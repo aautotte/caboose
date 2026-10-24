@@ -1,0 +1,4 @@
+# Unix line endings in every checkout, so generated files (npm run tokens, npm run icons) match what is committed.
+* text=auto eol=lf
+*.png binary
+*.ico binary
