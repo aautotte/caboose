@@ -192,7 +192,12 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
     return dirty ? [wip, ...commits] : commits
   }, [commits, dirty, refs?.head.sha])
 
-  const byRef = useMemo(() => refsBySha(refs?.refs ?? []), [refs])
+  // Hidden branches lose their labels too, on commits that other branches keep in view.
+  const hidden = useRepo(repoId, (r) => r.refView.hidden)
+  const byRef = useMemo(() => {
+    const off = new Set(hidden)
+    return refsBySha((refs?.refs ?? []).filter((r) => !off.has(r.name)))
+  }, [refs, hidden])
   const hitSet = useMemo(() => (hits ? new Set(hits) : null), [hits])
   const bySha = useMemo(() => new Map(rows.map((r) => [r.sha, r])), [rows])
   const lit = useMemo(() => ancestry(hoverSha, bySha), [hoverSha, bySha])

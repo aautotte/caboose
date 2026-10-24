@@ -938,7 +938,7 @@ export async function pinLeft(repoId: string, ref: string | null): Promise<void>
 /** Hide or show a folder, a remote or a whole section in one go. */
 export async function setRefViewMany(repoId: string, refs: string[], state: 'normal' | 'hidden'): Promise<void> {
   if (!refs.length) return
-  const view = await attempt(() => call('refView.setMany', { repoId, refs, state }), state === 'hidden' ? 'Couldn’t hide the branches' : 'Couldn’t show the branches')
+  const view = await attempt(() => call('refView.setMany', { repoId, refs, state }), state === 'hidden' ? 'Couldn’t hide them' : 'Couldn’t show them')
   if (view) patchRepo(repoId, { refView: view })
   await loadRepo(repoId, { keepSelection: true })
 }

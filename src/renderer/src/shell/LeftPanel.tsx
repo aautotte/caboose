@@ -471,7 +471,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
             </Fragment>
           ))}
         </Section>
-        <Section title="Tags" count={shownTags.length} empty={f ? 'No matches' : 'No tags'}>
+        <Section title="Tags" count={shownTags.length} empty={f ? 'No matches' : 'No tags'} eye={eyeFor(tags) ?? undefined}>
           {shownTags.map((r) => (
             <Row
               key={r.name}
@@ -481,7 +481,9 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               onSelect={() => act.select(repoId, r.sha)}
               onActivate={() => act.select(repoId, r.sha)}
               title={r.annotation ? `${r.short}: ${r.annotation}` : r.short}
-              menu={tagMenu(repoId, r.short, refs?.remotes ?? [])}
+              eye={eyeOne(r)}
+              dim={view.hidden.includes(r.name)}
+              menu={tagMenu(repoId, r.short, refs?.remotes ?? [], eyeOne(r))}
             />
           ))}
         </Section>

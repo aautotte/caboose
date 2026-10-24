@@ -16,7 +16,7 @@ works offline, and it doesn't phone home.
 
 - **Commit graph:**
   - branches, tags, stashes and remotes, laid out in lanes;
-  - focus on one branch, hide the ones you don't care about, pin one to the left;
+  - focus on one branch, hide the branches and tags you don't care about, pin one to the left;
   - search the whole history.
 - **Staging:** stage files, blocks or single lines (mouse or keyboard); discard them too, with undo.
 - **Commits:** amend, sign, edit any commit's message, squash several into one, move a commit up or down,

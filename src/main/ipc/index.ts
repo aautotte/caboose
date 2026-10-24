@@ -580,7 +580,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   // ---------- hide / show many; rewriting the current branch ----------
   handle(
     'refView.setMany',
-    z.object({ ...R, refs: z.array(z.string().regex(/^refs\/(heads|remotes)\//).max(400)).max(5000), state: z.enum(['normal', 'hidden']) }),
+    z.object({ ...R, refs: z.array(z.string().regex(/^refs\/(heads|remotes|tags)\//).max(400)).max(5000), state: z.enum(['normal', 'hidden']) }),
     ({ repoId, refs, state }) => refView.setMany(repoId, refs, state)
   )
   const rewriteDir = (id: string): string => join(tmpDir, `rewrite-${id}`)

@@ -1,4 +1,4 @@
-import { GitBranchPlus, Tag, Trash2, Upload } from 'lucide-react'
+import { Eye, EyeOff, GitBranchPlus, Tag, Trash2, Upload } from 'lucide-react'
 import type { MenuEntry } from '@/ui'
 import * as act from '@/actions'
 
@@ -32,7 +32,7 @@ export function pushEntry(repoId: string, branch: { name: string; isHead: boolea
  * A tag's menu, in the branches panel and on a commit row in the graph. With one remote, push and delete act on it
  * directly; with several, they become sub-menus listing each remote, plus all of them for a push.
  */
-export function tagMenu(repoId: string, name: string, remotes: string[]): MenuEntry[] {
+export function tagMenu(repoId: string, name: string, remotes: string[], eye?: { hidden: boolean; onToggle: () => void }): MenuEntry[] {
   const push: MenuEntry =
     remotes.length > 1
       ? {
@@ -63,6 +63,9 @@ export function tagMenu(repoId: string, name: string, remotes: string[]): MenuEn
     { type: 'item', label: 'Delete tag…', icon: <Trash2 size={14} />, danger: true, onSelect: () => act.deleteTag(repoId, name) },
     deleteRemote,
     { type: 'separator' },
+    ...(eye
+      ? [{ type: 'item' as const, label: eye.hidden ? 'Show tag in the graph' : 'Hide tag from the graph', icon: eye.hidden ? <Eye size={14} /> : <EyeOff size={14} />, shortcut: 'H', onSelect: eye.onToggle }]
+      : []),
     { type: 'item', label: 'Copy name', onSelect: () => void navigator.clipboard.writeText(name) }
   ]
 }

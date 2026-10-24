@@ -125,9 +125,19 @@ export class RepoOps {
 
   async graph(skip: number, limit: number, stashes: Refs['stashes'], view: RefViewState = { hidden: [], soloed: [], pinned: null }): Promise<GraphPage> {
     // Soloed branches replace "everything"; hidden ones are left out of it. HEAD always shows.
+    // A remote's HEAD (origin/HEAD) is only an alias for one of its branches, so it never brings commits in itself:
+    // otherwise hiding that branch would leave all its commits on screen. Likewise, while anything is hidden, tags
+    // only label commits that shown branches bring in; a tag on a hidden branch's commit would keep it in view.
     const which = view.soloed.length
       ? [...view.soloed, 'HEAD']
-      : [...EXCLUDE_OWN, '--exclude=refs/stash', ...view.hidden.map((r) => `--exclude=${r}`), '--all']
+      : [
+          ...EXCLUDE_OWN,
+          '--exclude=refs/stash',
+          '--exclude=refs/remotes/*/HEAD',
+          ...(view.hidden.length ? ['--exclude=refs/tags/*'] : []),
+          ...view.hidden.map((r) => `--exclude=${r}`),
+          '--all'
+        ]
     const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--'])
     if (out === null) return { commits: [], hasMore: false } // unborn repo
     const commits = parseLog(out)
