@@ -1,0 +1,596 @@
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { z, type ZodType } from 'zod'
+import type { Api, Channel } from '../../shared/api'
+import type { ActivityEntry, ProgressEvent, Result } from '../../shared/types'
+import type { Db } from '../db'
+import { uuid } from '../db'
+import { GcFail } from '../errors'
+import type { GitRunner } from '../git/runner'
+import { UNDO_REFS } from '../git/ops'
+import type { Repos } from '../repos'
+import type { UndoStack } from '../undo'
+import type { GraphLayouts, Prefs, RefView, RepoPrefs } from '../settings'
+import { defaultCommand, launch } from '../tools'
+import { generateKey, listKeys } from '../ssh'
+import { shell } from 'electron'
+import type { Askpass } from '../askpass'
+import type { Profiles } from '../profiles'
+import { gpuState, setGpu } from '../gpu'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+const repoId = z.string().uuid()
+const R = { repoId }
+const paths = z.union([z.literal('all'), z.array(z.string().min(1)).min(1).max(5000)])
+const opId = z.string().min(8).max(64)
+const ref = z.string().min(1).max(400)
+
+interface Deps {
+  db: Db
+  runner: GitRunner
+  repos: Repos
+  undo: UndoStack
+  prefs: Prefs
+  refView: RefView
+  repoPrefs: RepoPrefs
+  layouts: GraphLayouts
+  askpass: Askpass
+  profiles: Profiles
+  /** Makes another profile the active one (watchers included). */
+  switchProfile: (id: string) => void
+  /** Forget which settings repositories set themselves, after Settings changes one. */
+  forgetRepoConfig: () => void
+  tmpDir: string
+  isTrustedSender: (e: IpcMainInvokeEvent) => boolean
+}
+
+export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig, tmpDir, isTrustedSender }: Deps): void {
+  const progress = (id: string) => (phase: string, percent?: number) => {
+    const ev: ProgressEvent = { opId: id, phase, percent }
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('op:progress', ev)
+  }
+
+  function handle<C extends Channel>(channel: C, schema: ZodType<Api[C]['in']>, fn: (input: Api[C]['in'], e: IpcMainInvokeEvent) => Promise<Api[C]['out']> | Api[C]['out']): void {
+    ipcMain.handle(channel, async (e, raw): Promise<Result<Api[C]['out']>> => {
+      if (!isTrustedSender(e)) return { ok: false, error: { code: 'internal', message: 'Untrusted sender.' } }
+      const parsed = schema.safeParse(raw)
+      if (!parsed.success) {
+        return { ok: false, error: { code: 'invalid', message: 'The app sent an invalid request.', detail: parsed.error.message } }
+      }
+      try {
+        return { ok: true, value: await fn(parsed.data, e) }
+      } catch (err) {
+        if (err instanceof GcFail) return { ok: false, error: err.toJSON() }
+        console.error(channel, err)
+        return { ok: false, error: { code: 'internal', message: 'Something went wrong.', detail: String((err as Error)?.stack ?? err) } }
+      }
+    })
+  }
+
+  const ops = (id: string) => repos.get(id)
+  const pruned = new Set<string>()
+
+  // Requests that change a repo run one at a time per repo, so an action and its undo record
+  // finish together before the next action (say, an Undo click) starts.
+  const locks = new Map<string, Promise<unknown>>()
+  function exclusive<T>(id: string, fn: () => Promise<T>): Promise<T> {
+    const prev = locks.get(id) ?? Promise.resolve()
+    const next = prev.catch(() => {}).then(fn)
+    locks.set(id, next)
+    return next
+  }
+
+  /** Runs a history-changing action and records it for undo once it completes. */
+  async function undoable<T>(id: string, type: Parameters<UndoStack['record']>[1], label: string, run: () => Promise<T>, finished: (r: T) => boolean = () => true): Promise<T> {
+    return exclusive(id, async () => {
+      const o = ops(id)
+      const before = await undo.snapshot(o)
+      const result = await run()
+      if (finished(result)) undo.record(id, type, label, before, await undo.snapshot(o))
+      else undo.setPending(id, type, label, before)
+      return result
+    })
+  }
+
+  handle('dialog.pickFolder', z.object({ title: z.string().max(200) }), async ({ title }, e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const res = await dialog.showOpenDialog(win!, { title, properties: ['openDirectory', 'createDirectory'] })
+    return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
+
+  // ---------- repositories ----------
+  handle('repo.open', z.object({ path: z.string().min(1).max(4096) }), ({ path }) => repos.open(path))
+  handle('repo.list', z.object({}), () => repos.list())
+  handle('repo.close', z.object(R), ({ repoId }) => (repos.close(repoId), null))
+  handle('repo.reorderTabs', z.object({ repoIds: z.array(repoId).max(200) }), ({ repoIds }) => (repos.reorder(repoIds), null))
+  handle(
+    'repo.update',
+    z.object({ ...R, alias: z.string().max(200).nullable().optional(), isFavorite: z.boolean().optional(), groupId: z.string().uuid().nullable().optional() }),
+    ({ repoId, ...patch }) => repos.update(repoId, patch)
+  )
+  handle('group.create', z.object({ name: z.string().max(200) }), ({ name }) => repos.createGroup(name))
+  handle('group.rename', z.object({ groupId: z.string().uuid(), name: z.string().max(200) }), ({ groupId, name }) => (repos.renameGroup(groupId, name), null))
+  handle('group.delete', z.object({ groupId: z.string().uuid() }), ({ groupId }) => (repos.deleteGroup(groupId), null))
+  handle('repo.forget', z.object(R), ({ repoId }) => (repos.forget(repoId), null))
+  handle(
+    'repo.clone',
+    z.object({
+      url: z.string().min(1).max(2048),
+      dest: z.string().min(1).max(4096),
+      opId,
+      depth: z.number().int().min(1).max(100000).optional(),
+      branch: z.string().max(400).optional(),
+      sparse: z.array(z.string().min(1).max(1024)).max(200).optional()
+    }),
+    (input) => repos.clone(input, progress(input.opId))
+  )
+  handle(
+    'repo.init',
+    z.object({ parentDir: z.string().min(1).max(4096), name: z.string().min(1).max(255), defaultBranch: z.string().max(255), gitignore: z.string().max(40).nullable(), license: z.string().max(40).nullable() }),
+    (input) => repos.init(input)
+  )
+  handle('op.cancel', z.object({ opId }), ({ opId }) => (runner.cancel(opId), null))
+
+  // ---------- reads ----------
+  handle('graph.load', z.object({ ...R, skip: z.number().int().min(0), limit: z.number().int().min(1).max(5000) }), async ({ repoId, skip, limit }) => {
+    const o = ops(repoId)
+    const refs = await o.refs()
+    refView.prune(repoId, new Set(refs.refs.map((r) => r.name)))
+    if (!pruned.has(repoId)) {
+      // Once per session: drop undo safety refs no entry needs any more.
+      pruned.add(repoId)
+      await exclusive(repoId, () => o.pruneUndoRefs(undo.referencedShas(repoId))).catch((e) => console.error('prune', e))
+    }
+    const view = refView.get(repoId)
+    if (repoPrefs.getAll(repoId)['graph.focusHead'] === true) view.soloed = [...new Set([...view.soloed, ...(await o.focusRefs(refs))])]
+    return o.graph(skip, limit, refs.stashes, view)
+  })
+  handle('refs.list', z.object(R), ({ repoId }) => ops(repoId).refs())
+  handle('status.get', z.object(R), ({ repoId }) => ops(repoId).status())
+  handle('commit.details', z.object({ ...R, sha: ref }), ({ repoId, sha }) => ops(repoId).details(sha))
+  handle(
+    'diff.get',
+    z.object({
+      ...R,
+      path: z.string().min(1).max(4096),
+      oldPath: z.string().max(4096).optional(),
+      force: z.boolean().optional(),
+      full: z.boolean().optional(),
+      ignoreWs: z.boolean().optional(),
+      source: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('worktree') }),
+        z.object({ kind: z.literal('index') }),
+        z.object({ kind: z.literal('commit'), sha: ref, parent: ref.optional() })
+      ])
+    }),
+    ({ repoId, path, oldPath, source, force, full, ignoreWs }) => ops(repoId).diff(path, oldPath, source, force, full, ignoreWs)
+  )
+  handle('search.commits', z.object({ ...R, query: z.string().max(400) }), ({ repoId, query }) => ops(repoId).searchCommits(query))
+
+  // ---------- staging and commits ----------
+  handle('index.stage', z.object({ ...R, paths }), ({ repoId, paths }) => exclusive(repoId, async () => (await ops(repoId).stage(paths), null)))
+  handle('index.unstage', z.object({ ...R, paths }), ({ repoId, paths }) => exclusive(repoId, async () => (await ops(repoId).unstage(paths), null)))
+  handle(
+    'commit.create',
+    z.object({ ...R, summary: z.string().max(2000), body: z.string().max(100_000), amend: z.boolean(), noVerify: z.boolean(), messageOnly: z.boolean().optional() }),
+    async ({ repoId, summary, body, amend, noVerify, messageOnly }) => {
+      const label = amend ? `Amend “${summary.trim()}”` : `Commit “${summary.trim()}”`
+      const sha = await undoable(repoId, amend ? 'amend' : 'commit', label, () => ops(repoId).commit(summary, body, amend, noVerify, messageOnly))
+      return { sha }
+    }
+  )
+  handle('worktree.discard', z.object({ ...R, paths }), ({ repoId, paths }) => exclusive(repoId, async () => {
+    const o = ops(repoId)
+    const before = await undo.snapshot(o)
+    const entryRef = `${UNDO_REFS}${uuid()}`
+    const stash = await o.discard(paths, entryRef)
+    if (stash) {
+      const n = paths === 'all' ? 'all changes' : paths.length === 1 ? paths[0] : `${paths.length} files`
+      undo.record(repoId, 'discard', `Discard ${n}`, { ...before, stash, paths }, before)
+    }
+    return null
+  }))
+
+  // ---------- branches ----------
+  handle('branch.create', z.object({ ...R, name: z.string().min(1).max(255), at: ref, checkout: z.boolean() }), async ({ repoId, name, at, checkout }) => {
+    if (checkout) await undoable(repoId, 'checkout', `Switch to ${name}`, () => ops(repoId).createBranch(name, at, true))
+    else await ops(repoId).createBranch(name, at, false)
+    return null
+  })
+  handle('branch.checkout', z.object({ ...R, ref }), async ({ repoId, ref }) => {
+    await undoable(repoId, 'checkout', `Switch to ${ref}`, () => ops(repoId).checkout(ref))
+    return null
+  })
+  handle('branch.rename', z.object({ ...R, name: ref, newName: z.string().min(1).max(255) }), ({ repoId, name, newName }) => exclusive(repoId, async () => (await ops(repoId).renameBranch(name, newName), null)))
+  handle('branch.delete', z.object({ ...R, name: ref, force: z.boolean() }), ({ repoId, name, force }) => exclusive(repoId, async () => {
+    const o = ops(repoId)
+    const head = await undo.snapshot(o)
+    const sha = await o.deleteBranch(name, force)
+    undo.record(repoId, 'branch_delete', `Delete branch ${name}`, { ...head, name, sha }, head)
+    return null
+  }))
+  handle('branch.deleteRemote', z.object({ ...R, remote: ref, name: ref, opId }), ({ repoId, remote, name, opId }) =>
+    exclusive(repoId, () => ops(repoId).deleteRemoteBranch(remote, name, opId))
+  )
+  handle('branch.merge', z.object({ ...R, source: ref }), ({ repoId, source }) =>
+    undoable(repoId, 'merge', `Merge ${source}`, () => ops(repoId).merge(source), (r) => r.result !== 'conflicts')
+  )
+  handle('branch.rebase', z.object({ ...R, onto: ref, branch: ref.optional() }), ({ repoId, onto, branch }) =>
+    undoable(repoId, 'rebase', `Rebase ${branch ? `${branch} ` : ''}onto ${onto}`, () => ops(repoId).rebase(onto, branch), (r) => r.result !== 'conflicts')
+  )
+  handle('branch.setUpstream', z.object({ ...R, name: ref, upstream: ref }), async ({ repoId, name, upstream }) => (await ops(repoId).setUpstream(name, upstream), null))
+
+  // ---------- sync ----------
+  handle('remote.fetch', z.object({ ...R, opId, background: z.boolean().optional() }), async ({ repoId, opId, background }) => (await ops(repoId).fetch(opId, progress(opId), !background), null))
+  handle('remote.pull', z.object({ ...R, mode: z.enum(['ff', 'ff-only', 'rebase']), opId }), ({ repoId, mode, opId }) => exclusive(repoId, async () => {
+    const o = ops(repoId)
+    const before = await undo.snapshot(o)
+    const r = await o.pull(mode, opId, progress(opId))
+    if (r.result === 'conflicts') undo.setPending(repoId, mode === 'rebase' ? 'rebase' : 'merge', 'Pull', before)
+    return r
+  }))
+  handle(
+    'remote.push',
+    z.object({ ...R, opId, remote: ref.optional(), branch: ref.optional(), setUpstream: z.boolean().optional(), force: z.boolean().optional() }),
+    ({ repoId, ...rest }) => ops(repoId).push(rest, progress(rest.opId))
+  )
+
+  // ---------- conflicts ----------
+  handle('conflict.get', z.object({ ...R, path: z.string().min(1).max(4096) }), ({ repoId, path }) => ops(repoId).conflict(path))
+  handle('conflict.resolve', z.object({ ...R, path: z.string().min(1).max(4096), content: z.string().max(50_000_000) }), ({ repoId, path, content }) => exclusive(repoId, async () => (await ops(repoId).resolve(path, content), null)))
+  handle('conflict.take', z.object({ ...R, path: z.string().min(1).max(4096), side: z.enum(['ours', 'theirs']) }), ({ repoId, path, side }) => exclusive(repoId, async () => (await ops(repoId).take(path, side), null)))
+  handle('op.continue', z.object(R), ({ repoId }) => exclusive(repoId, async () => {
+    const o = ops(repoId)
+    const r = await o.continueOp()
+    if (r.result === 'ok') await undo.finishPending(o)
+    return r
+  }))
+  handle('op.skip', z.object(R), ({ repoId }) => exclusive(repoId, async () => {
+    const o = ops(repoId)
+    const r = await o.skipOp()
+    if (r.result === 'ok') await undo.finishPending(o)
+    return r
+  }))
+  handle('op.abort', z.object(R), ({ repoId }) => exclusive(repoId, async () => {
+    await ops(repoId).abortOp()
+    undo.dropPending(repoId)
+    return null
+  }))
+
+  // ---------- undo ----------
+  handle('undo.peek', z.object(R), ({ repoId }) => exclusive(repoId, async () => undo.peek(repoId)))
+  handle('undo.undo', z.object(R), ({ repoId }) => exclusive(repoId, async () => (await undo.undo(ops(repoId)), null)))
+  handle('undo.redo', z.object(R), ({ repoId }) => exclusive(repoId, async () => (await undo.redo(ops(repoId)), null)))
+
+  // ---------- activity log ----------
+  handle('activity.list', z.object({ repoId: repoId.optional(), limit: z.number().int().min(1).max(1000) }), ({ repoId, limit }) => {
+    const rows = (
+      repoId
+        ? db.prepare('SELECT * FROM activity_log WHERE repo_id = ? ORDER BY started_at DESC LIMIT ?').all(repoId, limit)
+        : db.prepare('SELECT * FROM activity_log ORDER BY started_at DESC LIMIT ?').all(limit)
+    ) as Array<Record<string, unknown>>
+    return rows.map(
+      (r): ActivityEntry => ({
+        id: r.id as string,
+        repoId: r.repo_id as string | null,
+        opId: r.op_id as string,
+        argv: JSON.parse(r.argv as string),
+        status: r.status as ActivityEntry['status'],
+        exitCode: r.exit_code as number | null,
+        stderrTail: r.stderr_tail as string | null,
+        startedAt: r.started_at as number,
+        finishedAt: r.finished_at as number | null
+      })
+    )
+  })
+
+  // ---------- partial staging, ignore ----------
+  const filePath = z.string().min(1).max(4096)
+  handle(
+    'index.applyPatch',
+    z.object({
+      ...R,
+      path: filePath,
+      source: z.enum(['worktree', 'index']),
+      hunk: z.number().int().min(0),
+      header: z.string().max(10_000),
+      lines: z.array(z.number().int().min(0)).max(1_000_000).nullable(),
+      action: z.enum(['stage', 'unstage', 'discard']),
+      full: z.boolean()
+    }),
+    (input) =>
+      exclusive(input.repoId, async () => {
+        const o = ops(input.repoId)
+        if (input.action !== 'discard') return (await o.applyPartial(input), null)
+        const before = await undo.snapshot(o)
+        const patch = await o.applyPartial(input)
+        const what = input.lines ? `${input.lines.length} line${input.lines.length === 1 ? '' : 's'}` : 'a block'
+        undo.record(input.repoId, 'discard_lines', `Discard ${what} in ${input.path.split('/').pop()}`, { ...before, patch }, before)
+        return null
+      })
+  )
+  handle('ignore.add', z.object({ ...R, pattern: z.string().min(1).max(1000), stopTracking: z.array(filePath).max(5000) }), ({ repoId, pattern, stopTracking }) =>
+    exclusive(repoId, async () => (await ops(repoId).ignore(pattern, stopTracking), null))
+  )
+
+  // ---------- stash ----------
+  const sha = z.string().regex(/^[0-9a-f]{40}$/)
+  handle('stash.save', z.object({ ...R, message: z.string().max(2000), stagedOnly: z.boolean(), includeUntracked: z.boolean() }), ({ repoId, message, stagedOnly, includeUntracked }) =>
+    exclusive(repoId, () => ops(repoId).stashSave(message, stagedOnly, includeUntracked))
+  )
+  handle('stash.apply', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, false)))
+  handle('stash.pop', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, true)))
+  handle('stash.drop', z.object({ ...R, sha }), ({ repoId, sha }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      // Keep the stash's objects reachable so undo can bring it back.
+      await o.mut(['update-ref', `${UNDO_REFS}${uuid()}`, sha])
+      const message = await o.stashDrop(sha)
+      undo.record(repoId, 'stash_drop', `Delete stash “${message.replace(/^On [^:]+: /, '')}”`, { ...head, stash: sha, message }, head)
+      return null
+    })
+  )
+
+  // ---------- tags ----------
+  handle('tag.create', z.object({ ...R, name: z.string().min(1).max(255), at: ref, message: z.string().max(100_000).nullable() }), ({ repoId, name, at, message }) =>
+    exclusive(repoId, async () => (await ops(repoId).createTag(name, at, message), null))
+  )
+  handle('tag.delete', z.object({ ...R, name: ref }), ({ repoId, name }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const obj = (await o.git(['rev-parse', '--verify', `refs/tags/${o.safeRev(name)}`])).trim()
+      await o.mut(['update-ref', `${UNDO_REFS}${uuid()}`, obj])
+      await o.deleteTag(name)
+      undo.record(repoId, 'tag_delete', `Delete tag ${name}`, { ...head, name, sha: obj }, head)
+      return null
+    })
+  )
+  handle('tag.push', z.object({ ...R, name: ref, remote: ref, opId }), async ({ repoId, name, remote, opId }) => (await ops(repoId).pushTag(name, remote, opId, false), null))
+  handle('tag.deleteRemote', z.object({ ...R, name: ref, remote: ref, opId }), async ({ repoId, name, remote, opId }) => (await ops(repoId).pushTag(name, remote, opId, true), null))
+
+  // ---------- history edits ----------
+  handle('history.reset', z.object({ ...R, target: ref, mode: z.enum(['soft', 'mixed', 'hard']) }), ({ repoId, target, mode }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const before = await undo.snapshot(o)
+      const stash = mode === 'hard' ? await o.pinWork(`${UNDO_REFS}${uuid()}`) : null
+      await o.reset(target, mode)
+      const words = { soft: 'keep changes staged', mixed: 'keep changes', hard: 'discard changes' }
+      undo.record(repoId, 'reset', `Reset to ${target.slice(0, 7)} (${words[mode]})`, { ...before, mode, stash: stash ?? undefined }, await undo.snapshot(o))
+      return null
+    })
+  )
+  handle('history.revert', z.object({ ...R, sha: ref }), ({ repoId, sha }) =>
+    undoable(repoId, 'revert', `Revert ${sha.slice(0, 7)}`, () => ops(repoId).revert(sha), (r) => r.result !== 'conflicts')
+  )
+  handle('history.cherryPick', z.object({ ...R, shas: z.array(ref).min(1).max(1000) }), ({ repoId, shas }) =>
+    undoable(
+      repoId,
+      'cherry_pick',
+      shas.length === 1 ? `Cherry-pick ${shas[0].slice(0, 7)}` : `Cherry-pick ${shas.length} commits`,
+      () => ops(repoId).cherryPick(shas),
+      (r) => r.result !== 'conflicts'
+    )
+  )
+  handle('cherry.preview', z.object({ ...R, tip: ref }), ({ repoId, tip }) => ops(repoId).cherryPreview(tip))
+  handle('rebase.preview', z.object({ ...R, onto: ref }), ({ repoId, onto }) => ops(repoId).rebasePreview(onto))
+  handle(
+    'rebase.interactive',
+    z.object({
+      ...R,
+      onto: ref,
+      plan: z
+        .array(z.object({ sha, action: z.enum(['pick', 'reword', 'squash', 'fixup', 'drop']), message: z.string().max(100_000).optional() }))
+        .min(1)
+        .max(5000)
+    }),
+    ({ repoId, onto, plan }) =>
+      undoable(
+        repoId,
+        'rebase',
+        `Interactive rebase onto ${onto.slice(0, 12)}`,
+        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`)),
+        (r) => r.result !== 'conflicts'
+      )
+  )
+
+  // ---------- remotes ----------
+  handle('remote.list', z.object(R), ({ repoId }) => ops(repoId).remotes())
+  handle('remote.add', z.object({ ...R, name: z.string().min(1).max(255), url: z.string().min(1).max(2048) }), ({ repoId, name, url }) =>
+    exclusive(repoId, async () => (await ops(repoId).addRemote(name, url), null))
+  )
+  handle('remote.remove', z.object({ ...R, name: ref }), ({ repoId, name }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const remote = await o.removeRemote(name)
+      undo.record(repoId, 'remote_remove', `Remove remote ${name}`, { ...head, remote }, head)
+      return null
+    })
+  )
+
+  // ---------- file history, blame ----------
+  handle('file.history', z.object({ ...R, path: filePath, limit: z.number().int().min(1).max(10_000) }), ({ repoId, path, limit }) => ops(repoId).fileHistory(path, limit))
+  handle('file.blame', z.object({ ...R, path: filePath, rev: ref.nullable() }), ({ repoId, path, rev }) => ops(repoId).blame(path, rev))
+
+  // ---------- graph focus ----------
+  handle('refView.get', z.object(R), ({ repoId }) => refView.get(repoId))
+  handle('refView.pin', z.object({ ...R, ref: z.string().regex(/^refs\/(heads|remotes)\//).max(400).nullable() }), ({ repoId, ref }) => refView.pin(repoId, ref))
+  handle(
+    'refView.set',
+    z.object({ ...R, ref: z.string().regex(/^refs\/(heads|remotes|tags)\//).max(400), state: z.enum(['normal', 'hidden', 'soloed']) }),
+    ({ repoId, ref, state }) => refView.set(repoId, ref, state)
+  )
+
+  // ---------- preferences, identity ----------
+  handle('prefs.getAll', z.object({}), () => prefs.getAll())
+  handle('prefs.set', z.object({ key: z.string().regex(/^[a-zA-Z][\w.]{0,63}$/), value: z.unknown() }), ({ key, value }) => {
+    if (JSON.stringify(value ?? null).length > 10_000) throw new GcFail('invalid', 'That setting is too large.')
+    prefs.set(key, value)
+    return null
+  })
+  const cfg = async (cwd: string, scope: '--global' | '--local', key: string): Promise<string | null> => {
+    try {
+      return (await runner.run({ cwd, plain: true, args: ['config', scope, '--get', key] })).stdout.trim() || null
+    } catch {
+      return null
+    }
+  }
+  handle('identity.get', z.object({ repoId: repoId.optional() }), async ({ repoId: id }) => {
+    const home = homedir()
+    const global = { name: await cfg(home, '--global', 'user.name'), email: await cfg(home, '--global', 'user.email') }
+    if (!id) return { global, repo: null }
+    const path = ops(id).repo.path
+    return { global, repo: { name: await cfg(path, '--local', 'user.name'), email: await cfg(path, '--local', 'user.email') } }
+  })
+  // Git locks the whole config file for each write, so two writes at once make one fail. One at a time.
+  let configWrites: Promise<unknown> = Promise.resolve()
+  const writeConfig = (id: string | undefined, key: string, value: string): Promise<void> => {
+    const run = async (): Promise<void> => {
+      const cwd = id ? ops(id).repo.path : homedir()
+      const scope = id ? '--local' : '--global'
+      if (value) await runner.run({ cwd, repoId: id, mutating: true, args: ['config', scope, key, value] })
+      else await runner.run({ cwd, repoId: id, mutating: true, args: ['config', scope, '--unset', key], okCodes: [5] })
+    }
+    const p = configWrites.then(run, run)
+    configWrites = p.catch(() => {})
+    return p
+  }
+  handle('identity.set', z.object({ repoId: repoId.optional(), name: z.string().max(200), email: z.string().max(320) }), async ({ repoId: id, name, email }) => {
+    if (/[\r\n<>]/.test(name + email)) throw new GcFail('invalid', 'Names and emails can’t contain line breaks or angle brackets.')
+    await writeConfig(id, 'user.name', name.trim())
+    await writeConfig(id, 'user.email', email.trim())
+    forgetRepoConfig()
+    return null
+  })
+  // Who the next commit will be by, after the repository's config, the profile and Git's global config.
+  handle('identity.effective', z.object(R), async ({ repoId }) => {
+    const o = ops(repoId)
+    const ident = (await o.tryGit(['var', 'GIT_AUTHOR_IDENT']))?.trim()
+    const m = ident ? /^(.*) <([^>]*)>/.exec(ident) : null
+    if (!m) return null
+    const local = await cfg(o.repo.path, '--local', 'user.email')
+    return { name: m[1], email: m[2], from: local ? 'repo' : profiles.active().authorEmail ? 'profile' : 'git' }
+  })
+
+  // ---------- profiles ----------
+  const profileId = z.string().uuid()
+  const optText = (max: number) => z.string().max(max).nullable().optional()
+  handle('profile.list', z.object({}), () => profiles.list())
+  handle('profile.create', z.object({ name: z.string().max(200) }), ({ name }) => profiles.create(name))
+  handle(
+    'profile.update',
+    z.object({ id: profileId, name: z.string().max(200).optional(), authorName: optText(200), authorEmail: optText(320), signingKey: optText(200), sshKey: optText(64) }),
+    ({ id, ...patch }) => {
+      const p = profiles.update(id, patch)
+      forgetRepoConfig()
+      return p
+    }
+  )
+  handle('profile.delete', z.object({ id: profileId }), ({ id }) => (profiles.remove(id), null))
+  handle('profile.switch', z.object({ id: profileId }), ({ id }, e) => {
+    if (repos.list().open.some((r) => runner.isBusy(r.id))) throw new GcFail('busy', 'Wait for the running Git command to finish, then switch.')
+    switchProfile(id)
+    // The other profile's tabs and settings load from scratch. The window blocks page-initiated navigation
+    // (will-navigate), so the reload comes from here, after this answer has gone back.
+    setTimeout(() => e.sender.reload(), 0)
+    return null
+  })
+
+  // ---------- graphics acceleration ----------
+  handle('gpu.get', z.object({}), () => gpuState())
+  handle('gpu.set', z.object({ on: z.boolean() }), ({ on }) => (setGpu(on), null))
+  handle('app.restart', z.object({}), () => {
+    app.relaunch()
+    app.exit(0)
+    return null
+  })
+
+  // ---------- credential prompts ----------
+  handle('auth.respond', z.object({ promptId: z.string().uuid(), answer: z.string().max(10_000).nullable() }), ({ promptId, answer }) => (askpass.respond(promptId, answer), null))
+
+  // ---------- stash names, graph columns, per-repo settings ----------
+  handle('stash.rename', z.object({ ...R, sha, message: z.string().min(1).max(2000) }), ({ repoId, sha, message }) =>
+    exclusive(repoId, async () => (await ops(repoId).stashRename(sha, message), null))
+  )
+  const column = z.object({ key: z.enum(['author', 'date', 'sha']), width: z.number().int().min(40).max(600), visible: z.boolean() })
+  handle('graph.getColumns', z.object(R), ({ repoId }) => layouts.get(repoId))
+  handle('graph.setColumns', z.object({ ...R, columns: z.array(column).max(3) }), ({ repoId, columns }) => (layouts.set(repoId, columns), null))
+  handle('repoPrefs.get', z.object(R), ({ repoId }) => repoPrefs.getAll(repoId))
+  handle('repoPrefs.set', z.object({ ...R, key: z.string().regex(/^[a-zA-Z][\w.]{0,63}$/), value: z.unknown() }), ({ repoId, key, value }) => {
+    if (JSON.stringify(value ?? null).length > 10_000) throw new GcFail('invalid', 'That setting is too large.')
+    repoPrefs.set(repoId, key, value)
+    return null
+  })
+
+  // ---------- git config the Settings screen edits ----------
+  const configKey = z.enum(['user.signingkey', 'commit.gpgsign', 'commit.template', 'diff.tool', 'merge.tool'])
+  const KEYS = configKey.options
+  handle('gitConfig.get', z.object({ repoId: repoId.optional() }), async ({ repoId: id }) => {
+    const read = async (cwd: string, scope: '--global' | '--local'): Promise<Record<string, string>> => {
+      const out: Record<string, string> = {}
+      for (const k of KEYS) {
+        const v = await cfg(cwd, scope, k)
+        if (v !== null) out[k] = v
+      }
+      return out
+    }
+    return { global: await read(homedir(), '--global'), repo: id ? await read(ops(id).repo.path, '--local') : null }
+  })
+  handle('gitConfig.set', z.object({ repoId: repoId.optional(), key: configKey, value: z.string().max(1000).nullable() }), async ({ repoId: id, key, value }) => {
+    const v = value?.trim() ?? ''
+    if (/[\r\n]/.test(v) || v.startsWith('-')) throw new GcFail('invalid', 'That value can’t be used.')
+    if (key === 'commit.gpgsign' && v && v !== 'true' && v !== 'false') throw new GcFail('invalid', 'Signing is on or off.')
+    if ((key === 'diff.tool' || key === 'merge.tool') && v && !/^[\w.-]+$/.test(v)) throw new GcFail('invalid', 'Use the tool’s name as Git knows it, like meld, kdiff3 or bc.')
+    await writeConfig(id, key, v)
+    forgetRepoConfig()
+    return null
+  })
+  handle('commit.template', z.object(R), ({ repoId }) => ops(repoId).commitTemplate())
+
+  // ---------- other programs ----------
+  handle('shell.open', z.object({ ...R, target: z.enum(['folder', 'terminal', 'editor']), path: z.string().min(1).max(4096).optional() }), async ({ repoId, target, path }) => {
+    const o = ops(repoId)
+    const root = o.repo.path
+    const file = path ? join(root, o.safePath(path)) : root
+    if (target === 'folder') {
+      if (path) shell.showItemInFolder(file)
+      else {
+        const err = await shell.openPath(root)
+        if (err) throw new GcFail('invalid', err)
+      }
+      return null
+    }
+    const all = prefs.getAll()
+    const template = String((target === 'terminal' ? all.terminalCommand : all.editorCommand) || defaultCommand(target))
+    await launch(template, { path: root, file })
+    return null
+  })
+  handle('file.externalDiff', z.object({ ...R, path: z.string().min(1).max(4096), staged: z.boolean() }), async ({ repoId, path, staged }) => (await ops(repoId).externalTool('diff', path, staged), null))
+  handle('file.externalMerge', z.object({ ...R, path: z.string().min(1).max(4096) }), async ({ repoId, path }) => (await ops(repoId).externalTool('merge', path, false), null))
+
+  // ---------- SSH keys (Settings) ----------
+  handle('ssh.keys', z.object({}), () => listKeys())
+  handle('ssh.generate', z.object({ name: z.string().min(1).max(64), comment: z.string().max(200), passphrase: z.string().max(200) }), ({ name, comment, passphrase }) =>
+    generateKey(name, comment, passphrase)
+  )
+
+  // ---------- hide / show many; rewriting the current branch ----------
+  handle(
+    'refView.setMany',
+    z.object({ ...R, refs: z.array(z.string().regex(/^refs\/(heads|remotes)\//).max(400)).max(5000), state: z.enum(['normal', 'hidden']) }),
+    ({ repoId, refs, state }) => refView.setMany(repoId, refs, state)
+  )
+  const rewriteDir = (id: string): string => join(tmpDir, `rewrite-${id}`)
+  handle('history.reword', z.object({ ...R, sha, message: z.string().min(1).max(100_000) }), ({ repoId, sha, message }) =>
+    undoable(repoId, 'rebase', `Edit message of ${sha.slice(0, 7)}`, () => ops(repoId).reword(sha, message, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  )
+  handle('history.squash', z.object({ ...R, shas: z.array(sha).min(2).max(1000), message: z.string().min(1).max(100_000) }), ({ repoId, shas, message }) =>
+    undoable(repoId, 'rebase', `Squash ${shas.length} commits`, () => ops(repoId).squash(shas, message, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  )
+  handle('history.move', z.object({ ...R, sha, direction: z.enum(['up', 'down']) }), ({ repoId, sha, direction }) =>
+    undoable(repoId, 'rebase', `Move ${sha.slice(0, 7)} ${direction}`, () => ops(repoId).move(sha, direction, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  )
+}

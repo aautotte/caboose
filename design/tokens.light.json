@@ -1,0 +1,617 @@
+{
+  "_about": "Mergatroid design tokens, LIGHT theme. Same role names as tokens.json (dark). `npm run tokens` regenerates the CSS, `npm run contrast` checks the pairs.",
+  "theme": "light",
+  "color": {
+    "bg": "#ffffff",
+    "surface": "#f5f6f8",
+    "surface-raised": "#ffffff",
+    "surface-sunken": "#eceef2",
+    "row-hover": "#eef1f5",
+    "row-selected": "#e8e1fb",
+    "border": "#dfe2e8",
+    "border-input": "#828a96",
+    "text": "#16191f",
+    "text-muted": "#59616d",
+    "text-disabled": "#a3a9b3",
+    "accent": "#6a3fd9",
+    "accent-hover": "#5a32c0",
+    "on-accent": "#ffffff",
+    "accent-text": "#5a32c0",
+    "focus-ring": "#6a3fd9",
+    "danger": "#c2333d",
+    "danger-solid": "#c2333d",
+    "on-danger": "#ffffff",
+    "success": "#1d7a4c",
+    "warning": "#8f5d00",
+    "info": "#1f6ca8",
+    "diff-add-bg": "#e3f6ea",
+    "diff-add-emph": "#cdeedb",
+    "diff-del-bg": "#fbe6e8",
+    "diff-del-emph": "#f9d9dc",
+    "diff-picked": "#d3e2f6",
+    "conflict-ours-bg": "#e2eefb",
+    "conflict-theirs-bg": "#fbf0d9",
+    "lane-0": "#2966cc",
+    "lane-1": "#c73f7c",
+    "lane-2": "#197a48",
+    "lane-3": "#975c08",
+    "lane-4": "#7a52d6",
+    "lane-5": "#12808b",
+    "lane-6": "#c2522a",
+    "lane-7": "#737a14",
+    "on-lane": "#ffffff",
+    "syntax-keyword": "#8338b8",
+    "syntax-string": "#25702a",
+    "syntax-comment": "#535b67",
+    "syntax-number": "#9a4b06",
+    "syntax-function": "#2556b8",
+    "syntax-type": "#7a5600",
+    "syntax-attr": "#0b6b75",
+    "scrim": "#10131a"
+  },
+  "pairs": [
+    [
+      "text",
+      "bg"
+    ],
+    [
+      "text",
+      "surface"
+    ],
+    [
+      "text",
+      "surface-raised"
+    ],
+    [
+      "text",
+      "surface-sunken"
+    ],
+    [
+      "text",
+      "row-hover"
+    ],
+    [
+      "text",
+      "row-selected"
+    ],
+    [
+      "text-muted",
+      "bg"
+    ],
+    [
+      "text-muted",
+      "surface"
+    ],
+    [
+      "text-muted",
+      "surface-raised"
+    ],
+    [
+      "text-muted",
+      "row-selected"
+    ],
+    [
+      "on-accent",
+      "accent"
+    ],
+    [
+      "on-accent",
+      "accent-hover"
+    ],
+    [
+      "on-danger",
+      "danger-solid"
+    ],
+    [
+      "accent-text",
+      "bg"
+    ],
+    [
+      "accent-text",
+      "surface"
+    ],
+    [
+      "danger",
+      "bg"
+    ],
+    [
+      "danger",
+      "surface"
+    ],
+    [
+      "success",
+      "bg"
+    ],
+    [
+      "success",
+      "surface"
+    ],
+    [
+      "warning",
+      "bg"
+    ],
+    [
+      "warning",
+      "surface"
+    ],
+    [
+      "info",
+      "bg"
+    ],
+    [
+      "info",
+      "surface"
+    ],
+    [
+      "text",
+      "diff-add-bg"
+    ],
+    [
+      "text",
+      "diff-add-emph"
+    ],
+    [
+      "text",
+      "diff-del-bg"
+    ],
+    [
+      "text",
+      "diff-del-emph"
+    ],
+    [
+      "text",
+      "conflict-ours-bg"
+    ],
+    [
+      "text",
+      "conflict-theirs-bg"
+    ],
+    [
+      "border-input",
+      "bg",
+      "ui"
+    ],
+    [
+      "border-input",
+      "surface",
+      "ui"
+    ],
+    [
+      "focus-ring",
+      "bg",
+      "ui"
+    ],
+    [
+      "focus-ring",
+      "surface",
+      "ui"
+    ],
+    [
+      "focus-ring",
+      "surface-raised",
+      "ui"
+    ],
+    [
+      "lane-0",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-1",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-2",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-3",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-4",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-5",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-6",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-7",
+      "bg",
+      "ui"
+    ],
+    [
+      "lane-0",
+      "row-selected",
+      "ui"
+    ],
+    [
+      "lane-4",
+      "row-selected",
+      "ui"
+    ],
+    [
+      "on-lane",
+      "lane-0"
+    ],
+    [
+      "on-lane",
+      "lane-1"
+    ],
+    [
+      "on-lane",
+      "lane-2"
+    ],
+    [
+      "on-lane",
+      "lane-3"
+    ],
+    [
+      "on-lane",
+      "lane-4"
+    ],
+    [
+      "on-lane",
+      "lane-5"
+    ],
+    [
+      "on-lane",
+      "lane-6"
+    ],
+    [
+      "on-lane",
+      "lane-7"
+    ],
+    [
+      "on-lane",
+      "success"
+    ],
+    [
+      "on-lane",
+      "warning"
+    ],
+    [
+      "on-lane",
+      "danger"
+    ],
+    [
+      "on-lane",
+      "info"
+    ],
+    [
+      "accent-text",
+      "row-selected"
+    ],
+    [
+      "accent-text",
+      "surface-raised"
+    ],
+    [
+      "syntax-keyword",
+      "bg"
+    ],
+    [
+      "syntax-keyword",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-keyword",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-keyword",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-keyword",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-keyword",
+      "surface-sunken"
+    ],
+    [
+      "syntax-string",
+      "bg"
+    ],
+    [
+      "syntax-string",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-string",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-string",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-string",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-string",
+      "surface-sunken"
+    ],
+    [
+      "syntax-comment",
+      "bg"
+    ],
+    [
+      "syntax-comment",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-comment",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-comment",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-comment",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-comment",
+      "surface-sunken"
+    ],
+    [
+      "syntax-number",
+      "bg"
+    ],
+    [
+      "syntax-number",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-number",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-number",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-number",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-number",
+      "surface-sunken"
+    ],
+    [
+      "syntax-function",
+      "bg"
+    ],
+    [
+      "syntax-function",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-function",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-function",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-function",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-function",
+      "surface-sunken"
+    ],
+    [
+      "syntax-type",
+      "bg"
+    ],
+    [
+      "syntax-type",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-type",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-type",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-type",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-type",
+      "surface-sunken"
+    ],
+    [
+      "syntax-attr",
+      "bg"
+    ],
+    [
+      "syntax-attr",
+      "diff-add-bg"
+    ],
+    [
+      "syntax-attr",
+      "diff-del-bg"
+    ],
+    [
+      "syntax-attr",
+      "diff-add-emph"
+    ],
+    [
+      "syntax-attr",
+      "diff-del-emph"
+    ],
+    [
+      "syntax-attr",
+      "surface-sunken"
+    ],
+    [
+      "text",
+      "diff-picked"
+    ],
+    [
+      "syntax-keyword",
+      "diff-picked"
+    ],
+    [
+      "syntax-string",
+      "diff-picked"
+    ],
+    [
+      "syntax-comment",
+      "diff-picked"
+    ],
+    [
+      "syntax-number",
+      "diff-picked"
+    ],
+    [
+      "syntax-function",
+      "diff-picked"
+    ],
+    [
+      "syntax-type",
+      "diff-picked"
+    ],
+    [
+      "syntax-attr",
+      "diff-picked"
+    ]
+  ],
+  "font": {
+    "sans": "\"Inter Variable\", Inter, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif",
+    "mono": "\"JetBrains Mono Variable\", \"JetBrains Mono\", \"Cascadia Code\", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+  },
+  "type": {
+    "2xs": {
+      "size": 10,
+      "line": 12,
+      "weight": 700
+    },
+    "xs": {
+      "size": 11,
+      "line": 14,
+      "weight": 500
+    },
+    "sm": {
+      "size": 12,
+      "line": 16,
+      "weight": 400
+    },
+    "base": {
+      "size": 13,
+      "line": 18,
+      "weight": 400
+    },
+    "md": {
+      "size": 14,
+      "line": 20,
+      "weight": 500
+    },
+    "lg": {
+      "size": 16,
+      "line": 22,
+      "weight": 600
+    },
+    "xl": {
+      "size": 20,
+      "line": 26,
+      "weight": 600
+    },
+    "code": {
+      "size": 12,
+      "line": 18,
+      "weight": 400
+    }
+  },
+  "space": [
+    0,
+    2,
+    4,
+    6,
+    8,
+    12,
+    16,
+    20,
+    24,
+    32,
+    48
+  ],
+  "radius": {
+    "sm": 3,
+    "md": 5,
+    "lg": 8,
+    "pill": 999
+  },
+  "shadow": {
+    "pop": "0 6px 20px rgba(16,24,40,.16), 0 0 0 1px rgba(16,24,40,.06)",
+    "modal": "0 16px 48px rgba(16,24,40,.22), 0 0 0 1px rgba(16,24,40,.06)"
+  },
+  "motion": {
+    "fast": "100ms",
+    "base": "160ms",
+    "ease": "cubic-bezier(.2,.8,.2,1)"
+  },
+  "layout": {
+    "window-min-w": 960,
+    "window-min-h": 600,
+    "tabbar-h": 34,
+    "toolbar-h": 44,
+    "statusbar-h": 24,
+    "left-panel-w": 240,
+    "left-panel-min": 180,
+    "left-panel-max": 480,
+    "detail-panel-w": 380,
+    "detail-panel-min": 300,
+    "detail-panel-max": 720,
+    "graph-row-h": 28,
+    "list-row-h": 26,
+    "lane-w": 16,
+    "node-r": 5,
+    "avatar": 18,
+    "control-h-sm": 24,
+    "control-h-md": 28,
+    "control-h-lg": 32,
+    "modal-w": 520,
+    "palette-w": 640,
+    "col-author-w": 150,
+    "col-date-w": 120,
+    "col-sha-w": 76,
+    "content-w": 880,
+    "prefs-w": 680,
+    "design-w": 1100,
+    "design-narrow-w": 720,
+    "tab-min-w": 120,
+    "tab-max-w": 220,
+    "palette-list-h": 360,
+    "stripe-w": 3
+  },
+  "z": {
+    "panel": 10,
+    "modal": 50,
+    "palette": 60,
+    "dropdown": 65,
+    "toast": 70,
+    "tooltip": 80
+  }
+}

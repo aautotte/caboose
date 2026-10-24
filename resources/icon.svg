@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Mergatroid: a small, slightly worried robot whose antenna is two lanes merging into one. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#252032"/>
+      <stop offset="1" stop-color="#16181d"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f1fb"/>
+      <stop offset="1" stop-color="#dcd5f0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" rx="228" fill="url(#tile)"/>
+
+  <!-- Antenna: two lanes join, then one line runs into the head. -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="44">
+    <path d="M330 150 C330 240 512 230 512 318" stroke="#b9a5ff"/>
+    <path d="M694 150 C694 240 512 230 512 318" stroke="#8a66f0"/>
+    <path d="M512 318 V372" stroke="#b9a5ff"/>
+  </g>
+  <circle cx="330" cy="150" r="46" fill="#b9a5ff"/>
+  <circle cx="694" cy="150" r="46" fill="#8a66f0"/>
+  <circle cx="512" cy="318" r="40" fill="#f4f1fb" stroke="#7148e0" stroke-width="20"/>
+
+  <!-- Ears -->
+  <rect x="168" y="532" width="80" height="168" rx="36" fill="#7148e0"/>
+  <rect x="776" y="532" width="80" height="168" rx="36" fill="#7148e0"/>
+
+  <!-- Head -->
+  <rect x="220" y="380" width="584" height="476" rx="132" fill="url(#face)"/>
+
+  <!-- Worried brows: inner ends raised. -->
+  <g stroke="#16181d" stroke-width="26" stroke-linecap="round" fill="none">
+    <path d="M352 520 L452 494"/>
+    <path d="M672 520 L572 494"/>
+  </g>
+  <!-- Eyes, glancing up -->
+  <circle cx="410" cy="604" r="54" fill="#16181d"/>
+  <circle cx="614" cy="604" r="54" fill="#16181d"/>
+  <circle cx="426" cy="586" r="17" fill="#f4f1fb"/>
+  <circle cx="630" cy="586" r="17" fill="#f4f1fb"/>
+  <!-- A small, unsure mouth -->
+  <path d="M444 744 q34 -26 68 0 t68 0" fill="none" stroke="#16181d" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

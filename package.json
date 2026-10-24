@@ -1,0 +1,113 @@
+{
+  "name": "mergatroid",
+  "productName": "Mergatroid",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A desktop Git client with a commit graph, built on the git you already have installed.",
+  "license": "MIT",
+  "author": "aautotte (https://github.com/aautotte)",
+  "homepage": "https://github.com/aautotte/mergatroid",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aautotte/mergatroid.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aautotte/mergatroid/issues"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "tokens": "node scripts/tokens.mjs",
+    "design": "electron-vite dev -- --view=design",
+    "design:shots": "electron-vite build && electron . --view=design --screenshot=docs/screenshots/design",
+    "seed": "node scripts/seed.mjs",
+    "icons": "electron scripts/icons.mjs",
+    "shots": "electron-vite build && node scripts/shots.mjs",
+    "e2e": "electron-vite build && playwright test",
+    "contrast": "node scripts/contrast.mjs",
+    "dist": "electron-vite build && electron-builder"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@tanstack/react-virtual": "^3.14.22",
+    "cmdk": "^1.1.1",
+    "highlight.js": "^11.12.0",
+    "lucide-react": "^1.61.0",
+    "radix-ui": "^1.8.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7",
+    "zustand": "^5.0.16"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  },
+  "build": {
+    "appId": "app.mergatroid",
+    "productName": "Mergatroid",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "icons",
+        "filter": [
+          "icon.ico",
+          "icon.png"
+        ]
+      }
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Mergatroid-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Mergatroid-${version}-portable.${ext}"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "resources/icon-1024.png",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "resources/icon.png",
+      "category": "Development"
+    }
+  }
+}

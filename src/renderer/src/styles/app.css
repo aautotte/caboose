@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+@import './tokens.css';
+@import './tailwind.theme.css';
+
+/* tokens.css and tailwind.theme.css are generated: npm run tokens */
+
+@layer base {
+  * {
+    border-color: var(--gc-color-border);
+  }
+  :focus-visible {
+    outline: 2px solid var(--gc-color-focus-ring);
+    outline-offset: 1px;
+  }
+  ::selection {
+    background: var(--gc-color-row-selected);
+  }
+}
+
+@keyframes gc-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Syntax colours for highlight.js output, from tokens. */
+.hljs-line .hljs-keyword, .hljs-line .hljs-built_in, .hljs-line .hljs-literal, .hljs-line .hljs-selector-tag { color: var(--gc-color-syntax-keyword); }
+.hljs-line .hljs-string, .hljs-line .hljs-regexp, .hljs-line .hljs-template-string, .hljs-line .hljs-addition { color: var(--gc-color-syntax-string); }
+.hljs-line .hljs-comment, .hljs-line .hljs-quote, .hljs-line .hljs-meta { color: var(--gc-color-syntax-comment); font-style: italic; }
+.hljs-line .hljs-number, .hljs-line .hljs-symbol, .hljs-line .hljs-bullet { color: var(--gc-color-syntax-number); }
+.hljs-line .hljs-title, .hljs-line .hljs-title.function_, .hljs-line .hljs-section { color: var(--gc-color-syntax-function); }
+.hljs-line .hljs-type, .hljs-line .hljs-title.class_, .hljs-line .hljs-class { color: var(--gc-color-syntax-type); }
+.hljs-line .hljs-attr, .hljs-line .hljs-attribute, .hljs-line .hljs-property, .hljs-line .hljs-variable, .hljs-line .hljs-name, .hljs-line .hljs-tag { color: var(--gc-color-syntax-attr); }
+.hljs-line .hljs-emphasis { font-style: italic; }
+.hljs-line .hljs-strong { font-weight: 600; }
+
+/* Tab width from Settings (code views). */
+.hljs-line,
+textarea {
+  tab-size: var(--gc-tab-size, 4);
+}
