@@ -34,6 +34,11 @@ test.describe('profiles and diff controls', () => {
 
   const profileButton = () => h.page.getByRole('button', { name: /^Profile: / })
   const profilesDialog = () => dialog(h.page).filter({ has: h.page.getByRole('heading', { name: 'Profiles' }) })
+  /** Closes the profiles dialog with its own button and waits until it's gone (Escape is covered by F34-K1). */
+  async function closeProfiles(): Promise<void> {
+    await profilesDialog().getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(profilesDialog()).toHaveCount(0)
+  }
   const chip = (name: string) => profilesDialog().getByRole('group', { name: 'Profiles' }).getByRole('button', { name })
   const author = (): string => h.git(repo, 'log', '-1', '--format=%an <%ae>')
   const commitButton = () => h.page.getByRole('form', { name: 'Commit' }).getByRole('button', { name: /^Commit/ })
@@ -127,7 +132,7 @@ test.describe('profiles and diff controls', () => {
     await profilesDialog().getByLabel('Commit as (email)').fill('not an email')
     await expect(profilesDialog().getByText('That doesn’t look like an email address.')).toBeVisible()
     await expect(profilesDialog().getByRole('button', { name: 'Save' })).toBeDisabled()
-    await h.page.keyboard.press('Escape')
+    await closeProfiles()
   })
 
   test('F34-H3: switching back brings the other profile’s tabs and identity back; a profile can be deleted', async () => {
@@ -143,7 +148,7 @@ test.describe('profiles and diff controls', () => {
     await dialog(h.page).getByRole('button', { name: 'Delete profile' }).click()
     await profilesDialog().waitFor()
     await expect(chip('Work')).toHaveCount(0)
-    await h.page.keyboard.press('Escape')
+    await closeProfiles()
     const all = await appState<{ profiles: Array<{ name: string }> }>(h.page)
     expect(all.profiles.map((p) => p.name)).toEqual(['Default'])
   })

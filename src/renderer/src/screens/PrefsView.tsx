@@ -301,6 +301,7 @@ function IdentityForm({ repoId }: { repoId: string | undefined }): React.JSX.Ele
     try {
       await call('identity.set', { repoId, name, email })
       setLoaded({ name: name.trim() || null, email: email.trim() || null })
+      act.identityChanged()
       toast({ tone: 'success', title: repoId ? 'Saved for this repository' : 'Saved your name and email' })
     } catch (err) {
       act.fail(err, 'Couldn’t save')

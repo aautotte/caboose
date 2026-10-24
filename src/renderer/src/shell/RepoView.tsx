@@ -24,8 +24,10 @@ export function RepoView({ repoId }: { repoId: string }): React.JSX.Element {
   const multi = useRepo(repoId, (r) => r.multi)
   const loadError = useRepo(repoId, (r) => r.loadError)
   const hasRefs = useRepo(repoId, (r) => r.refs !== null)
-  const leftOpen = useApp((s) => s.leftOpen)
-  const detailOpen = useApp((s) => s.detailOpen)
+  // A full-width diff hides both side panels; closing the diff brings them back.
+  const wideDiff = useApp((s) => s.diffWide) && center.kind === 'diff'
+  const leftOpen = useApp((s) => s.leftOpen) && !wideDiff
+  const detailOpen = useApp((s) => s.detailOpen) && !wideDiff
   const leftWidth = useApp((s) => s.prefs.leftWidth)
   const detailWidth = useApp((s) => s.prefs.detailWidth)
   const tab = useApp((s) => s.tabs.find((t) => t.id === repoId))

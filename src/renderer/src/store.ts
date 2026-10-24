@@ -179,10 +179,14 @@ export interface AppState {
   paletteOpen: boolean
   leftOpen: boolean
   detailOpen: boolean
+  /** "Use the full width" in a diff: hides both side panels while a diff is open, and only then. */
+  diffWide: boolean
   prefs: Prefs
   authPrompt: AuthPromptEvent | null
   /** Every profile; the active one has isActive. */
   profiles: Profile[]
+  /** Goes up whenever a name or email is saved, so whatever shows "who commits" reads it again. */
+  identityVersion: number
 }
 
 export const useApp = create<AppState>(() => ({
@@ -194,9 +198,11 @@ export const useApp = create<AppState>(() => ({
   paletteOpen: false,
   leftOpen: true,
   detailOpen: true,
+  diffWide: false,
   prefs: loadPrefs(),
   authPrompt: null,
-  profiles: []
+  profiles: [],
+  identityVersion: 0
 }))
 
 function cachePrefs(prefs: Prefs): void {

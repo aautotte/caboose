@@ -40,7 +40,7 @@ export function DiffView({
   const mode = useApp((s) => s.prefs.diffMode)
   const wrap = useApp((s) => s.prefs.diffWrap)
   const ignoreWs = useApp((s) => s.prefs.diffIgnoreWs)
-  const wide = useApp((s) => !s.leftOpen && !s.detailOpen)
+  const wide = useApp((s) => s.diffWide)
   const status = useRepo(repoId, (r) => r.status)
   // A file can become conflicted while its diff is open (or be opened just before the status says so).
   const conflicted = source.kind !== 'commit' && (status?.changes.some((c) => c.path === path && c.conflicted) ?? false)
@@ -191,7 +191,7 @@ export function DiffView({
         </Tooltip>
         {embedded ? null : (
           <Tooltip content={wide ? 'Show the side panels' : 'Use the full width'}>
-            <IconButton label="Use the full width" pressed={wide} onClick={() => useApp.setState({ leftOpen: wide, detailOpen: wide })}>
+            <IconButton label="Use the full width" pressed={wide} onClick={() => useApp.setState({ diffWide: !wide })}>
               {wide ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </IconButton>
           </Tooltip>

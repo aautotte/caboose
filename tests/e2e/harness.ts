@@ -29,7 +29,7 @@ const ALLOWED = [/Failed to load resource/i]
 
 export async function launch(
   name: string,
-  opts: { open?: string[]; reseed?: boolean; extraEnv?: Record<string, string>; setup?: (env: NodeJS.ProcessEnv) => void; keepUserData?: boolean } = {}
+  opts: { open?: string[]; reseed?: boolean; extraEnv?: Record<string, string>; setup?: (env: NodeJS.ProcessEnv) => void; keepUserData?: boolean; exe?: string } = {}
 ): Promise<Harness> {
   const home = join(seed, `home-${name}`)
   const env: NodeJS.ProcessEnv = {
@@ -51,7 +51,13 @@ export async function launch(
   const userData = join(seed, `userdata-${name}`)
   if (!opts.keepUserData) rmSync(userData, { recursive: true, force: true })
   const open = opts.open ?? [demo, conflict]
-  const electronApp = await electron.launch({ cwd: app, args: ['.', ...(open.length ? [`--open=${open.join('|')}`] : [])], env: { ...env, GC_USER_DATA: userData } })
+  // exe: a packaged Mergatroid (npm run dist) instead of the dev build.
+  const openArgs = open.length ? [`--open=${open.join('|')}`] : []
+  const electronApp = await electron.launch({
+    cwd: app,
+    ...(opts.exe ? { executablePath: opts.exe, args: openArgs } : { args: ['.', ...openArgs] }),
+    env: { ...env, GC_USER_DATA: userData }
+  })
   const page = await electronApp.firstWindow()
   const problems: string[] = []
   page.on('console', (m) => {

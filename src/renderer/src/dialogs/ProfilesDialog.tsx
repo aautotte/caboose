@@ -80,6 +80,7 @@ export function ProfilesDialog({ d }: { d: Extract<D, { kind: 'profiles' }> }): 
         sshKey: draft.sshKey === NO_KEY ? null : draft.sshKey
       })
       await load(current.id)
+      act.identityChanged()
       toast({ tone: 'success', title: `Saved the ${draft.name.trim()} profile` })
     } catch (err) {
       setError((err as Error).message)

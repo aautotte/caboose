@@ -104,6 +104,11 @@ export async function reorderTabs(ids: string[]): Promise<void> {
 
 // ---------- profiles ----------
 
+/** A name, email or profile identity changed: anything showing who commits should ask again. */
+export function identityChanged(): void {
+  useApp.setState((s) => ({ identityVersion: s.identityVersion + 1 }))
+}
+
 export async function loadProfiles(): Promise<void> {
   const profiles = await attempt(() => call('profile.list', {}))
   if (profiles) useApp.setState({ profiles })

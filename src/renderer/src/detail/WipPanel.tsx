@@ -288,6 +288,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
 function CommitAs({ repoId }: { repoId: string }): React.JSX.Element | null {
   const profile = useApp((s) => s.profiles.find((p) => p.isActive))
   const several = useApp((s) => s.profiles.length > 1)
+  const version = useApp((s) => s.identityVersion)
   const [who, setWho] = useState<EffectiveIdentity | null>(null)
   useEffect(() => {
     let live = true
@@ -297,7 +298,7 @@ function CommitAs({ repoId }: { repoId: string }): React.JSX.Element | null {
     return () => {
       live = false
     }
-  }, [repoId, profile])
+  }, [repoId, profile, version])
   if (!who) return null
   const from = who.from === 'repo' ? 'this repository’s setting' : who.from === 'profile' ? `the ${profile?.name ?? ''} profile` : several ? 'Git’s global setting' : null
   return (
