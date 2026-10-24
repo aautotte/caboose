@@ -59,6 +59,7 @@ export async function launch(
     env: { ...env, GC_USER_DATA: userData }
   })
   const page = await electronApp.firstWindow()
+  await ciSize(electronApp)
   const problems: string[] = []
   page.on('console', (m) => {
     if (m.type() === 'error' && !ALLOWED.some((r) => r.test(m.text()))) problems.push(`console error: ${m.text()}`)
@@ -90,6 +91,11 @@ export async function launch(
       await electronApp.close()
     }
   }
+}
+
+/** GitHub's Windows runners have a 1024x768 screen, which caps the window there; tests run at that size everywhere. */
+export async function ciSize(electronApp: ElectronApplication): Promise<void> {
+  await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 768))
 }
 
 export interface AxeIssue {

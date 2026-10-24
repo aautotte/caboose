@@ -53,7 +53,8 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
   }, [repoId])
 
   return (
-    <section aria-label="Settings" className="flex min-h-0 flex-1 flex-col bg-bg">
+    // A container, so the section list can step aside when Settings is squeezed between both side panels.
+    <section aria-label="Settings" className="@container flex min-h-0 flex-1 flex-col bg-bg">
       <header className="flex h-10 shrink-0 items-center border-b border-border bg-surface px-3">
         <h2 className="flex-1 text-md text-text">Settings</h2>
         <IconButton label="Close settings" onClick={() => act.setCenter(repoId, { kind: 'graph' })}>
@@ -61,7 +62,7 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
         </IconButton>
       </header>
       <div className="flex min-h-0 flex-1">
-        <nav aria-label="Settings sections" className="w-52 shrink-0 border-r border-border bg-surface p-2">
+        <nav aria-label="Settings sections" className="hidden w-52 shrink-0 border-r border-border bg-surface p-2 @2xl:block">
           {sections.map((s) => (
             <button
               key={s.id}
@@ -258,10 +259,11 @@ function Group({ id, title, note, children }: { id: string; title: string; note?
   )
 }
 
+/** In a narrow window the controls wrap under the text rather than squeezing it to nothing. */
 function Row({ label, help, children }: { label: string; help: string; children: React.ReactNode }): React.JSX.Element {
   return (
-    <div className="flex items-start justify-between gap-6 border-b border-border py-3">
-      <div className="min-w-0">
+    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 border-b border-border py-3">
+      <div className="min-w-0 flex-1 basis-56">
         <p className="text-base font-medium text-text">{label}</p>
         <p className="text-sm text-muted">{help}</p>
       </div>
@@ -440,8 +442,8 @@ function SigningForm({ repoId }: { repoId: string | undefined }): React.JSX.Elem
 function CommandRow({ label, prefKey, repoId, target }: { label: string; prefKey: 'terminalCommand' | 'editorCommand'; repoId: string; target: 'terminal' | 'editor' }): React.JSX.Element {
   const value = useApp((s) => s.prefs[prefKey])
   return (
-    <div className="flex items-start justify-between gap-6 border-b border-border py-3">
-      <div className="min-w-0">
+    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2 border-b border-border py-3">
+      <div className="min-w-0 flex-1 basis-56">
         <p className="text-base font-medium text-text">{label}</p>
         <p className="text-sm text-muted">Empty uses the usual one for your system.</p>
         <Button size="sm" variant="ghost" className="-ml-2 text-accent-text" onClick={() => void act.openIn(repoId, target)}>
@@ -512,7 +514,7 @@ function SshKeys(): React.JSX.Element {
         </ul>
       )}
       <form
-        className="grid grid-cols-3 items-end gap-3"
+        className="grid grid-cols-1 items-end gap-3 @xl:grid-cols-3"
         onSubmit={(e) => {
           e.preventDefault()
           void create()
@@ -521,7 +523,7 @@ function SshKeys(): React.JSX.Element {
         <Field label="File name">{(p) => <TextInput {...p} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
         <Field label="Label">{(p) => <TextInput {...p} value={label} placeholder="laptop" onChange={(e) => setLabel(e.target.value)} />}</Field>
         <Field label="Passphrase (optional)">{(p) => <TextInput {...p} type="password" autoComplete="new-password" value={pass} onChange={(e) => setPass(e.target.value)} />}</Field>
-        <div className="col-span-3 flex justify-end">
+        <div className="flex justify-end @xl:col-span-3">
           <Button type="submit" variant="primary" loading={busy} disabled={!name.trim()}>
             Create an SSH key
           </Button>

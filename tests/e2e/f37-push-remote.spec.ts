@@ -153,7 +153,8 @@ test('F38-H4: a tag on a commit has the same menu in the graph', async () => {
   await row.click({ button: 'right' })
   await h.page.getByRole('menuitem', { name: 'v1.0' }).click()
   await h.page.getByRole('menuitem', { name: 'Push tag to' }).click()
-  await h.page.getByRole('menu').last().getByRole('menuitem', { name: 'origin', exact: true }).click()
+  // Two submenus deep: in a small window the last one can open over its parent, so pick from the keyboard.
+  await h.page.getByRole('menu').last().getByRole('menuitem', { name: 'origin', exact: true }).press('Enter')
   await expect(toasts().getByText('Pushed tag v1.0 to origin', { exact: true })).toBeVisible()
   expect(tagOn(origin, 'v1.0')).toBe('v1.0')
 })
@@ -221,7 +222,8 @@ test('F39-H3: the same from a branch on a commit in the graph', async () => {
   await row.click({ button: 'right' })
   await h.page.getByRole('menuitem', { name: 'solo', exact: true }).click()
   await h.page.getByRole('menuitem', { name: 'Push to' }).click()
-  await h.page.getByRole('menu').last().getByRole('menuitem', { name: /^fork/ }).click()
+  // Two submenus deep, as in F38-H4.
+  await h.page.getByRole('menu').last().getByRole('menuitem', { name: /^fork/ }).press('Enter')
   await expect(toasts().getByText('Pushed solo to fork', { exact: true })).toBeVisible()
   expect(remoteHead(fork, 'solo')).toBe(head())
 })

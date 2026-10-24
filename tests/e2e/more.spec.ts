@@ -4,6 +4,7 @@ import { test, expect, _electron as electron, type ElectronApplication, type Pag
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { ciSize } from './harness'
 
 const app = resolve(__dirname, '..', '..')
 const seed = join(app, '.seed')
@@ -53,6 +54,7 @@ test.beforeAll(async () => {
   rmSync(userData, { recursive: true, force: true })
   electronApp = await electron.launch({ cwd: app, args: ['.', `--open=${demo}`], env: { ...env, GC_USER_DATA: userData } })
   page = await electronApp.firstWindow()
+  await ciSize(electronApp)
   page.on('pageerror', (e) => console.error('pageerror', e))
   await page.getByRole('tab', { name: 'demo' }).click()
   await page.getByRole('row', { name: /Uncommitted changes/ }).waitFor()
@@ -117,6 +119,8 @@ test('focus on this branch, then show all', async () => {
 })
 
 test('hide a column, and the choice is saved for the repo', async () => {
+  // At 1024 wide the Author column only fits with the left panel out of the way.
+  await page.keyboard.press('Control+J')
   await expect(page.getByRole('columnheader', { name: /Author$/ })).toBeVisible()
   await menu(page.getByRole('row', { name: /^Columns/ }), 'Hide the Author column')
   await expect(page.getByRole('columnheader', { name: /Author$/ })).toHaveCount(0)
@@ -129,6 +133,7 @@ test('hide a column, and the choice is saved for the repo', async () => {
   expect(saved.find((c) => c.key === 'author')?.visible).toBe(false)
   await menu(page.getByRole('row', { name: /^Columns/ }), 'Reset columns')
   await expect(page.getByRole('columnheader', { name: /Author$/ })).toBeVisible()
+  await page.keyboard.press('Control+J')
 })
 
 test('pin a branch to the left of the graph', async () => {
