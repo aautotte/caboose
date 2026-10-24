@@ -613,7 +613,7 @@ export async function pull(repoId: string, mode?: PullMode): Promise<void> {
 
 export async function push(repoId: string, opts: { setUpstream?: boolean; force?: boolean; remote?: string; branch?: string } = {}): Promise<void> {
   const res = await remoteOp(repoId, 'push', 'Pushing', (opId) => call('remote.push', { repoId, opId, ...opts }), 'Push failed')
-  const branch = useApp.getState().repos[repoId]?.refs?.head.branch ?? ''
+  const branch = opts.branch ?? useApp.getState().repos[repoId]?.refs?.head.branch ?? ''
   if (res?.result === 'needsUpstream') openDialog({ kind: 'publish', repoId, branch })
   else if (res?.result === 'stale') {
     toast({ tone: 'error', title: 'Force push stopped', body: res.message, action: { label: 'Fetch now', onClick: () => void fetchAll(repoId) } })
@@ -626,7 +626,10 @@ export async function push(repoId: string, opts: { setUpstream?: boolean; force?
       undoable: false,
       onConfirm: () => void push(repoId, { ...opts, force: true })
     })
-  } else if (res?.result === 'ok') toast({ tone: 'success', title: opts.force ? `Force pushed ${branch}` : `Pushed ${branch}` })
+  } else if (res?.result === 'ok') {
+    const where = opts.remote ? ` to ${opts.remote}` : ''
+    toast({ tone: 'success', title: opts.force ? `Force pushed ${branch}${where}` : `Pushed ${branch}${where}` })
+  }
   await loadRepo(repoId, { keepSelection: true })
 }
 
@@ -783,11 +786,20 @@ function defaultRemote(repoId: string): string | undefined {
   return remotes.includes('origin') ? 'origin' : remotes[0]
 }
 
-export async function pushTag(repoId: string, name: string): Promise<void> {
-  const remote = defaultRemote(repoId)
-  if (!remote) return void toast({ tone: 'error', title: 'No remote to push to', body: 'Add a remote first.' })
-  const ok = await remoteOp(repoId, 'push', 'Pushing tag', (opId) => call('tag.push', { repoId, name, remote, opId }), `Couldn’t push ${name}`)
-  if (ok !== undefined) toast({ tone: 'success', title: `Pushed tag ${name} to ${remote}` })
+/** Stands for every remote in pushTag. */
+export const ALL_REMOTES = '*'
+
+/** Pushes a tag to one remote (origin, or the first one, by default) or to all of them, one after the other. */
+export async function pushTag(repoId: string, name: string, remote?: string): Promise<void> {
+  const all = useApp.getState().repos[repoId]?.refs?.remotes ?? []
+  const targets = remote === ALL_REMOTES ? all : [remote ?? defaultRemote(repoId)].filter((r): r is string => !!r)
+  if (!targets.length) return void toast({ tone: 'error', title: 'No remote to push to', body: 'Add a remote first.' })
+  const done: string[] = []
+  for (const r of targets) {
+    const ok = await remoteOp(repoId, 'push', 'Pushing tag', (opId) => call('tag.push', { repoId, name, remote: r, opId }), `Couldn’t push ${name} to ${r}`)
+    if (ok !== undefined) done.push(r)
+  }
+  if (done.length) toast({ tone: 'success', title: `Pushed tag ${name} to ${done.join(', ')}` })
 }
 
 /** "refs/remotes/origin/feature/x" → origin + feature/x, if we know that remote-tracking branch (and it isn't origin/HEAD). */
@@ -817,13 +829,13 @@ export function deleteRemoteBranch(repoId: string, remote: string, name: string)
   })
 }
 
-export function deleteRemoteTag(repoId: string, name: string): void {
-  const remote = defaultRemote(repoId)
+export function deleteRemoteTag(repoId: string, name: string, which?: string): void {
+  const remote = which ?? defaultRemote(repoId)
   if (!remote) return
   confirm({
     title: `Delete ${name} from ${remote}?`,
     body: `Anyone who already fetched the tag keeps their copy. Your own copy stays too.`,
-    confirmLabel: 'Delete from remote',
+    confirmLabel: `Delete from ${remote}`,
     danger: true,
     undoable: false,
     onConfirm: async () => {

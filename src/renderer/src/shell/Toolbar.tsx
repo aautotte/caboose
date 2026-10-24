@@ -44,6 +44,10 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
   const pullMode = useApp((s) => s.prefs.pullMode)
   const tab = useApp((s) => s.tabs.find((t) => t.id === repoId))
   const head = refs?.head
+  const remotes = refs?.remotes ?? []
+  // The remote the current branch tracks, from its upstream (refs/remotes/<remote>/<branch>).
+  const upstream = refs?.refs.find((r) => r.kind === 'local' && r.isHead)?.upstream
+  const tracked = upstream ? remotes.find((r) => upstream.startsWith(`refs/remotes/${r}/`)) : undefined
   const branchLabel = head?.branch ?? (head?.sha ? `Detached at ${head.sha.slice(0, 7)}` : '…')
 
   return (
@@ -113,7 +117,45 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
             </RMenu.Portal>
           </RMenu.Root>
         </div>
-        <ToolButton label="Push" text="Push" icon={<ArrowUpFromLine size={16} />} busy={!!busy.push} disabled={!head?.branch} onClick={() => void act.push(repoId)} />
+        <div className="flex items-center">
+          <ToolButton
+            label="Push"
+            text="Push"
+            icon={<ArrowUpFromLine size={16} />}
+            busy={!!busy.push}
+            disabled={!head?.branch}
+            onClick={() => void act.push(repoId)}
+          />
+          {remotes.length > 1 ? (
+            <RMenu.Root>
+              <RMenu.Trigger asChild>
+                <button
+                  aria-label="Push to another remote"
+                  disabled={!head?.branch || !!busy.push}
+                  className="grid h-9 w-4 place-items-center rounded-md text-muted enabled:hover:bg-row-hover enabled:hover:text-text disabled:text-disabled"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </RMenu.Trigger>
+              <RMenu.Portal>
+                <RMenu.Content align="start" sideOffset={4} className="z-(--gc-z-dropdown) min-w-56 rounded-md border border-border bg-surface-raised p-1 shadow-pop">
+                  <RMenu.Label className="truncate px-2 py-1 text-xs text-muted">Push {head?.branch} to</RMenu.Label>
+                  {remotes.map((r) => (
+                    <RMenu.Item
+                      key={r}
+                      // Pushing elsewhere leaves the branch's tracking alone; a branch that tracks nothing yet starts tracking this remote.
+                      onSelect={() => void act.push(repoId, { remote: r, setUpstream: !upstream })}
+                      className="flex h-7 items-center justify-between gap-4 rounded-sm px-2 text-base text-text outline-none data-highlighted:bg-row-selected"
+                    >
+                      <span className="truncate">{r}</span>
+                      {r === tracked ? <span className="text-xs text-muted">tracked</span> : null}
+                    </RMenu.Item>
+                  ))}
+                </RMenu.Content>
+              </RMenu.Portal>
+            </RMenu.Root>
+          ) : null}
+        </div>
         <span className="mx-1 h-6 w-px bg-border" />
         <ToolButton
           label="New branch from here"

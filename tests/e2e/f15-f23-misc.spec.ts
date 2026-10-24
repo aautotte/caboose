@@ -191,7 +191,7 @@ test('F20-E1 a tag name that already exists is rejected inline', async () => {
 
 test('F20-E2 delete a tag from the remote', async () => {
   await menu(h.page, h.page.getByRole('treeitem', { name: 'v9.9.9' }), 'Delete from the remote…')
-  await dialog(h.page).getByRole('button', { name: 'Delete from remote' }).click()
+  await dialog(h.page).getByRole('button', { name: 'Delete from origin' }).click()
   await expect.poll(h.gitOr(join(seed, 'origin.git'), 'tag', '-l', 'v9.9.9')).toBe('')
   expect(h.git(demo, 'tag', '-l', 'v9.9.9')).toBe('v9.9.9')
 })

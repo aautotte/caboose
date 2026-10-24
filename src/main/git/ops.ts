@@ -440,7 +440,8 @@ export class RepoOps {
     const st = await this.status()
     const branch = opts.branch ? this.safeRev(opts.branch) : st.branch
     if (!branch) throw invalid('You’re not on a branch (detached HEAD). Create a branch to push these commits.')
-    const upstream = opts.branch ? null : st.upstream
+    // Another branch than the current one: its own upstream, e.g. origin/feature (empty when it tracks nothing).
+    const upstream = opts.branch && opts.branch !== st.branch ? (await this.tryGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]))?.trim() || null : st.upstream
     if (!upstream && !opts.setUpstream) return { result: 'needsUpstream' }
     const { remotes } = await this.refs()
     const remote = opts.remote ? this.safeRev(opts.remote) : upstream ? remotes.find((r) => upstream.startsWith(r + '/')) : remotes[0]

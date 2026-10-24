@@ -157,7 +157,7 @@ function PublishDialog({ d }: { d: Extract<D, { kind: 'publish' }> }): React.JSX
   const [remote, setRemote] = useState(remotes.includes('origin') ? 'origin' : (remotes[0] ?? ''))
   const submit = (): void => {
     act.closeDialog()
-    void act.push(d.repoId, { setUpstream: true, remote })
+    void act.push(d.repoId, { setUpstream: true, remote, branch: d.branch })
   }
   if (!remotes.length) {
     return (

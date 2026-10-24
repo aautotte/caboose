@@ -81,13 +81,15 @@ export function CreateTagDialog({ d }: { d: Extract<D, { kind: 'createTag' }> })
   const [push, setPush] = useState(false)
   const [busy, setBusy] = useState(false)
   const refs = useApp((s) => s.repos[d.repoId]?.refs)
+  const remotes = refs?.remotes ?? []
+  const [pushTo, setPushTo] = useState(remotes.includes('origin') ? 'origin' : (remotes[0] ?? ''))
   const existing = useMemo(() => refs?.refs.filter((r) => r.kind === 'tag').map((r) => r.short) ?? [], [refs])
   const problem = tagNameProblem(name.trim(), existing)
   const submit = async (): Promise<void> => {
     if (!name.trim() || problem) return
     setBusy(true)
     const ok = await act.createTag(d.repoId, name.trim(), d.at, message.trim() || null)
-    if (ok && push) await act.pushTag(d.repoId, name.trim())
+    if (ok && push) await act.pushTag(d.repoId, name.trim(), remotes.length > 1 ? pushTo : undefined)
     setBusy(false)
     if (ok) close()
   }
@@ -112,7 +114,20 @@ export function CreateTagDialog({ d }: { d: Extract<D, { kind: 'createTag' }> })
         <Field label="Message (optional)" help="With a message, the tag also records who made it and when (an annotated tag).">
           {(p) => <TextArea {...p} value={message} onChange={(e) => setMessage(e.target.value)} />}
         </Field>
-        <Checkbox label="Push it to the remote too" checked={push} disabled={!refs?.remotes.length} onCheckedChange={setPush} />
+        {remotes.length > 1 ? (
+          <div className="flex items-center gap-3">
+            <Checkbox label="Push it to" checked={push} onCheckedChange={setPush} />
+            <Select
+              label="Remote to push the tag to"
+              value={pushTo}
+              disabled={!push}
+              onValueChange={setPushTo}
+              options={[...remotes.map((r) => ({ value: r, label: r })), { value: act.ALL_REMOTES, label: 'All remotes' }]}
+            />
+          </div>
+        ) : (
+          <Checkbox label="Push it to the remote too" checked={push} disabled={!remotes.length} onCheckedChange={setPush} />
+        )}
       </DialogForm>
     </Dialog>
   )

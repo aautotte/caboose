@@ -9,6 +9,7 @@ import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
+import { pushEntry, tagMenu } from '@/shell/refMenus'
 
 const ROW = 28 // matches --gc-graph-row-h
 const HEADER = 26 // --gc-list-row-h, the sticky column header
@@ -549,6 +550,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   }
   if (row.kind === 'stash') return stashMenu(repoId, row.sha, row.summary)
   const entries: MenuEntry[] = []
+  const remotes = useApp.getState().repos[repoId]?.refs?.remotes ?? []
   for (const r of refs.filter((x) => x.kind !== 'tag')) {
     const items: MenuEntry[] = []
     if (!r.isHead) items.push({ type: 'item', label: `Check out ${r.name}`, icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, r.name) })
@@ -557,7 +559,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       items.push({ type: 'item', label: `Rebase ${headBranch} onto ${r.name}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, headBranch, r.name) })
     }
     if (r.local) {
-      items.push({ type: 'item', label: 'Push', icon: <Upload size={14} />, disabled: !r.isHead, onSelect: () => void act.push(repoId) })
+      items.push(pushEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream }, remotes))
       items.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.name }) })
       items.push({ type: 'item', label: 'Delete…', danger: true, icon: <Trash2 size={14} />, disabled: r.isHead, onSelect: () => act.deleteBranch(repoId, r.name) })
     }
@@ -567,6 +569,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     }
     entries.push({ type: 'sub', label: r.name, icon: <GitBranch size={14} />, items })
   }
+  for (const r of refs.filter((x) => x.kind === 'tag')) entries.push({ type: 'sub', label: r.name, icon: <Tag size={14} />, items: tagMenu(repoId, r.name, remotes) })
   if (entries.length) entries.push({ type: 'separator' })
   const short = shortSha(row.sha)
   const here = headBranch ?? 'HEAD'

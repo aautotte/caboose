@@ -30,6 +30,7 @@ works offline, and it doesn't phone home.
 - **Conflicts:** a three-way merge tool, with yours, the common ancestor and theirs side by side; pick lines and save.
 - **Sync:**
   - fetch, pull (merge, fast-forward or rebase), push, force push with lease;
+  - with several remotes, push the current branch or a tag to whichever one you pick (tags to all of them too);
   - set upstreams, manage remotes;
   - background fetch that never asks for a password.
 - **Undo:** most actions can be undone, even after a restart, and Mergatroid refuses safely if the repository
