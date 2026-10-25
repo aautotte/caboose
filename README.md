@@ -84,6 +84,10 @@ Your build isn't code-signed, so the first launch shows a warning:
 Settings, profiles and the repository list live in your user data folder (for example `%APPDATA%\Caboose`). They
 survive reinstalls, and a newer build picks them up. Git still has to be installed, since Caboose uses yours.
 
+Caboose used to be called Mergatroid. On its first start, Caboose copies your Mergatroid folder (for example
+`%APPDATA%\Mergatroid`) into its own and notes it in `data-move.log` there. The old folder is left as it was, so you
+can delete it yourself once you're happy.
+
 ## Tests
 
 ```bash
