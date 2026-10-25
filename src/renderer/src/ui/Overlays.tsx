@@ -124,7 +124,8 @@ export function ConfirmDialog({
   confirmLabel,
   danger = false,
   undoable,
-  onConfirm
+  onConfirm,
+  alt
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -134,6 +135,8 @@ export function ConfirmDialog({
   danger?: boolean
   undoable: boolean
   onConfirm: () => void
+  /** Another way out, e.g. "Create a branch…": the dialog closes first, so it can open another one. */
+  alt?: { label: string; onSelect: () => void }
 }): React.JSX.Element {
   return (
     <Dialog
@@ -146,6 +149,16 @@ export function ConfirmDialog({
           <Button autoFocus={!undoable} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
+          {alt ? (
+            <Button
+              onClick={() => {
+                onOpenChange(false)
+                alt.onSelect()
+              }}
+            >
+              {alt.label}
+            </Button>
+          ) : null}
           <Button
             autoFocus={undoable}
             variant={danger ? 'danger' : 'primary'}

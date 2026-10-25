@@ -162,7 +162,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       nested: p['submodules.nested'] !== false,
       jobs: (await ops(repoId).submoduleJobs()) ?? 4,
       warnBack: p['submodules.warnBack'] !== false,
-      tidy: p['submodules.tidy'] !== false
+      tidy: p['submodules.tidy'] !== false,
+      pushCheck: p['submodules.pushCheck'] === 'off' || p['submodules.pushCheck'] === 'push' ? p['submodules.pushCheck'] : 'check'
     }
   }
   const subMode = z.enum(['follow', 'manual', 'working'])
@@ -170,7 +171,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     const o = ops(repoId)
     const settings = await subSettings(repoId)
     const list = settings.on ? await o.submodules() : []
-    return { list, settings, present: list.length > 0 || (!settings.on && (await o.hasSubmodules())) }
+    return { list, settings, present: list.length > 0 || (!settings.on && (await o.hasSubmodules())), superproject: await o.superproject() }
   })
   handle('submodule.goingBack', z.object(R), async ({ repoId }) => {
     const s = await subSettings(repoId)
@@ -182,6 +183,11 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     return s.on ? ops(repoId).submoduleSync(from, to, s, id, progress(id)) : empty
   })
   handle('submodule.atRisk', z.object({ ...R, to: ref }), async ({ repoId, to }) => ((await subSettings(repoId)).on ? ops(repoId).submodulesAtRisk(to) : []))
+  handle('submodule.unpushed', z.object({ ...R, branch: ref.optional() }), async ({ repoId, branch }) => {
+    const s = await subSettings(repoId)
+    return s.on && s.pushCheck !== 'off' ? ops(repoId).submodulesUnpushed(branch ?? null) : []
+  })
+  handle('submodule.push', z.object({ ...R, path: z.string().min(1).max(4096), opId }), async ({ repoId, path, opId: id }) => (await ops(repoId).submodulePush(path, id, progress(id)), null))
   handle('submodule.setup', z.object({ ...R, paths, shallow: z.boolean().optional(), opId }), async ({ repoId, paths: which, shallow, opId: id }) => {
     const s = await subSettings(repoId)
     await ops(repoId).submoduleSetup(which, { shallow: shallow ?? s.shallow, nested: s.nested, jobs: s.jobs }, id, progress(id))
@@ -203,9 +209,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   })
   handle(
     'submodule.settings',
-    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), warnBack: z.boolean().optional(), tidy: z.boolean().optional(), jobs: z.number().int().min(1).max(16).optional() }),
+    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), warnBack: z.boolean().optional(), tidy: z.boolean().optional(), pushCheck: z.enum(['off', 'check', 'push']).optional(), jobs: z.number().int().min(1).max(16).optional() }),
     async ({ repoId, jobs, ...rest }) => {
-      for (const k of ['on', 'mode', 'shallow', 'nested', 'warnBack', 'tidy'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
+      for (const k of ['on', 'mode', 'shallow', 'nested', 'warnBack', 'tidy', 'pushCheck'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
       if (jobs !== undefined) await ops(repoId).setSubmoduleJobs(jobs)
       return subSettings(repoId)
     }
