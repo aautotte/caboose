@@ -129,7 +129,7 @@ function ancestry(start: string | null, bySha: Map<string, CommitRow>): Set<stri
  * double-click it to fit the lanes again. onDone(null) means fit.
  */
 function GraphHeader({ width, lanesW, onResize, onDone }: { width: number; lanesW: number; onResize: (w: number) => void; onDone: (w: number | null) => void }): React.JSX.Element {
-  const start = useRef<{ x: number; w: number } | null>(null)
+  const start = useRef<{ x: number; w: number; last: number | null } | null>(null)
   const clamp = (n: number): number => Math.max(3 * LANE + 8, Math.min(Math.max(lanesW, MAX_GRAPH_W), Math.round(n)))
   return (
     <span role="columnheader" className="relative shrink-0 px-1" style={{ width }}>
@@ -142,11 +142,16 @@ function GraphHeader({ width, lanesW, onResize, onDone }: { width: number; lanes
         tabIndex={0}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId)
-          start.current = { x: e.clientX, w: width }
+          start.current = { x: e.clientX, w: width, last: null }
         }}
-        onPointerMove={(e) => start.current && onResize(clamp(start.current.w + (e.clientX - start.current.x)))}
+        onPointerMove={(e) => {
+          if (!start.current) return
+          start.current.last = clamp(start.current.w + (e.clientX - start.current.x))
+          onResize(start.current.last)
+        }}
         onPointerUp={() => {
-          if (start.current) onDone(width)
+          // Where the pointer ended, not the last width drawn; a click that didn't drag keeps the lanes fitting.
+          if (start.current?.last != null) onDone(start.current.last)
           start.current = null
         }}
         onDoubleClick={() => onDone(null)}

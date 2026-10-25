@@ -173,6 +173,8 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   patchRepo(repoId, { loading: true })
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
+  // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
+  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore } = useApp.getState().repos[repoId]
   try {
     const [refs, status, undo, refView, columns, repoPrefs] = await Promise.all([
       call('refs.list', { repoId }),
@@ -191,9 +193,9 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       refs,
       ...(freshStatus ? { status, undo } : {}),
       refView,
-      columns: columns ?? DEFAULT_COLUMNS,
-      focusHead: repoPrefs['graph.focusHead'] === true,
-      graphWidth: typeof repoPrefs['graph.width'] === 'number' ? repoPrefs['graph.width'] : null,
+      columns: r.columns !== columnsBefore ? r.columns : columns ?? DEFAULT_COLUMNS,
+      focusHead: r.focusHead !== focusBefore ? r.focusHead : repoPrefs['graph.focusHead'] === true,
+      graphWidth: r.graphWidth !== widthBefore ? r.graphWidth : typeof repoPrefs['graph.width'] === 'number' ? repoPrefs['graph.width'] : null,
       commits: page.commits,
       hasMore: page.hasMore,
       layout,
