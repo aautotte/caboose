@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="resources/icon.png" width="112" alt="Caboose's icon: a determined purple caboose with a Git branch on its door, at a fork in the rails">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img src="docs/images/logo.png" width="320" alt="Caboose Git Client logo: a red caboose with eyes riding the rails, surrounded by colorful Git branches">
+  </picture>
 </p>
-
-<h1 align="center">Caboose</h1>
 
 <p align="center">A desktop Git client with a commit graph, built on the git you already have.</p>
 

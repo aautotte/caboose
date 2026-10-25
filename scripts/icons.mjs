@@ -1,6 +1,6 @@
 // Renders the app icons with Electron's own Chromium, on a transparent canvas (no background anywhere):
 //   resources/icon.svg        main master: icon-1024.png, icon.png, and 64 px and up in the .ico and the Linux set
-//   resources/icon-small.svg  close-up filling the canvas: 48 px and below in the .ico and the Linux set (at 125 to
+//   resources/icon-small.svg  simplified, filling the canvas: 48 px and below in the .ico and the Linux set (at 125 to
 //                             150% scaling the Windows taskbar uses the 40 and 48 px entries)
 //   resources/icon-macos.svg  the same artwork on Apple's rounded tile: every size in icon.icns, and nothing else
 // Each size is drawn from its SVG at that size, so small ones stay crisp. Run: npm run icons

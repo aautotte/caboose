@@ -1,19 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-<!-- Caboose, a close-up that fills the canvas, for 48 px and below. Transparent background. -->
-<defs>
-<linearGradient id="cbs-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a66f0"/><stop offset="1" stop-color="#7148e0"/></linearGradient>
-<linearGradient id="cbs-win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f1fb"/><stop offset="1" stop-color="#dcd5f0"/></linearGradient>
-<radialGradient id="cbs-lamp"><stop offset="0" stop-color="#e0659a" stop-opacity=".55"/><stop offset="1" stop-color="#e0659a" stop-opacity="0"/></radialGradient>
-</defs>
-<g transform="translate(128 128) scale(1.08) translate(-128 -125)"><rect x="22" y="226" width="212" height="10" rx="5" fill="#a79fc4"/>
-<g fill="#2a2a38" stroke="#8b86a3" stroke-width="5"><circle cx="82" cy="214" r="17"/><circle cx="174" cy="214" r="17"/></g>
-<rect x="28" y="96" width="200" height="112" rx="16" fill="url(#cbs-body)"/>
-<path d="M16 100 Q128 66 240 100 L240 114 Q128 80 16 114 Z" fill="#4b2fa8"/>
-<rect x="68" y="34" width="120" height="64" rx="10" fill="url(#cbs-body)"/>
-<path d="M58 40 Q128 14 198 40 L198 50 Q128 24 58 50 Z" fill="#4b2fa8"/>
-<rect x="82" y="54" width="38" height="34" rx="7" fill="url(#cbs-win)"/><rect x="136" y="54" width="38" height="34" rx="7" fill="url(#cbs-win)"/>
-<circle cx="101" cy="76" r="10" fill="#16181d"/><circle cx="155" cy="76" r="10" fill="#16181d"/><circle cx="104" cy="74" r="3.5" fill="#f4f1fb"/><circle cx="158" cy="74" r="3.5" fill="#f4f1fb"/><path d="M82 54 H120 V66 Q101 72 82 62 Z" fill="#7148e0"/><path d="M136 54 H174 V62 Q155 72 136 66 Z" fill="#7148e0"/>
-<rect x="88" y="124" width="80" height="84" rx="8" fill="#4b2fa8"/><g fill="none" stroke="#f4f1fb" stroke-width="7" stroke-linecap="round"><path d="M110 192 V142"/><path d="M148 152 C148 176 110 168 110 184"/></g><circle cx="110" cy="192" r="9" fill="#4f9dff" stroke="#f4f1fb" stroke-width="3"/><circle cx="110" cy="140" r="9" fill="#4f9dff" stroke="#f4f1fb" stroke-width="3"/><circle cx="148" cy="148" r="9" fill="#e0659a" stroke="#f4f1fb" stroke-width="3"/>
-<rect x="194" y="128" width="18" height="22" rx="5" fill="#e0659a" stroke="#f4f1fb" stroke-width="2.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="62 66 900 900" width="1024" height="1024">
+<!-- Caboose, simplified for 48 px and below: two branches, thicker strokes, viewBox cropped so it fills the canvas. Transparent background. -->
+<path d="M400 440 C 320 380, 220 320, 196 190" fill="none" stroke="#1B2440" stroke-width="130" stroke-linecap="round"/>
+<circle cx="196" cy="190" r="114" fill="#1B2440"/>
+<path d="M624 440 C 704 380, 804 320, 828 190" fill="none" stroke="#1B2440" stroke-width="130" stroke-linecap="round"/>
+<circle cx="828" cy="190" r="114" fill="#1B2440"/>
+<path d="M400 440 C 320 380, 220 320, 196 190" fill="none" stroke="#FF8A1F" stroke-width="70" stroke-linecap="round"/>
+<circle cx="196" cy="190" r="84" fill="#FF8A1F"/>
+<path d="M624 440 C 704 380, 804 320, 828 190" fill="none" stroke="#2EC5F0" stroke-width="70" stroke-linecap="round"/>
+<circle cx="828" cy="190" r="84" fill="#2EC5F0"/>
+<g transform="translate(512 600) scale(0.92) translate(-512 -560)">
+<rect x="400" y="196" width="60" height="70" rx="14" fill="#1B2440"/>
+<rect x="352" y="262" width="320" height="150" rx="24" fill="#E8352B" stroke="#1B2440" stroke-width="34"/>
+<rect x="322" y="240" width="380" height="58" rx="29" fill="#1B2440"/>
+<rect x="196" y="420" width="632" height="380" rx="44" fill="#E8352B" stroke="#1B2440" stroke-width="34"/>
+<path d="M209 690 H815 V760 a30 30 0 0 1 -30 30 H239 a30 30 0 0 1 -30 -30 Z" fill="#B8231C"/>
+<rect x="196" y="420" width="632" height="380" rx="44" fill="none" stroke="#1B2440" stroke-width="34"/>
+<rect x="160" y="384" width="704" height="72" rx="36" fill="#1B2440"/>
+<circle cx="390" cy="568" r="92" fill="#fff" stroke="#1B2440" stroke-width="30"/>
+<circle cx="418" cy="574" r="44" fill="#1B2440"/>
+<circle cx="634" cy="568" r="92" fill="#fff" stroke="#1B2440" stroke-width="30"/>
+<circle cx="662" cy="574" r="44" fill="#1B2440"/>
+<path d="M440 712 Q 512 762 592 706" fill="none" stroke="#1B2440" stroke-width="30" stroke-linecap="round"/>
+<circle cx="236" cy="476" r="30" fill="#FFD21F" stroke="#1B2440" stroke-width="12"/>
+<circle cx="788" cy="476" r="30" fill="#FFD21F" stroke="#1B2440" stroke-width="12"/>
+<rect x="170" y="790" width="684" height="66" rx="22" fill="#1B2440"/>
+<circle cx="330" cy="868" r="78" fill="#1B2440"/>
+<circle cx="330" cy="868" r="42" fill="#9AA6BC"/>
+<circle cx="330" cy="868" r="16" fill="#1B2440"/>
+<circle cx="694" cy="868" r="78" fill="#1B2440"/>
+<circle cx="694" cy="868" r="42" fill="#9AA6BC"/>
+<circle cx="694" cy="868" r="16" fill="#1B2440"/>
 </g>
 </svg>
