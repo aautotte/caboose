@@ -39,8 +39,8 @@ export const shortcutGroups: Array<{ title: string; items: Array<[string, string
       ['Search commits', 'Ctrl+F'],
       ['Filter branches', 'Ctrl+Alt+F'],
       ['Command palette', 'Ctrl+P'],
-      ['Toggle the left panel', 'Ctrl+J'],
-      ['Toggle the details panel', 'Ctrl+K'],
+      ['Collapse or expand the branches panel', 'Ctrl+J'],
+      ['Collapse or expand the details panel', 'Ctrl+K'],
       ['File history (from a diff or blame)', 'Ctrl+Shift+H'],
       ['Close the current view', 'Esc']
     ]

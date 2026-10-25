@@ -7,6 +7,7 @@ import { pushEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
+import { CollapseLeftButton, leftSectionId } from './PanelRails'
 
 function Section({
   title,
@@ -25,7 +26,7 @@ function Section({
 }): React.JSX.Element {
   const [open, setOpen] = useState(true)
   return (
-    <section className="flex flex-col">
+    <section id={leftSectionId(title)} className="flex flex-col">
       <div className="flex items-center pr-1">
         <button
           aria-expanded={open}
@@ -359,7 +360,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
 
   return (
     <nav aria-label="Branches and tags" className="flex shrink-0 flex-col overflow-hidden bg-surface" style={{ width }}>
-      <div className="p-2">
+      <div className="flex items-center gap-1 p-2">
         <TextInput
           id="left-filter"
           variant="search"
@@ -370,6 +371,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
           onChange={(e) => setFilter(e.target.value)}
           onClear={() => setFilter('')}
         />
+        <CollapseLeftButton />
       </div>
       {focusHead ? (
         <div role="status" className="mx-2 mb-2 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2 py-1 text-sm text-muted">

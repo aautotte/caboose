@@ -56,6 +56,7 @@
   --gc-detail-panel-w: 380px;
   --gc-detail-panel-min: 300px;
   --gc-detail-panel-max: 720px;
+  --gc-rail-w: 36px;
   --gc-graph-row-h: 28px;
   --gc-list-row-h: 26px;
   --gc-lane-w: 16px;

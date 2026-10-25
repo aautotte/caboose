@@ -44,12 +44,24 @@ export function Badge({ tone = 'neutral', children, label }: { tone?: Tone; chil
 
 export const TooltipProvider = RTooltip.Provider
 
-export function Tooltip({ content, shortcut, children }: { content: string; shortcut?: string; children: ReactNode }): React.JSX.Element {
+export function Tooltip({
+  content,
+  shortcut,
+  side,
+  children
+}: {
+  content: string
+  shortcut?: string
+  /** Where it opens; Radix picks above or below by default. */
+  side?: 'top' | 'right' | 'bottom' | 'left'
+  children: ReactNode
+}): React.JSX.Element {
   return (
     <RTooltip.Root>
       <RTooltip.Trigger asChild>{children}</RTooltip.Trigger>
       <RTooltip.Portal>
         <RTooltip.Content
+          side={side}
           sideOffset={6}
           className="z-(--gc-z-tooltip) flex max-w-80 items-center gap-2 rounded-sm border border-border bg-surface-raised px-2 py-1 text-sm text-text shadow-pop"
         >

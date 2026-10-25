@@ -6,6 +6,7 @@ import { call } from '@/lib/api'
 import { fullDate, plural, shortSha } from '@/lib/format'
 import { patchRepo, useRepo } from '@/store'
 import * as act from '@/actions'
+import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList } from './FileList'
 import { toStatus } from './FileList'
 
@@ -81,6 +82,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+        <CollapseDetailsButton />
         <h2 className="flex-1 text-md text-text">{stash ? 'Stash' : d.parents.length > 1 ? 'Merge commit' : 'Commit'}</h2>
         <span className="font-mono text-xs text-muted">{shortSha(d.sha)}</span>
         <Tooltip content="Copy full SHA">
