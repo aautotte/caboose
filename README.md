@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="resources/icon.png" width="112" alt="Caboose's icon: a friendly red caboose looking at a fork in the rails">
+  <img src="resources/icon.png" width="112" alt="Caboose's icon: a friendly purple caboose glancing at a fork in the rails">
 </p>
 
 <h1 align="center">Caboose</h1>
