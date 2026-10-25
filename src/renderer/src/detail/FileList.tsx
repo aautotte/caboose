@@ -8,6 +8,8 @@ export interface FileItem {
   path: string
   origPath?: string
   status: FileStatus
+  /** Stored in Git LFS. */
+  lfs?: boolean
 }
 
 const letterToStatus: Record<string, FileStatus> = {
@@ -118,6 +120,11 @@ function Row({ f, tree, selected, onOpen, rowAction, menu, onKey }: { f: FileIte
           <span className="truncate text-text">{name}</span>
           {!tree && dir ? <span className="truncate text-sm text-muted">{dir}</span> : null}
         </span>
+        {f.lfs ? (
+          <span title="Stored in Git LFS" className="shrink-0 rounded-sm border border-border px-1 font-mono text-xs text-muted">
+            LFS
+          </span>
+        ) : null}
         {rowAction ? (
           // A list option can't contain a button, so this is a mouse shortcut. Keyboard: S / U on the row, or its menu.
           <span

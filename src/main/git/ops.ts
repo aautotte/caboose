@@ -138,6 +138,22 @@ export class RepoOps {
     return { uses, installed, on }
   }
 
+  /**
+   * The paths .gitattributes sends through Git LFS: the working copy's attributes, or a commit's (`source`).
+   * Plain git reads the attributes, so this works whether or not git-lfs is installed.
+   */
+  async lfsPaths(paths: string[], source?: string): Promise<Set<string>> {
+    const found = new Set<string>()
+    if (!paths.length) return found
+    const out = await this.tryGit(['check-attr', '-z', '--stdin', ...(source ? [`--source=${this.safeRev(source)}`] : []), 'filter'], {
+      stdin: paths.join('\0') + '\0'
+    })
+    // -z: path NUL attribute NUL value NUL, for each path.
+    const parts = (out ?? '').split('\0')
+    for (let i = 0; i + 2 < parts.length; i += 3) if (parts[i + 2] === 'lfs') found.add(parts[i])
+    return found
+  }
+
   /** `git lfs install` (git's global config, and this repository's hooks), then the large files' content in place of their pointers. */
   async lfsTurnOn(opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
     await this.mut(['lfs', 'install'], { opId })
@@ -243,7 +259,9 @@ export class RepoOps {
       this.git(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all']),
       this.opState()
     ])
-    return { ...parseStatus(out), op }
+    const s = parseStatus(out)
+    const lfs = await this.lfsPaths(s.changes.map((c) => c.path))
+    return { ...s, changes: lfs.size ? s.changes.map((c) => (lfs.has(c.path) ? { ...c, lfs: true } : c)) : s.changes, op }
   }
 
   async details(sha: string): Promise<CommitDetails> {
@@ -257,6 +275,8 @@ export class RepoOps {
     const filesOut = parentList.length
       ? await this.git(['diff-tree', '-r', '-M', '-z', '--name-status', '--no-commit-id', parentList[0], full])
       : await this.git(['diff-tree', '-r', '-M', '-z', '--name-status', '--no-commit-id', '--root', full])
+    const files = parseNameStatus(filesOut)
+    const lfs = await this.lfsPaths(files.map((f) => f.path), full)
     return {
       sha: full,
       parents: parentList,
@@ -265,7 +285,7 @@ export class RepoOps {
       summary,
       body: rest.join('\n').trim(),
       coAuthors: parseCoAuthors(message),
-      files: parseNameStatus(filesOut),
+      files: lfs.size ? files.map((f) => (lfs.has(f.path) ? { ...f, lfs: true } : f)) : files,
       isHead: full === head,
       signature: parseSignature(sig, signer, sigKey)
     }

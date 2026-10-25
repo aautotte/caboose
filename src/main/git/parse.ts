@@ -1,5 +1,5 @@
 // Pure parsers for git's machine-readable output. No I/O here, so they can be unit tested.
-import type { Blame, BlameCommit, BlameLine, Change, CommitRow, DiffLine, FileChange, FileDiff, FileHistoryEntry, Hunk, Person, Ref, StatusCode, Stash } from '../../shared/types'
+import type { Blame, BlameCommit, BlameLine, Change, CommitRow, DiffLine, FileChange, FileDiff, FileHistoryEntry, Hunk, LfsPointer, Person, Ref, StatusCode, Stash } from '../../shared/types'
 
 export const US = '\x1f' // unit separator between fields
 export const RS = '\x1e' // record separator between commits
@@ -214,7 +214,26 @@ export function parseDiff(text: string, path: string): FileDiff {
       diff.lineCount++
     }
   }
+  const lfs = lfsPointers(diff.hunks)
+  if (lfs) diff.lfs = lfs
   return diff
+}
+
+const POINTER_LINE = /^(version https:\/\/git-lfs\.github\.com\/spec\/v1|oid sha256:[0-9a-f]{64}|size \d+|ext-\d+-\w+ \S+)$/
+
+/** When every line of the diff belongs to an LFS pointer file: the pointer on each side (null where there's no file). */
+export function lfsPointers(hunks: Hunk[]): FileDiff['lfs'] | null {
+  const lines = hunks.flatMap((h) => h.lines)
+  if (!lines.length || !lines.every((l) => POINTER_LINE.test(l.text))) return null
+  const side = (keep: DiffLine['type']): LfsPointer | null => {
+    const mine = lines.filter((l) => l.type === 'ctx' || l.type === keep)
+    const oid = mine.map((l) => /^oid sha256:([0-9a-f]{64})$/.exec(l.text)?.[1]).find(Boolean)
+    const size = mine.map((l) => /^size (\d+)$/.exec(l.text)?.[1]).find(Boolean)
+    return oid && size ? { oid, size: Number(size) } : null
+  }
+  const old = side('del')
+  const now = side('add')
+  return old || now ? { old, new: now } : null
 }
 
 export const HISTORY_FORMAT = '%x1e' + ['%H', '%P', '%an', '%ae', '%at', '%s'].join('%x1f')

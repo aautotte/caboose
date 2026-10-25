@@ -172,7 +172,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
       <div className="min-h-0 flex-1 overflow-y-auto">
         <FileList
           title={d.parents.length > 1 ? `Changed vs first parent` : 'Changed files'}
-          files={d.files.map((f) => ({ path: f.path, origPath: f.origPath, status: toStatus(f.status) }))}
+          files={d.files.map((f) => ({ path: f.path, origPath: f.origPath, status: toStatus(f.status), lfs: f.lfs }))}
           selected={openPath}
           onOpen={(f) => act.openDiff(repoId, f.path, { kind: 'commit', sha: d.sha, parent: d.parents[0] }, f.origPath)}
           menu={(f) => [

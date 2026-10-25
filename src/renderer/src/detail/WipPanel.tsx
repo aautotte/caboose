@@ -36,11 +36,11 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
 
   const changes = status?.changes ?? []
   const conflicted = changes.filter((c) => c.conflicted)
-  const staged: FileItem[] = changes.filter((c) => !c.conflicted && c.index !== '.' && c.index !== '?').map((c) => ({ path: c.path, origPath: c.origPath, status: toStatus(c.index) }))
+  const staged: FileItem[] = changes.filter((c) => !c.conflicted && c.index !== '.' && c.index !== '?').map((c) => ({ path: c.path, origPath: c.origPath, status: toStatus(c.index), lfs: c.lfs }))
   const showUntracked = useApp((s) => s.prefs.showUntracked)
   const allUnstaged: FileItem[] = changes
     .filter((c) => c.conflicted || (c.worktree !== '.'))
-    .map((c) => ({ path: c.path, origPath: c.origPath, status: c.conflicted ? 'conflicted' : toStatus(c.worktree) }))
+    .map((c) => ({ path: c.path, origPath: c.origPath, status: c.conflicted ? 'conflicted' : toStatus(c.worktree), lfs: c.lfs }))
   const unstaged = showUntracked ? allUnstaged : allUnstaged.filter((f) => f.status !== 'untracked')
   const hiddenUntracked = allUnstaged.length - unstaged.length
   const op = status?.op
