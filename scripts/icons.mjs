@@ -1,6 +1,7 @@
 // Renders the app icons with Electron's own Chromium, on a transparent canvas (no background anywhere):
-//   resources/icon.svg        main master: icon-1024.png, icon.png, and 48 px and up in the .ico and the Linux set
-//   resources/icon-small.svg  simplified close-up: 32 px and below in the .ico and the Linux set
+//   resources/icon.svg        main master: icon-1024.png, icon.png, and 64 px and up in the .ico and the Linux set
+//   resources/icon-small.svg  close-up filling the canvas: 48 px and below in the .ico and the Linux set (at 125 to
+//                             150% scaling the Windows taskbar uses the 40 and 48 px entries)
 //   resources/icon-macos.svg  the same artwork on Apple's rounded tile: every size in icon.icns, and nothing else
 // Each size is drawn from its SVG at that size, so small ones stay crisp. Run: npm run icons
 import { app, BrowserWindow, nativeImage } from 'electron'
@@ -78,7 +79,7 @@ const ICNS_TYPES = [
   ['icp4', 16], ['icp5', 32], ['ic11', 32], ['ic12', 64], ['ic07', 128],
   ['ic13', 256], ['ic08', 256], ['ic14', 512], ['ic09', 512], ['ic10', 1024]
 ]
-const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
+const ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 256]
 const LINUX_SIZES = [16, 24, 32, 48, 64, 128, 256, 512]
 
 // Each render closes its window; without this, closing the first one would quit before the next.
@@ -87,8 +88,8 @@ app.on('window-all-closed', () => {})
 app.whenReady().then(async () => {
   try {
     const cache = new Map()
-    /** PNG bytes for one size: the small master up to 32 px, the main one from 48 px (or the given master). */
-    const png = async (size, master = size <= 32 ? 'icon-small.svg' : 'icon.svg') => {
+    /** PNG bytes for one size: the close-up up to 48 px, the main master from 64 px (or the given master). */
+    const png = async (size, master = size <= 48 ? 'icon-small.svg' : 'icon.svg') => {
       const key = `${master}@${size}`
       if (!cache.has(key)) cache.set(key, (await render(master, size)).toPNG())
       return cache.get(key)

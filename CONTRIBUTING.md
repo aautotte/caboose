@@ -53,8 +53,8 @@ npm run e2e
 ## The icon
 
 A friendly purple caboose whose cupola windows are its eyes, on rails that fork into commit dots, in the colours of
-`design/tokens.json`, on a transparent background. `resources/icon.svg` is the master for 48 px and up,
-`icon-small.svg` a simplified close-up for 32 px and below, and `icon-macos.svg` the same artwork on Apple's rounded
+`design/tokens.json`, on a transparent background. `resources/icon.svg` is the master for 64 px and up,
+`icon-small.svg` a close-up that fills the canvas for 48 px and below (the Windows taskbar's sizes), and `icon-macos.svg` the same artwork on Apple's rounded
 tile, used only for the macOS `.icns`. After editing any of them, run
 `npm run icons` to regenerate the PNG, ICO and ICNS files.
 
