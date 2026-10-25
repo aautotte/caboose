@@ -86,9 +86,16 @@ test('discarding lines can be undone', async () => {
   await diffRow('README.md', 'npm install -g skycast').getByTitle(/Pick this line/).click()
   await page.getByRole('button', { name: 'Discard 1 line' }).click()
   await dialog().getByRole('button', { name: 'Discard' }).click()
-  const readme = (): string => readFileSync(join(demo, 'README.md'), 'utf8')
-  await expect.poll(readme).not.toContain('npm install -g skycast')
-  expect(readme()).toContain('## Install')
+  // Git rewrites the file by removing and recreating it, so for a moment it may not be there.
+  const readme = (): string => {
+    try {
+      return readFileSync(join(demo, 'README.md'), 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  // The picked line goes, the rest of the file stays.
+  await expect.poll(() => readme().includes('## Install') && !readme().includes('npm install -g skycast')).toBe(true)
   await toolbar(/^Undo: Discard 1 line/).click()
   await expect.poll(readme).toContain('npm install -g skycast')
 })
