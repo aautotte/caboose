@@ -19,6 +19,7 @@ export type UndoType =
   | 'stash_drop'
   | 'tag_delete'
   | 'remote_remove'
+  | 'ignore'
 
 /** What each undo entry needs to move the repo back (before) and forward again (after). */
 export interface Snapshot {
@@ -31,6 +32,8 @@ export interface Snapshot {
   message?: string // stash_drop: the stash's message
   mode?: ResetMode // reset
   remote?: Remote // remote_remove
+  gitignore?: string | null // ignore: the root .gitignore on this side (null: none)
+  index?: string // ignore: the index entries of the files it stopped tracking
 }
 
 interface Row {
@@ -208,6 +211,13 @@ export class UndoStack {
         const r = before.remote!
         if (dir === 'back') await ops.addRemote(r.name, r.fetchUrl, r.pushUrl)
         else await ops.removeRemote(r.name)
+        return after
+      }
+      case 'ignore': {
+        if (ops.readGitignore() !== from.gitignore) throw moved()
+        ops.writeGitignore(to.gitignore ?? null)
+        if (dir === 'back') await ops.restoreIndex(before.index ?? '')
+        else await ops.untrack(after.paths === 'all' ? [] : (after.paths ?? []))
         return after
       }
       case 'reset': {

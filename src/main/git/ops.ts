@@ -708,16 +708,67 @@ export class RepoOps {
     await this.mut(['apply', ...(reverse ? ['--reverse'] : []), '--recount', '--whitespace=nowarn', '-'], { stdin: patch })
   }
 
-  /** Adds a line to the root .gitignore, and optionally stops tracking files it now covers. */
-  async ignore(pattern: string, stopTracking: string[]): Promise<void> {
-    const p = pattern.trim()
-    if (!p || /[\r\n\0]/.test(p)) throw invalid('Enter one pattern.')
+  /** The root .gitignore, or null when there isn't one. */
+  readGitignore(): string | null {
     const file = join(this.repo.path, '.gitignore')
-    const cur = existsSync(file) ? readFileSync(file, 'utf8') : ''
-    if (cur.split(/\r?\n/).includes(p)) throw invalid(`.gitignore already has “${p}”.`)
+    return existsSync(file) ? readFileSync(file, 'utf8') : null
+  }
+
+  writeGitignore(text: string | null): void {
+    const file = join(this.repo.path, '.gitignore')
+    if (text === null) rmSync(file, { force: true })
+    else writeFileSync(file, text)
+  }
+
+  /** Tracked files that the ignore rules cover (files someone added on purpose, or that are about to stop being tracked). */
+  private async trackedIgnored(): Promise<Set<string>> {
+    return new Set((await this.git(['ls-files', '-z', '-c', '-i', '--exclude-standard'])).split('\0').filter(Boolean))
+  }
+
+  /** Stops tracking these files (they stay on disk), whatever is staged for them. */
+  async untrack(paths: string[]): Promise<void> {
+    if (!paths.length) return
+    const spec = this.safePaths(paths).map((p) => `:(literal)${p}\0`).join('')
+    await this.mut(['rm', '--cached', '-f', '-q', '--ignore-unmatch', '--pathspec-from-file=-', '--pathspec-file-nul'], { stdin: spec })
+  }
+
+  /** Index entries for these paths, as `git update-index --index-info` reads them back. */
+  async indexEntries(paths: string[]): Promise<string> {
+    const want = new Set(paths)
+    return (await this.git(['ls-files', '-z', '-s']))
+      .split('\0')
+      .filter((e) => want.has(e.slice(e.indexOf('\t') + 1)))
+      .map((e) => `${e}\0`)
+      .join('')
+  }
+
+  /** Puts back index entries saved by indexEntries, skipping any path that's tracked again. */
+  async restoreIndex(entries: string): Promise<void> {
+    const tracked = new Set((await this.git(['ls-files', '-z'])).split('\0'))
+    const back = entries.split('\0').filter((e) => e && !tracked.has(e.slice(e.indexOf('\t') + 1)))
+    if (back.length) await this.mut(['update-index', '-z', '--index-info'], { stdin: back.map((e) => `${e}\0`).join('') })
+  }
+
+  /**
+   * Adds lines to the root .gitignore, then stops tracking the tracked files they now cover: without that,
+   * .gitignore doesn't apply to them. Returns what an undo needs to put both back.
+   */
+  async ignore(patterns: string[]): Promise<{ before: string | null; after: string; untracked: string[]; index: string }> {
+    const lines = patterns.map((p) => p.trim())
+    if (!lines.length || lines.some((p) => !p || /[\r\n\0]/.test(p))) throw invalid('Enter one pattern per line.')
+    const before = this.readGitignore()
+    const cur = before ?? ''
+    const have = new Set(cur.split(/\r?\n/))
+    const add = [...new Set(lines)].filter((p) => !have.has(p))
+    if (!add.length) throw invalid(lines.length === 1 ? `.gitignore already has “${lines[0]}”.` : '.gitignore already has those lines.')
     const eol = cur.includes('\r\n') ? '\r\n' : '\n'
-    writeFileSync(file, cur + (cur && !cur.endsWith('\n') ? eol : '') + p + eol)
-    if (stopTracking.length) await this.mut(['rm', '--cached', '-r', '-q', '--ignore-unmatch', '--', ...this.safePaths(stopTracking)])
+    const after = cur + (cur && !cur.endsWith('\n') ? eol : '') + add.map((p) => p + eol).join('')
+    const already = await this.trackedIgnored()
+    this.writeGitignore(after)
+    const untracked = [...(await this.trackedIgnored())].filter((p) => !already.has(p))
+    const index = await this.indexEntries(untracked)
+    await this.untrack(untracked)
+    return { before, after, untracked, index }
   }
 
   // ---------- stash ----------

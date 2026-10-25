@@ -74,7 +74,6 @@ export type Dialog =
   | { kind: 'createTag'; repoId: string; at: string; atLabel: string }
   | { kind: 'addRemote'; repoId: string }
   | { kind: 'reset'; repoId: string; target: string; targetLabel: string }
-  | { kind: 'ignore'; repoId: string; path: string; tracked: boolean }
   | { kind: 'upstream'; repoId: string; branch: string }
   | { kind: 'renameStash'; repoId: string; sha: string; message: string }
   | { kind: 'groupName'; mode: 'create' | 'rename'; name: string; groupId?: string; repoId?: string }

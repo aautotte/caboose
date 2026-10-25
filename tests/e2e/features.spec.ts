@@ -117,8 +117,8 @@ test('stash with a name, then pop it', async () => {
 
 test('ignore a new file', async () => {
   await page.getByRole('row', { name: /Uncommitted changes/ }).click()
-  await menu(page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /wind\.js/ }), 'Ignore…')
-  await dialog().getByRole('button', { name: 'Add to .gitignore' }).click()
+  await menu(page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /wind\.js/ }), 'Ignore')
+  await page.getByRole('menu').last().getByRole('menuitem', { name: 'This file (wind.js)' }).press('Enter')
   await expect.poll(() => readFileSync(join(demo, '.gitignore'), 'utf8')).toContain('/src/wind.js')
   expect(git('status', '--porcelain')).not.toContain('wind.js')
 })

@@ -2,6 +2,7 @@
 import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
+import type { IgnoreChoice } from './lib/ignore'
 import { layoutInWorker } from './graph/layoutClient'
 import { toast } from './ui/toastBus'
 import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog } from './store'
@@ -752,11 +753,20 @@ export async function applyPatch(
   return ok !== undefined
 }
 
-export async function ignore(repoId: string, pattern: string, stopTracking: string[]): Promise<boolean> {
-  const ok = await attempt(() => call('ignore.add', { repoId, pattern, stopTracking }), 'Couldn’t update .gitignore')
-  if (ok !== undefined) toast({ tone: 'success', title: `Ignoring ${pattern}`, body: stopTracking.length ? 'Git stopped tracking the matching files. Commit to record that.' : undefined })
+/** Adds lines to the root .gitignore; tracked files they cover stop being tracked and stay on disk. Undoable. */
+export async function ignore(repoId: string, choice: IgnoreChoice): Promise<boolean> {
+  const res = await attempt(() => call('ignore.add', { repoId, patterns: choice.patterns, label: choice.what }), 'Couldn’t update .gitignore')
+  if (res) {
+    toast({
+      tone: 'success',
+      title: `Ignoring ${choice.what}`,
+      body: res.untracked
+        ? `Git stopped tracking ${plural(res.untracked, 'file')}; ${res.untracked === 1 ? 'it stays' : 'they stay'} on disk. Commit to record it.`
+        : 'Commit .gitignore to share it.'
+    })
+  }
   await loadStatus(repoId)
-  return ok !== undefined
+  return res !== undefined
 }
 
 // ---------- stash ----------

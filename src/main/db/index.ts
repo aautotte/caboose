@@ -5,9 +5,10 @@ import { dirname } from 'node:path'
 import init001 from './001_init.sql?raw'
 import undoTypes002 from './002_undo_types.sql?raw'
 import profileKeys003 from './003_profile_keys.sql?raw'
+import undoIgnore004 from './004_undo_ignore.sql?raw'
 
 // Migrations run in order; each one ends by setting PRAGMA user_version to its number.
-const migrations: string[] = [init001, undoTypes002, profileKeys003]
+const migrations: string[] = [init001, undoTypes002, profileKeys003, undoIgnore004]
 
 export type Db = DatabaseSync
 

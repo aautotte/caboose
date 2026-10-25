@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { commitRow, demo, dialog, gitIn, grid, launch, makeRepo, menu, openWip, seed, toGraph, writeAndCommit, type Harness } from './harness'
+import { commitRow, demo, dialog, gitIn, grid, launch, makeRepo, menu, openWip, seed, subMenu, toGraph, writeAndCommit, type Harness } from './harness'
 
 let h: Harness
 let big = ''
@@ -224,10 +224,8 @@ test('F21-E3 set a branch’s upstream', async () => {
 test('F22-E2 ignore a tracked file and stop tracking it (the file stays on disk)', async () => {
   writeFileSync(join(demo, 'README.md'), readFileSync(join(demo, 'README.md'), 'utf8') + '\nLocal notes.\n')
   await openWip(h.page)
-  await menu(h.page, h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /README\.md/ }), 'Ignore…')
-  await dialog(h.page).getByRole('button', { name: 'Add to .gitignore' }).click()
+  await subMenu(h.page, h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /README\.md/ }), 'Ignore', 'This file (README.md)')
   await expect.poll(() => readFileSync(join(demo, '.gitignore'), 'utf8')).toContain('/README.md')
-  // .gitignore is written first; untracking follows a moment later.
   await expect.poll(h.gitOr(demo, 'ls-files', '--', 'README.md')).toBe('')
   expect(existsSync(join(demo, 'README.md'))).toBe(true)
 })
@@ -235,10 +233,7 @@ test('F22-E2 ignore a tracked file and stop tracking it (the file stays on disk)
 test('F22-E3 ignore every file with an extension', async () => {
   writeFileSync(join(demo, 'debug.log'), 'noise\n')
   await openWip(h.page)
-  await menu(h.page, h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /debug\.log/ }), 'Ignore…')
-  await dialog(h.page).getByRole('combobox', { name: 'What to ignore' }).click()
-  await h.page.getByRole('option', { name: 'All .log files' }).click()
-  await dialog(h.page).getByRole('button', { name: 'Add to .gitignore' }).click()
+  await subMenu(h.page, h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /debug\.log/ }), 'Ignore', 'All *.log files')
   await expect.poll(() => readFileSync(join(demo, '.gitignore'), 'utf8')).toContain('*.log')
   expect(h.git(demo, 'status', '--porcelain')).not.toContain('debug.log')
 })

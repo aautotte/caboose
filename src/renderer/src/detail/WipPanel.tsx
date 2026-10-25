@@ -6,6 +6,7 @@ import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { plural, splitPath } from '@/lib/format'
 import { extensionRule, ruleFor } from '@/lib/lfs'
+import { ignoreChoices } from '@/lib/ignore'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
@@ -131,7 +132,35 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     }
   }
 
-  const fileMenu = (f: FileItem, side: 'staged' | 'unstaged'): MenuEntry[] => [
+  // Ignore › this file (or these files) / all files of their kind / a folder that holds them all.
+  const ignoreMenu = (files: FileItem[]): MenuEntry => ({
+    type: 'sub',
+    label: 'Ignore',
+    icon: <EyeOff size={14} />,
+    items: files.some((f) => f.status === 'conflicted')
+      ? [{ type: 'item', label: 'Resolve the conflict first', disabled: true }]
+      : ignoreChoices(files.map((f) => f.path)).map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c) }))
+  })
+
+  // Several files picked: only what makes sense for all of them at once.
+  const manyMenu = (files: FileItem[], side: 'staged' | 'unstaged'): MenuEntry[] => {
+    const paths = files.map((f) => f.path)
+    const n = plural(files.length, 'file')
+    return [
+      side === 'unstaged'
+        ? { type: 'item', label: `Stage ${n}`, onSelect: () => void act.stage(repoId, paths) }
+        : { type: 'item', label: `Unstage ${n}`, onSelect: () => void act.unstage(repoId, paths) },
+      { type: 'item', label: 'Copy paths', onSelect: () => void navigator.clipboard.writeText(paths.join('\n')) },
+      { type: 'separator' },
+      ignoreMenu(files),
+      { type: 'separator' },
+      { type: 'item', label: `Discard changes to ${n}…`, danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, paths) }
+    ]
+  }
+
+  const fileMenu = (f: FileItem, side: 'staged' | 'unstaged', picked: FileItem[]): MenuEntry[] => (picked.length > 1 ? manyMenu(picked, side) : oneMenu(f, side))
+
+  const oneMenu = (f: FileItem, side: 'staged' | 'unstaged'): MenuEntry[] => [
     side === 'unstaged'
       ? { type: 'item' as const, label: 'Stage', onSelect: () => void act.stage(repoId, [f.path]) }
       : { type: 'item' as const, label: 'Unstage', onSelect: () => void act.unstage(repoId, [f.path]) },
@@ -151,13 +180,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     { type: 'separator' as const },
     { type: 'item' as const, label: 'File history', icon: <History size={14} />, disabled: f.status === 'untracked' || f.status === 'added', onSelect: () => act.setCenter(repoId, { kind: 'history', path: f.path }) },
     { type: 'item' as const, label: 'Blame', icon: <UserSearch size={14} />, disabled: f.status === 'untracked' || f.status === 'added' || f.status === 'deleted', onSelect: () => act.setCenter(repoId, { kind: 'blame', path: f.path, rev: null }) },
-    {
-      type: 'item' as const,
-      label: 'Ignore…',
-      icon: <EyeOff size={14} />,
-      disabled: f.status === 'conflicted',
-      onSelect: () => act.openDialog({ kind: 'ignore', repoId, path: f.path, tracked: f.status !== 'untracked' })
-    },
+    ignoreMenu([f]),
     lfsMenu(f),
     { type: 'separator' as const },
     { type: 'item' as const, label: 'Discard changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, [f.path]) }
@@ -243,11 +266,12 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
               ) : null
             }
             rowAction={{ label: 'Stage', onClick: (f) => (f.status === 'conflicted' ? open(f, 'worktree') : void act.stage(repoId, [f.path])) }}
-            menu={(f) => fileMenu(f, 'unstaged')}
+            menu={(f, picked) => fileMenu(f, 'unstaged', picked)}
+            multi
             emptyText="Everything is staged."
-            onKey={(e, f) => {
-              if (e.key === 's') void act.stage(repoId, [f.path])
-              if (e.key === 'Delete') act.discard(repoId, [f.path])
+            onKey={(e, _f, picked) => {
+              if (e.key === 's') void act.stage(repoId, picked.map((p) => p.path))
+              if (e.key === 'Delete') act.discard(repoId, picked.map((p) => p.path))
             }}
           />
           <FileList
@@ -257,9 +281,10 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             onOpen={(f) => open(f, 'index')}
             bulk={{ label: 'Unstage all', onClick: () => void act.unstage(repoId, 'all') }}
             rowAction={{ label: 'Unstage', onClick: (f) => void act.unstage(repoId, [f.path]) }}
-            menu={(f) => fileMenu(f, 'staged')}
+            menu={(f, picked) => fileMenu(f, 'staged', picked)}
+            multi
             emptyText="Stage files to include them in the next commit."
-            onKey={(e, f) => e.key === 'u' && void act.unstage(repoId, [f.path])}
+            onKey={(e, _f, picked) => e.key === 'u' && void act.unstage(repoId, picked.map((p) => p.path))}
           />
         </div>
       )}
