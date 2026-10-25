@@ -16,6 +16,7 @@ function lfsChange({ old, new: now }: NonNullable<FileDiff['lfs']>): string {
 import { setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { highlightLine, languageFor } from './highlight'
+import { SubmoduleDiff } from './SubmoduleDiff'
 
 function sourceLabel(s: DiffSource): string {
   if (s.kind === 'worktree') return 'Not staged'
@@ -233,6 +234,8 @@ export function DiffView({
               <div key={i} className="h-3 rounded-sm bg-surface-raised" style={{ width: `${25 + ((i * 41) % 60)}%` }} />
             ))}
           </div>
+        ) : diff.submodule ? (
+          <SubmoduleDiff repoId={repoId} path={path} change={diff.submodule} source={source} />
         ) : diff.lfs ? (
           <EmptyState icon={HardDrive} title="Stored in Git LFS" body={lfsChange(diff.lfs)} />
         ) : diff.binary ? (

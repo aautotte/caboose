@@ -10,6 +10,8 @@ export interface FileItem {
   status: FileStatus
   /** Stored in Git LFS. */
   lfs?: boolean
+  /** A submodule, not a file. */
+  submodule?: boolean
 }
 
 const letterToStatus: Record<string, FileStatus> = {
@@ -206,6 +208,11 @@ function Row({
           <span className="truncate text-text">{name}</span>
           {!tree && dir ? <span className="truncate text-sm text-muted">{dir}</span> : null}
         </span>
+        {f.submodule ? (
+          <span title="A submodule: its diff shows the commits it moves by" className="shrink-0 rounded-sm border border-border px-1 text-xs text-muted">
+            submodule
+          </span>
+        ) : null}
         {f.lfs ? (
           <span title="Stored in Git LFS" className="shrink-0 rounded-sm border border-border px-1 font-mono text-xs text-muted">
             LFS

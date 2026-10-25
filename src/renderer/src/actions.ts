@@ -586,10 +586,33 @@ export function discard(repoId: string, paths: string[] | 'all'): void {
   })
 }
 
-export async function commit(
-  repoId: string,
-  input: { summary: string; body: string; amend: boolean; noVerify: boolean; push: boolean; messageOnly?: boolean }
-): Promise<boolean> {
+type CommitInput = { summary: string; body: string; amend: boolean; noVerify: boolean; push: boolean; messageOnly?: boolean }
+
+/**
+ * Commits, but first asks when a staged submodule pointer would move back: the usual way a teammate's update gets
+ * undone (the submodule wasn't updated after a pull, and staging everything picked up its old commit).
+ */
+export async function commit(repoId: string, input: CommitInput): Promise<boolean> {
+  const r = useApp.getState().repos[repoId]
+  if (!input.messageOnly && r?.submodules?.list.length) {
+    const back = await call('submodule.goingBack', { repoId }).catch(() => [])
+    if (back.length) {
+      const what = back.map((b) => `${b.path} back ${plural(b.behind, 'commit')}`).join(', ')
+      confirm({
+        title: back.length === 1 ? `Move ${back[0].path} back?` : `Move ${plural(back.length, 'submodule')} back?`,
+        body: `This commit moves ${what}. That usually means the submodule wasn’t updated after a pull or a branch switch, and committing would undo someone’s update. To keep their update, cancel, unstage the submodule, and use “Update to the expected commit” from the Submodules list.`,
+        confirmLabel: 'Commit anyway',
+        danger: true,
+        undoable: true,
+        onConfirm: () => void runCommit(repoId, input)
+      })
+      return false
+    }
+  }
+  return runCommit(repoId, input)
+}
+
+async function runCommit(repoId: string, input: CommitInput): Promise<boolean> {
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, commit: 'Committing' } }))
   try {
     await call('commit.create', { repoId, summary: input.summary, body: input.body, amend: input.amend, noVerify: input.noVerify, messageOnly: input.messageOnly })

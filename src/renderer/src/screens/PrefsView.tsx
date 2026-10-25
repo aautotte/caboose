@@ -230,6 +230,9 @@ function SubmoduleGroup({ repoId }: { repoId: string }): React.JSX.Element | nul
           <Row label="Include nested submodules" help="Setting up or updating a submodule does the same for the submodules inside it.">
             <Switch hideLabel label="Include nested submodules" checked={st.nested} onCheckedChange={(v) => set({ nested: v })} />
           </Row>
+          <Row label="Warn about pointers moving back" help="Asks before a commit that moves a submodule to an older commit, which usually undoes someone’s update after a pull.">
+            <Switch hideLabel label="Warn about pointers moving back" checked={st.warnBack} onCheckedChange={(v) => set({ warnBack: v })} />
+          </Row>
           <Row label="At once" help="How many submodules are set up or updated at the same time (git’s submodule.fetchJobs).">
             <Select label="At once" value={String(st.jobs)} onValueChange={(v) => set({ jobs: Number(v) })} options={[1, 2, 4, 8, 16].map((n) => ({ value: String(n), label: String(n) }))} />
           </Row>

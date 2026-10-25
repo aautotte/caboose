@@ -223,6 +223,18 @@ export function parseDiff(text: string, path: string): FileDiff {
   return diff
 }
 
+const SUBPROJECT = /^Subproject commit ([0-9a-f]{40,64})(-dirty)?$/
+
+/** When the diff is a submodule's pointer (`--submodule=short`): the commit on each side, and whether it has changes inside. */
+export function submodulePointers(hunks: Hunk[]): { old: string | null; new: string | null; dirty: boolean } | null {
+  const lines = hunks.flatMap((h) => h.lines)
+  if (!lines.length || !lines.every((l) => SUBPROJECT.test(l.text))) return null
+  const side = (keep: DiffLine['type']): RegExpExecArray | null => lines.filter((l) => l.type === 'ctx' || l.type === keep).map((l) => SUBPROJECT.exec(l.text))[0] ?? null
+  const old = side('del')
+  const now = side('add')
+  return { old: old?.[1] ?? null, new: now?.[1] ?? null, dirty: !!now?.[2] }
+}
+
 const POINTER_LINE = /^(version https:\/\/git-lfs\.github\.com\/spec\/v1|oid sha256:[0-9a-f]{64}|size \d+|ext-\d+-\w+ \S+)$/
 
 /** When every line of the diff belongs to an LFS pointer file: the pointer on each side (null where there's no file). */
