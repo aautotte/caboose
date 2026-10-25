@@ -170,6 +170,25 @@ export interface FileDiff {
   hunks: Hunk[]
   /** Set when what changed is only an LFS pointer: the content lives in LFS, so the lines say nothing. null on the side with no file. */
   lfs?: { old: LfsPointer | null; new: LfsPointer | null }
+  /** Set when the path is a submodule: which commit it pointed at and points at now, and what lies between. */
+  submodule?: SubmoduleChange
+}
+
+/** A submodule's pointer moving, read in the submodule's own history when it's set up here. */
+export interface SubmoduleChange {
+  old: string | null
+  new: string | null
+  /** The submodule has changes inside that aren't committed there. */
+  dirty: boolean
+  /** forward: new is ahead of old; back: new is behind it (moving the pointer back); diverged: both have commits the other hasn't. */
+  direction: 'forward' | 'back' | 'diverged' | 'same' | 'added' | 'removed' | 'unknown'
+  /** Commits new has that old hasn't, and the other way round. */
+  ahead: number
+  behind: number
+  /** The commits in between, newest first, at most 50: what new adds, or for "back" what it takes away. */
+  commits: Array<{ sha: string; summary: string; author: string }>
+  /** Why the direction is unknown. */
+  reason?: 'not set up' | 'missing commits'
 }
 
 export interface LfsPointer {
@@ -227,6 +246,8 @@ export interface SubmoduleSettings {
   nested: boolean
   /** How many at once (git's submodule.fetchJobs). */
   jobs: number
+  /** Ask before a commit that moves a submodule's pointer back. */
+  warnBack: boolean
 }
 
 /** Git LFS in one repository, as the system git sees it. */

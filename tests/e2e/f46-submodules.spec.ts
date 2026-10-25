@@ -4,7 +4,7 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { dialog, gitIn, launch, makeRepo, seed, type Harness } from './harness'
+import { commitRow, dialog, gitIn, launch, makeRepo, openWip, seed, writeAndCommit, type Harness } from './harness'
 
 let h: Harness
 const parent = join(seed, 'subs-parent')
@@ -130,4 +130,78 @@ test('F46-H7: Settings: handling off hides the section; on brings it back; At on
 test('F46-H8: double-click opens a submodule in its own tab', async () => {
   await row('one').dblclick()
   await expect(h.page.getByRole('tab', { name: 'one', exact: true })).toHaveAttribute('aria-selected', 'true')
+})
+
+// ---------- step 2: what a pointer change means ----------
+
+const notStaged = () => h.page.getByRole('listbox', { name: /Not staged/ })
+const staged = () => h.page.getByRole('listbox', { name: 'Staged', exact: true })
+const lib = (n: string): string => join(repo, 'libs', n)
+
+test('F46-H9: a submodule moved forward: its diff lists the commits it brings, in the changes and in the commit', async () => {
+  await h.page.getByRole('tab', { name: 'subs', exact: true }).click()
+  writeAndCommit(h.env, join(seed, 'sub-one'), 'Third one', { 'one.txt': 'one 3\n' })
+  writeAndCommit(h.env, join(seed, 'sub-one'), 'Fourth one', { 'one.txt': 'one 4\n' })
+  h.git(lib('one'), 'fetch', '-q')
+  h.git(lib('one'), 'checkout', '-q', 'origin/main')
+  await openWip(h.page)
+  const entry = notStaged().getByRole('option', { name: /one/ })
+  await expect(entry).toContainText('submodule')
+  await entry.click()
+  await expect(h.page.getByText('Moves forward 2 commits')).toBeVisible()
+  const brings = h.page.getByRole('region', { name: 'Commits it brings' })
+  await expect(brings.getByRole('listitem')).toHaveCount(2)
+  await expect(brings.getByRole('listitem').first()).toContainText('Fourth one')
+  await expect(h.page.getByText('Subproject commit')).toHaveCount(0)
+
+  await h.page.getByRole('button', { name: 'Stage all', exact: true }).click()
+  await h.page.getByLabel('Commit summary').fill('Move one forward')
+  await h.page.getByRole('button', { name: /^Commit 1 file$/ }).click()
+  await expect.poll(h.gitOr(repo, 'log', '-1', '--format=%s')).toBe('Move one forward')
+  await h.page.keyboard.press('Escape')
+  await commitRow(h.page, 'Move one forward').click()
+  await h.page.getByRole('listbox', { name: 'Changed files' }).getByRole('option', { name: /one/ }).click()
+  await expect(h.page.getByText('Moves forward 2 commits')).toBeVisible()
+  await expect(h.page.getByRole('region', { name: 'Commits it brings' }).getByRole('listitem').first()).toContainText('Fourth one')
+})
+
+test('F46-H10: a submodule left on an older commit: its diff warns, and Update puts it where the repository expects', async () => {
+  h.git(lib('one'), 'checkout', '-q', 'HEAD~3')
+  await openWip(h.page)
+  await notStaged().getByRole('option', { name: /one/ }).click()
+  await expect(h.page.getByText('Moves back 3 commits')).toBeVisible()
+  await expect(h.page.getByRole('alert')).toContainText('Staging this would move the pointer back')
+  await expect(h.page.getByRole('region', { name: 'Commits it takes away' }).getByRole('listitem')).toHaveCount(3)
+  await h.page.getByRole('alert').getByRole('button', { name: 'Update to the expected commit' }).click()
+  await expect.poll(() => current('one')).toBe(expected('one'))
+  await expect(notStaged().getByRole('option', { name: /one/ })).toHaveCount(0)
+})
+
+test('F46-H11: committing a pointer that moves back asks first; Cancel keeps it uncommitted, Commit anyway commits', async () => {
+  h.git(lib('one'), 'checkout', '-q', 'HEAD~3')
+  h.git(repo, 'add', 'libs/one')
+  const before = h.git(repo, 'rev-parse', 'HEAD')
+  await openWip(h.page)
+  await expect(staged().getByRole('option', { name: /one/ })).toBeVisible()
+  await h.page.getByLabel('Commit summary').fill('Oops, one goes back')
+  await h.page.getByRole('button', { name: /^Commit 1 file$/ }).click()
+  await expect(dialog(h.page)).toContainText('This commit moves libs/one back 3 commits')
+  await dialog(h.page).getByRole('button', { name: 'Cancel' }).click()
+  expect(h.git(repo, 'rev-parse', 'HEAD')).toBe(before)
+  await h.page.getByRole('button', { name: /^Commit 1 file$/ }).click()
+  await dialog(h.page).getByRole('button', { name: 'Commit anyway' }).click()
+  await expect.poll(h.gitOr(repo, 'log', '-1', '--format=%s')).toBe('Oops, one goes back')
+})
+
+test('F46-H12: with the warning turned off in Settings, the same commit goes straight through', async () => {
+  await h.page.getByRole('button', { name: 'Settings' }).click()
+  await h.page.getByRole('region', { name: 'Settings' }).getByRole('switch', { name: 'Warn about pointers moving back' }).click()
+  await h.page.getByRole('button', { name: 'Close settings' }).click()
+  h.git(lib('two'), 'checkout', '-q', 'HEAD~1')
+  h.git(repo, 'add', 'libs/two')
+  await openWip(h.page)
+  await h.page.getByLabel('Commit summary').fill('Back again, no question')
+  await h.page.getByRole('button', { name: /^Commit 1 file$/ }).click()
+  await expect.poll(h.gitOr(repo, 'log', '-1', '--format=%s')).toBe('Back again, no question')
+  await expect(dialog(h.page)).toHaveCount(0)
 })

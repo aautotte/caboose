@@ -160,7 +160,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       mode: mode === 'manual' || mode === 'working' ? mode : 'follow',
       shallow: p['submodules.shallow'] === true,
       nested: p['submodules.nested'] !== false,
-      jobs: (await ops(repoId).submoduleJobs()) ?? 4
+      jobs: (await ops(repoId).submoduleJobs()) ?? 4,
+      warnBack: p['submodules.warnBack'] !== false
     }
   }
   const subMode = z.enum(['follow', 'manual', 'working'])
@@ -169,6 +170,10 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     const settings = await subSettings(repoId)
     const list = settings.on ? await o.submodules() : []
     return { list, settings, present: list.length > 0 || (!settings.on && (await o.hasSubmodules())) }
+  })
+  handle('submodule.goingBack', z.object(R), async ({ repoId }) => {
+    const s = await subSettings(repoId)
+    return s.on && s.warnBack ? ops(repoId).submodulesGoingBack() : []
   })
   handle('submodule.setup', z.object({ ...R, paths, shallow: z.boolean().optional(), opId }), async ({ repoId, paths: which, shallow, opId: id }) => {
     const s = await subSettings(repoId)
@@ -191,9 +196,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   })
   handle(
     'submodule.settings',
-    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), jobs: z.number().int().min(1).max(16).optional() }),
+    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), warnBack: z.boolean().optional(), jobs: z.number().int().min(1).max(16).optional() }),
     async ({ repoId, jobs, ...rest }) => {
-      for (const k of ['on', 'mode', 'shallow', 'nested'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
+      for (const k of ['on', 'mode', 'shallow', 'nested', 'warnBack'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
       if (jobs !== undefined) await ops(repoId).setSubmoduleJobs(jobs)
       return subSettings(repoId)
     }

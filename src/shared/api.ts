@@ -66,6 +66,7 @@ export interface Api {
   'lfs.track': { in: R & { pattern: string; exact: boolean }; out: null }
   'lfs.untrack': { in: R & { pattern: string }; out: null }
   'submodule.list': { in: R; out: { list: Submodule[]; settings: SubmoduleSettings; present: boolean } }
+  'submodule.goingBack': { in: R; out: Array<{ path: string; behind: number }> }
   'submodule.setup': { in: R & { paths: string[] | 'all'; shallow?: boolean; opId: string }; out: null }
   'submodule.update': { in: R & { paths: string[] | 'all'; opId: string }; out: null }
   'submodule.remove': { in: R & { paths: string[] }; out: null }

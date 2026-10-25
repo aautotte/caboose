@@ -20,6 +20,7 @@ import type {
   LfsState,
   Submodule,
   SubmoduleMode,
+  SubmoduleChange,
   OperationState,
   OpResult,
   PullMode,
@@ -44,7 +45,8 @@ import {
   parseNameStatus,
   parseRefs,
   parseStashes,
-  parseStatus
+  parseStatus,
+  submodulePointers
 } from './parse'
 
 export interface RepoCtx {
@@ -452,7 +454,8 @@ export class RepoOps {
     const path = this.safePath(rawPath)
     const old = rawOld ? this.safePath(rawOld) : undefined
     const specs = old && old !== path ? ['--', old, path] : ['--', path]
-    const base = ['--no-color', '--no-ext-diff', '-M', '--src-prefix=a/', '--dst-prefix=b/', ...(full ? ['--unified=1000000'] : []), ...(ignoreWs ? ['-w'] : [])]
+    // --submodule=short whatever diff.submodule says: a submodule's diff is then its two commits, read below.
+    const base = ['--no-color', '--no-ext-diff', '--submodule=short', '-M', '--src-prefix=a/', '--dst-prefix=b/', ...(full ? ['--unified=1000000'] : []), ...(ignoreWs ? ['-w'] : [])]
     let out: string
     if (source.kind === 'worktree') {
       const tracked = (await this.git(['ls-files', '-z', '--', path])).length > 0
@@ -474,7 +477,51 @@ export class RepoOps {
     }
     const d = parseDiff(out, path)
     if (old && !d.oldPath && old !== path) d.oldPath = old
+    const pointers = submodulePointers(d.hunks)
+    if (pointers) d.submodule = await this.submoduleChange(path, pointers)
     return d
+  }
+
+  /**
+   * What a submodule's pointer moving means, from the submodule's own history: forward or back, and the commits in
+   * between. Only possible where it's set up and has both commits.
+   */
+  async submoduleChange(path: string, p: { old: string | null; new: string | null; dirty: boolean }): Promise<SubmoduleChange> {
+    const none = { ...p, ahead: 0, behind: 0, commits: [] }
+    if (!p.old) return { ...none, direction: 'added' }
+    if (!p.new) return { ...none, direction: 'removed' }
+    if (p.old === p.new) return { ...none, direction: 'same' }
+    if (!/^[0-9a-f]+$/.test(p.old + p.new)) return { ...none, direction: 'unknown' }
+    if (!existsSync(join(this.repo.path, path, '.git'))) return { ...none, direction: 'unknown', reason: 'not set up' }
+    const counts = await this.tryGit(['-C', path, 'rev-list', '--left-right', '--count', `${p.old}...${p.new}`])
+    if (!counts) return { ...none, direction: 'unknown', reason: 'missing commits' }
+    // Left: only in old (what moving to new leaves behind); right: only in new.
+    const [behind, ahead] = counts.trim().split(/\s+/).map(Number)
+    const direction = ahead && !behind ? 'forward' : behind && !ahead ? 'back' : 'diverged'
+    const range = direction === 'back' ? `${p.new}..${p.old}` : `${p.old}..${p.new}`
+    const log = (await this.tryGit(['-C', path, 'log', '-n', '50', '--format=%H%x1f%s%x1f%an', range])) ?? ''
+    const commits = log
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const [sha, summary, author] = l.split('\x1f')
+        return { sha, summary, author }
+      })
+    return { ...p, direction, ahead, behind, commits }
+  }
+
+  /** Staged submodule pointers that would move back if committed now (only where the submodule is set up here). */
+  async submodulesGoingBack(): Promise<Array<{ path: string; behind: number }>> {
+    const out = (await this.tryGit(['diff', '--cached', '--raw', '-z', '--no-renames', 'HEAD'])) ?? ''
+    const parts = out.split('\0')
+    const found: Array<{ path: string; behind: number }> = []
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const [srcMode, dstMode, from, to] = parts[i].slice(1).split(' ')
+      if (srcMode !== '160000' || dstMode !== '160000') continue
+      const c = await this.submoduleChange(parts[i + 1], { old: from, new: to, dirty: false })
+      if (c.direction === 'back') found.push({ path: parts[i + 1], behind: c.behind })
+    }
+    return found
   }
 
   async searchCommits(query: string): Promise<string[]> {
