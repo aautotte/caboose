@@ -248,6 +248,17 @@ export interface SubmoduleSettings {
   jobs: number
   /** Ask before a commit that moves a submodule's pointer back. */
   warnBack: boolean
+  /** After a checkout, remove the folders git leaves behind for submodules the new commit doesn't have (when clean). */
+  tidy: boolean
+}
+
+/** What happened to the submodules after HEAD moved. */
+export interface SubmoduleSyncResult {
+  updated: string[]
+  restored: string[]
+  removed: string[]
+  /** Left alone: changes inside, or (Working in it) on a branch. */
+  skipped: Array<{ path: string; why: 'changes' | 'branch' }>
 }
 
 /** Git LFS in one repository, as the system git sees it. */
