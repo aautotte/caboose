@@ -147,6 +147,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   })
   handle('refs.list', z.object(R), ({ repoId }) => ops(repoId).refs())
   handle('status.get', z.object(R), ({ repoId }) => ops(repoId).status())
+  handle('lfs.state', z.object(R), ({ repoId }) => ops(repoId).lfsState())
+  handle('lfs.turnOn', z.object({ ...R, opId }), async ({ repoId, opId }) => (await ops(repoId).lfsTurnOn(opId, progress(opId)), null))
   handle('commit.details', z.object({ ...R, sha: ref }), ({ repoId, sha }) => ops(repoId).details(sha))
   handle(
     'diff.get',

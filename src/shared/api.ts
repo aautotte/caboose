@@ -22,6 +22,7 @@ import type {
   DiffSource,
   FileDiff,
   GraphPage,
+  LfsState,
   OpResult,
   ProgressEvent,
   PullMode,
@@ -57,6 +58,8 @@ export interface Api {
   'commit.details': { in: R & { sha: string }; out: CommitDetails }
   'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean }; out: FileDiff }
   'search.commits': { in: R & { query: string }; out: string[] }
+  'lfs.state': { in: R; out: LfsState }
+  'lfs.turnOn': { in: R & { opId: string }; out: null }
 
   'index.stage': { in: R & { paths: string[] | 'all' }; out: null }
   'index.unstage': { in: R & { paths: string[] | 'all' }; out: null }

@@ -17,6 +17,7 @@ import type {
   DiffSource,
   FileDiff,
   GraphPage,
+  LfsState,
   OperationState,
   OpResult,
   PullMode,
@@ -117,6 +118,30 @@ export class RepoOps {
   async absGitDir(): Promise<string> {
     if (!this.gitDir) this.gitDir = (await this.git(['rev-parse', '--absolute-git-dir'])).trim()
     return this.gitDir
+  }
+
+  async lfsState(): Promise<LfsState> {
+    const listed = (await this.tryGit(['ls-files', '-z', '--', ':(glob)**/.gitattributes'])) ?? ''
+    const uses = listed
+      .split('\0')
+      .filter(Boolean)
+      .some((f) => {
+        try {
+          return /\sfilter=lfs(\s|$)/m.test(readFileSync(join(this.repo.path, f), 'utf8'))
+        } catch {
+          return false // listed but deleted from the working copy
+        }
+      })
+    if (!uses) return { uses, installed: false, on: false }
+    const installed = (await this.tryGit(['lfs', 'version'], { plain: true })) !== null
+    const on = !!(await this.tryGit(['config', '--get', 'filter.lfs.process']))?.trim() || !!(await this.tryGit(['config', '--get', 'filter.lfs.clean']))?.trim()
+    return { uses, installed, on }
+  }
+
+  /** `git lfs install` (git's global config, and this repository's hooks), then the large files' content in place of their pointers. */
+  async lfsTurnOn(opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
+    await this.mut(['lfs', 'install'], { opId })
+    await this.mut(['lfs', 'pull'], { opId, onProgress, timeoutMs: 600_000 })
   }
 
   async headSha(): Promise<string | null> {

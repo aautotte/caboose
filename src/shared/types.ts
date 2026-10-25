@@ -184,6 +184,16 @@ export interface ConflictFile {
 
 export type PullMode = 'ff' | 'ff-only' | 'rebase'
 
+/** Git LFS in one repository, as the system git sees it. */
+export interface LfsState {
+  /** A tracked .gitattributes sends some files through the LFS filter. */
+  uses: boolean
+  /** `git lfs` runs. */
+  installed: boolean
+  /** LFS's filters are in git's config (what `git lfs install` sets up); without them files commit and check out raw. */
+  on: boolean
+}
+
 export interface OpResult {
   result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale'
   message?: string

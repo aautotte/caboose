@@ -17,6 +17,7 @@ import { Toolbar } from './Toolbar'
 import { LeftPanel } from './LeftPanel'
 import { StatusBar } from './StatusBar'
 import { CollapseDetailsButton, DetailRail, LeftRail } from './PanelRails'
+import { LfsNotice } from './LfsNotice'
 
 /** S04: toolbar, branches on the left, history in the middle, details on the right. */
 export function RepoView({ repoId }: { repoId: string }): React.JSX.Element {
@@ -57,6 +58,7 @@ export function RepoView({ repoId }: { repoId: string }): React.JSX.Element {
     <div className="flex min-h-0 flex-1 flex-col">
       <main aria-label={tab?.alias ?? tab?.name ?? 'Repository'} className="flex min-h-0 flex-1 flex-col">
       <Toolbar repoId={repoId} />
+      <LfsNotice repoId={repoId} />
       <div className="flex min-h-0 flex-1">
         {wideDiff ? null : leftCollapsed ? (
           <LeftRail repoId={repoId} />
