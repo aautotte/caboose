@@ -1,10 +1,18 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, FileWarning, History, Maximize2, Minimize2, ScanSearch, Space, UserSearch, WrapText, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileWarning, HardDrive, History, Maximize2, Minimize2, ScanSearch, Space, UserSearch, WrapText, X } from 'lucide-react'
 import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
 import { Button, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { plural, shortSha, splitPath } from '@/lib/format'
+import { fileSize, plural, shortSha, splitPath } from '@/lib/format'
+
+/** What an LFS pointer diff means: the content is in LFS, so say how the file changed instead of showing the pointer's lines. */
+function lfsChange({ old, new: now }: NonNullable<FileDiff['lfs']>): string {
+  if (!old && now) return `A new file of ${fileSize(now.size)}. Its content is in Git LFS, so there are no lines to compare.`
+  if (old && !now) return `A file of ${fileSize(old.size)} was deleted. Its content was in Git LFS.`
+  if (old && now && old.oid === now.oid) return `${fileSize(now.size)}, unchanged.`
+  return `${fileSize(old!.size)} → ${fileSize(now!.size)} (content ${old!.oid.slice(0, 8)} → ${now!.oid.slice(0, 8)}). The content is in Git LFS, so there are no lines to compare.`
+}
 import { setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { highlightLine, languageFor } from './highlight'
@@ -225,6 +233,8 @@ export function DiffView({
               <div key={i} className="h-3 rounded-sm bg-surface-raised" style={{ width: `${25 + ((i * 41) % 60)}%` }} />
             ))}
           </div>
+        ) : diff.lfs ? (
+          <EmptyState icon={HardDrive} title="Stored in Git LFS" body={lfsChange(diff.lfs)} />
         ) : diff.binary ? (
           <EmptyState icon={FileWarning} title="Binary file" body="This file isn’t text, so there are no lines to compare. All Caboose can say is that it changed." />
         ) : diff.tooLarge ? (

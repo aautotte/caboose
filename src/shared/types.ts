@@ -81,6 +81,8 @@ export interface Change {
   index: StatusCode
   worktree: StatusCode
   conflicted: boolean
+  /** .gitattributes sends this path through Git LFS. */
+  lfs?: boolean
 }
 
 export type OperationKind = 'none' | 'merge' | 'rebase' | 'cherry_pick' | 'revert'
@@ -112,6 +114,8 @@ export interface FileChange {
   path: string
   origPath?: string
   status: 'A' | 'M' | 'D' | 'R' | 'C' | 'T'
+  /** The commit's .gitattributes sends this path through Git LFS. */
+  lfs?: boolean
 }
 
 export interface CommitDetails {
@@ -162,6 +166,13 @@ export interface FileDiff {
   isDeleted: boolean
   modeChange?: string
   hunks: Hunk[]
+  /** Set when what changed is only an LFS pointer: the content lives in LFS, so the lines say nothing. null on the side with no file. */
+  lfs?: { old: LfsPointer | null; new: LfsPointer | null }
+}
+
+export interface LfsPointer {
+  oid: string
+  size: number
 }
 
 export type DiffSource =

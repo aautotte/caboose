@@ -3,7 +3,7 @@
 import { test, expect } from '@playwright/test'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { dialog, gitIn, grid, launch, makeRepo, openWip, seed, writeAndCommit, type Harness } from './harness'
+import { dialog, gitIn, grid, launch, makeRepo, openWip, seed, toGraph, writeAndCommit, type Harness } from './harness'
 
 let h: Harness
 let repo = ''
@@ -83,4 +83,28 @@ test('F45-H4: Pull brings a large file someone else pushed, whole', async () => 
   await toolbar().getByRole('button', { name: /^Pull/ }).first().click()
   await expect(grid(h.page).getByRole('row', { name: /^Someone else adds a large file/ })).toBeVisible()
   await expect.poll(() => existsSync(join(repo, 'third.bin')) && readFileSync(join(repo, 'third.bin'), 'utf8')).toBe(big(3))
+})
+
+// big(n) is 26,000 bytes: "25 KB"; twice that is "51 KB".
+test('F45-H6: changed LFS files carry an LFS badge, and their diff says how the file changed instead of showing the pointer', async () => {
+  writeFileSync(join(repo, 'first.bin'), big(1) + big(1))
+  writeFileSync(join(repo, 'a.txt'), 'a changed\n')
+  await openWip(h.page)
+  const unstaged = h.page.getByRole('listbox', { name: /Not staged/ })
+  await expect(unstaged.getByRole('option', { name: /first\.bin/ })).toContainText('LFS')
+  await expect(unstaged.getByRole('option', { name: /a\.txt/ })).not.toContainText('LFS')
+  await unstaged.getByRole('option', { name: /first\.bin/ }).click()
+  await expect(h.page.getByText('Stored in Git LFS')).toBeVisible()
+  await expect(h.page.getByText(/^25 KB → 51 KB \(content [0-9a-f]{8} → [0-9a-f]{8}\)/)).toBeVisible()
+  await expect(h.page.getByText('oid sha256:')).toHaveCount(0)
+})
+
+test('F45-H7: in a commit, an added LFS file has the badge, and its diff gives its size', async () => {
+  h.git(repo, 'checkout', '--', 'first.bin', 'a.txt')
+  await toGraph(h.page)
+  await grid(h.page).getByRole('row', { name: /^Add a second large file/ }).click()
+  const files = h.page.getByRole('listbox', { name: 'Changed files' })
+  await expect(files.getByRole('option', { name: /second\.bin/ })).toContainText('LFS')
+  await files.getByRole('option', { name: /second\.bin/ }).click()
+  await expect(h.page.getByText('A new file of 25 KB. Its content is in Git LFS, so there are no lines to compare.')).toBeVisible()
 })

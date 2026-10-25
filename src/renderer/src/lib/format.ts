@@ -27,6 +27,18 @@ export function splitPath(p: string): { dir: string; name: string } {
   return i === -1 ? { dir: '', name: p } : { dir: p.slice(0, i + 1), name: p.slice(i + 1) }
 }
 
+/** 1536 → "1.5 KB"; powers of 1024, one decimal under 10. */
+export function fileSize(bytes: number): string {
+  const units = ['bytes', 'KB', 'MB', 'GB', 'TB']
+  let n = bytes
+  let u = 0
+  while (n >= 1024 && u < units.length - 1) {
+    n /= 1024
+    u++
+  }
+  return u === 0 ? plural(bytes, 'byte') : `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[u]}`
+}
+
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
 }
