@@ -168,9 +168,34 @@ export async function loadStatus(repoId: string): Promise<void> {
   }
 }
 
+/** Whether this repository uses Git LFS and whether the system git can run it; read once when it opens. */
+export async function checkLfs(repoId: string): Promise<void> {
+  const lfs = await attempt(() => call('lfs.state', { repoId }))
+  if (lfs) patchRepo(repoId, { lfs })
+}
+
+export async function turnOnLfs(repoId: string): Promise<void> {
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: 'Turning on Git LFS' }, progress: null }))
+  try {
+    await call('lfs.turnOn', { repoId, opId: newOpId() })
+    toast({ tone: 'success', title: 'Git LFS is on', body: 'Large files are in place of their pointers, and new ones go to LFS.' })
+  } catch (err) {
+    fail(err, 'Couldn’t turn on Git LFS')
+  } finally {
+    patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined }, progress: null }))
+  }
+  await checkLfs(repoId)
+  await loadRepo(repoId, { keepSelection: true })
+}
+
+export function dismissLfs(repoId: string): void {
+  patchRepo(repoId, { lfsDismissed: true })
+}
+
 export async function loadRepo(repoId: string, opts: { keepSelection?: boolean } = {}): Promise<void> {
   if (!useApp.getState().repos[repoId]) patchRepo(repoId, emptyRepo())
   patchRepo(repoId, { loading: true })
+  if (!useApp.getState().repos[repoId].lfs) void checkLfs(repoId)
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.

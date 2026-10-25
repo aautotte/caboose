@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek } from '../../shared/types'
+import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 
@@ -50,6 +50,10 @@ export interface RepoState {
   graphWidth: number | null
   /** The commit message being written. Kept here, not in the panel, so it survives looking at other commits. */
   draft: { summary: string; body: string }
+  /** Read when the repository opens and after "Check again"; null until then. */
+  lfs: LfsState | null
+  /** "Not now" on the LFS notice, for this session. */
+  lfsDismissed: boolean
 }
 
 // Mirrors --gc-col-*-w in the tokens: the starting widths before the user drags a column.
@@ -176,7 +180,9 @@ export const emptyRepo = (): RepoState => ({
   columns: DEFAULT_COLUMNS,
   focusHead: false,
   graphWidth: null,
-  draft: { summary: '', body: '' }
+  draft: { summary: '', body: '' },
+  lfs: null,
+  lfsDismissed: false
 })
 
 export interface AppState {
