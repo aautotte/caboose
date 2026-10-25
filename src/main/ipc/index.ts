@@ -161,7 +161,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       shallow: p['submodules.shallow'] === true,
       nested: p['submodules.nested'] !== false,
       jobs: (await ops(repoId).submoduleJobs()) ?? 4,
-      warnBack: p['submodules.warnBack'] !== false
+      warnBack: p['submodules.warnBack'] !== false,
+      tidy: p['submodules.tidy'] !== false
     }
   }
   const subMode = z.enum(['follow', 'manual', 'working'])
@@ -175,6 +176,12 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     const s = await subSettings(repoId)
     return s.on && s.warnBack ? ops(repoId).submodulesGoingBack() : []
   })
+  const empty = { updated: [], restored: [], removed: [], skipped: [] }
+  handle('submodule.sync', z.object({ ...R, from: ref, to: ref, opId }), async ({ repoId, from, to, opId: id }) => {
+    const s = await subSettings(repoId)
+    return s.on ? ops(repoId).submoduleSync(from, to, s, id, progress(id)) : empty
+  })
+  handle('submodule.atRisk', z.object({ ...R, to: ref }), async ({ repoId, to }) => ((await subSettings(repoId)).on ? ops(repoId).submodulesAtRisk(to) : []))
   handle('submodule.setup', z.object({ ...R, paths, shallow: z.boolean().optional(), opId }), async ({ repoId, paths: which, shallow, opId: id }) => {
     const s = await subSettings(repoId)
     await ops(repoId).submoduleSetup(which, { shallow: shallow ?? s.shallow, nested: s.nested, jobs: s.jobs }, id, progress(id))
@@ -196,9 +203,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   })
   handle(
     'submodule.settings',
-    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), warnBack: z.boolean().optional(), jobs: z.number().int().min(1).max(16).optional() }),
+    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), warnBack: z.boolean().optional(), tidy: z.boolean().optional(), jobs: z.number().int().min(1).max(16).optional() }),
     async ({ repoId, jobs, ...rest }) => {
-      for (const k of ['on', 'mode', 'shallow', 'nested', 'warnBack'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
+      for (const k of ['on', 'mode', 'shallow', 'nested', 'warnBack', 'tidy'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
       if (jobs !== undefined) await ops(repoId).setSubmoduleJobs(jobs)
       return subSettings(repoId)
     }

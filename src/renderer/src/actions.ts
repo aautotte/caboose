@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings } from '../../shared/types'
+import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
@@ -224,6 +224,33 @@ async function subOp(repoId: string, label: string, fn: (opId: string) => Promis
   }
 }
 
+/**
+ * HEAD moved: the main process brings along only the submodules whose pointer changed and that are safe to move
+ * (see submoduleSync). Nothing to do, and nothing shown, in a repository where no submodule was ever set up.
+ */
+async function followSubmodules(repoId: string, from: string, to: string): Promise<void> {
+  const subs = useApp.getState().repos[repoId]?.submodules
+  if (!subs?.present || !subs.settings.on) return
+  let res: SubmoduleSyncResult | undefined
+  await subOp(repoId, 'Updating submodules', async (opId) => (res = await call('submodule.sync', { repoId, from, to, opId })), 'Couldn’t update the submodules')
+  if (!res) return
+  const moved = [...res.updated, ...res.restored]
+  if (moved.length || res.removed.length) {
+    toast({
+      tone: 'success',
+      title: moved.length ? `Updated ${subName(moved)}` : `Tidied ${subName(res.removed)}`,
+      body: [moved.length ? `To the commits this branch expects: ${moved.join(', ')}.` : '', res.removed.length ? `Removed the folders of ${res.removed.join(', ')}, which aren’t on this branch.` : ''].filter(Boolean).join(' ')
+    })
+  }
+  for (const s of res.skipped) {
+    toast({
+      tone: 'info',
+      title: `Left ${s.path} as it was`,
+      body: s.why === 'changes' ? 'It has changes inside, so it wasn’t moved. Commit or discard them in the submodule, then update it from the Submodules list.' : 'It’s on a branch you’re working in, so it wasn’t moved.'
+    })
+  }
+}
+
 const subName = (paths: string[] | 'all'): string => (paths === 'all' ? 'all submodules' : paths.length === 1 ? paths[0] : plural(paths.length, 'submodule'))
 
 export async function setUpSubmodules(repoId: string, paths: string[] | 'all', shallow?: boolean): Promise<void> {
@@ -318,6 +345,8 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
     const layout = await layoutInWorker(withWip(page.commits, status.changes.length > 0, refs.head.sha), pinnedLine(page.commits, refs, refView.pinned))
     if (!isLatest(repoSeq, repoId, seq)) return // a newer full load is on its way
     const freshStatus = isLatest(statusSeq, repoId, sseq)
+    // HEAD as the screen last showed it: if it moved (a checkout, pull, reset, or a terminal), submodules may follow.
+    const headBefore = useApp.getState().repos[repoId]?.refs?.head.sha ?? null
     patchRepo(repoId, (r) => ({
       refs,
       ...(freshStatus ? { status, undo } : {}),
@@ -333,6 +362,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       multi: opts.keepSelection && r.multi.every((m) => page.commits.some((c) => c.sha === m)) ? r.multi : [],
       selected: opts.keepSelection && r.selected && (r.selected === 'wip' || page.commits.some((c) => c.sha === r.selected)) ? r.selected : r.selected ?? (status.changes.length ? 'wip' : null)
     }))
+    if (headBefore && refs.head.sha && headBefore !== refs.head.sha) void followSubmodules(repoId, headBefore, refs.head.sha)
   } catch (err) {
     if (!isLatest(repoSeq, repoId, seq)) return
     patchRepo(repoId, { loading: false, loadError: err instanceof Error ? err.message : String(err) })
@@ -645,7 +675,22 @@ export function setDraft(repoId: string, patch: Partial<{ summary: string; body:
 
 // ---------- branches ----------
 
+/** Before switching: asks when a submodule with changes inside would be moved or taken away. Git leaves those as they are. */
 export async function checkout(repoId: string, ref: string): Promise<void> {
+  const subs = useApp.getState().repos[repoId]?.submodules
+  const risky = subs?.list.some((m) => m.setUp) ? await call('submodule.atRisk', { repoId, to: ref }).catch(() => []) : []
+  if (!risky.length) return runCheckout(repoId, ref)
+  confirm({
+    title: `Switch to ${ref}?`,
+    body: `${risky.join(', ')} ${risky.length === 1 ? 'has' : 'have'} changes inside, and ${ref} expects ${risky.length === 1 ? 'it' : 'them'} on another commit (or doesn’t have ${risky.length === 1 ? 'it' : 'them'}). Your changes stay, but ${risky.length === 1 ? 'it won’t' : 'they won’t'} be moved.`,
+    confirmLabel: 'Switch anyway',
+    danger: false,
+    undoable: true,
+    onConfirm: () => void runCheckout(repoId, ref)
+  })
+}
+
+async function runCheckout(repoId: string, ref: string): Promise<void> {
   const ok = await attempt(() => call('branch.checkout', { repoId, ref }), `Couldn’t switch to ${ref}`)
   if (ok !== undefined) toast({ tone: 'success', title: `Switched to ${ref}` })
   await loadRepo(repoId, { keepSelection: true })

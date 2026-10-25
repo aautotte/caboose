@@ -300,6 +300,107 @@ export class RepoOps {
     await this.mut(['submodule', 'deinit', '--', ...safe])
   }
 
+  /** Submodule pointers that differ between two commits: moved, only in `to` (added), or only in `from` (removed). */
+  private async pointerChanges(from: string, to: string): Promise<Array<{ path: string; from: string | null; to: string | null }>> {
+    const out = (await this.tryGit(['diff', '--raw', '--no-abbrev', '-z', '--no-renames', '--ignore-submodules=none', this.safeRev(from), this.safeRev(to)])) ?? ''
+    const parts = out.split('\0')
+    const found: Array<{ path: string; from: string | null; to: string | null }> = []
+    for (let i = 0; i + 1 < parts.length; i += 2) {
+      const [srcMode, dstMode, src, dst] = parts[i].slice(1).split(' ')
+      if (srcMode !== '160000' && dstMode !== '160000') continue
+      found.push({ path: parts[i + 1], from: srcMode === '160000' ? src : null, to: dstMode === '160000' ? dst : null })
+    }
+    return found
+  }
+
+  /** Names (and modes) of submodules as a commit's .gitmodules has them. */
+  private async namesAt(rev: string): Promise<Map<string, string>> {
+    const declared = await this.configEntries(['--blob', `${this.safeRev(rev)}:.gitmodules`], '^submodule\\..*\\.path$')
+    return new Map(declared.map((d) => [d.value, d.sub]))
+  }
+
+  private async dirty(path: string): Promise<boolean> {
+    return !!(await this.tryGit(['-C', path, 'status', '--porcelain', '--ignore-submodules=none']))?.trim()
+  }
+
+  /**
+   * After HEAD moved from one commit to another (checkout, pull, merge, rebase, reset, undo, or a terminal), brings
+   * along only the submodules whose pointer changed, and only where it's safe:
+   * - set up and exactly at the old pointer (in step before): Follow updates it; Working in it only when it's not on
+   *   a branch; Manual never. With changes inside it's left alone. One the user moved elsewhere is left alone too.
+   * - only in the new commit: set up again from git's own copy under .git/modules, if it was set up before (Follow).
+   * - only in the old commit: its leftover folder is removed when it has no changes (tidy), as git leaves it behind.
+   */
+  async submoduleSync(
+    from: string,
+    to: string,
+    o: { mode: SubmoduleMode; nested: boolean; jobs: number; tidy: boolean },
+    opId: string,
+    onProgress: RunOptions['onProgress']
+  ): Promise<{ updated: string[]; restored: string[]; removed: string[]; skipped: Array<{ path: string; why: 'changes' | 'branch' }> }> {
+    const r = { updated: [] as string[], restored: [] as string[], removed: [] as string[], skipped: [] as Array<{ path: string; why: 'changes' | 'branch' }> }
+    // No submodule was ever set up here (git keeps each one's history under .git/modules): nothing to bring along.
+    const modules = join(resolve(this.repo.path, (await this.git(['rev-parse', '--git-common-dir'])).trim()), 'modules')
+    if (!existsSync(modules)) return r
+    const changes = await this.pointerChanges(from, to)
+    if (!changes.length) return r
+    // What the index records now. After a soft reset (undoing a commit) HEAD moved but the newer pointer is still
+    // staged: then the submodule stays with the index, not the commit.
+    const staged = new Map<string, string>()
+    for (const e of (await this.git(['ls-files', '-z', '-s'])).split('\0')) if (e.startsWith('160000 ')) staged.set(e.slice(e.indexOf('\t') + 1), e.split(' ')[1])
+    const [namesTo, local] = await Promise.all([this.namesAt(to), this.configEntries(['--local'], '^caboose-submodule\\.')])
+    const modeOf = (name: string): SubmoduleMode => {
+      const m = local.find((e) => e.sub === name && e.key === 'mode')?.value
+      return m === 'follow' || m === 'manual' || m === 'working' ? m : o.mode
+    }
+    for (const c of changes) {
+      const setUp = existsSync(join(this.repo.path, c.path, '.git'))
+      if (c.to && staged.get(c.path) !== c.to) continue
+      if (c.from && c.to) {
+        if (!setUp) continue
+        const head = (await this.tryGit(['-C', c.path, 'rev-parse', 'HEAD', '--abbrev-ref', 'HEAD']))?.split('\n')
+        if (!head?.[0] || head[0] !== c.from) continue // already there, or moved by the user
+        const mode = modeOf(namesTo.get(c.path) ?? c.path)
+        if (mode === 'manual') continue
+        if (await this.dirty(c.path)) r.skipped.push({ path: c.path, why: 'changes' })
+        else if (mode === 'working' && head[1] && head[1] !== 'HEAD') r.skipped.push({ path: c.path, why: 'branch' })
+        else r.updated.push(c.path)
+      } else if (c.to) {
+        const name = namesTo.get(c.path) ?? c.path
+        if (!setUp && existsSync(join(modules, name)) && modeOf(name) === 'follow') r.restored.push(c.path)
+      } else if (o.tidy && setUp) {
+        // Gone from this commit: git left the folder. Its history stays under .git/modules, so only changes could be lost.
+        const tracked = (await this.git(['ls-files', '-z', '--', c.path])).length > 0
+        if (tracked) continue
+        if (await this.dirty(c.path)) r.skipped.push({ path: c.path, why: 'changes' })
+        else {
+          rmSync(join(this.repo.path, this.safePath(c.path)), { recursive: true, force: true })
+          r.removed.push(c.path)
+        }
+      }
+    }
+    const move = [...r.updated, ...r.restored]
+    if (move.length) {
+      await this.git(['submodule', 'update', '--init', '--progress', `--jobs=${o.jobs}`, ...(o.nested ? ['--recursive'] : []), '--', ...this.safePaths(move)], {
+        opId,
+        onProgress,
+        timeoutMs: 3_600_000
+      })
+    }
+    return r
+  }
+
+  /** Before switching to `to`: set-up submodules with changes inside that the switch would move or take away. */
+  async submodulesAtRisk(to: string): Promise<string[]> {
+    const head = await this.headSha()
+    if (!head || !existsSync(join(resolve(this.repo.path, (await this.git(['rev-parse', '--git-common-dir'])).trim()), 'modules'))) return []
+    const at: string[] = []
+    for (const c of await this.pointerChanges(head, to)) {
+      if (existsSync(join(this.repo.path, c.path, '.git')) && (await this.dirty(c.path))) at.push(c.path)
+    }
+    return at
+  }
+
   /** A submodule's mode in this repository's .git/config; null goes back to the repository's default. */
   async submoduleSetMode(names: string[], mode: SubmoduleMode | null): Promise<void> {
     for (const n of names) {
@@ -512,7 +613,7 @@ export class RepoOps {
 
   /** Staged submodule pointers that would move back if committed now (only where the submodule is set up here). */
   async submodulesGoingBack(): Promise<Array<{ path: string; behind: number }>> {
-    const out = (await this.tryGit(['diff', '--cached', '--raw', '-z', '--no-renames', 'HEAD'])) ?? ''
+    const out = (await this.tryGit(['diff', '--cached', '--raw', '--no-abbrev', '-z', '--no-renames', 'HEAD'])) ?? ''
     const parts = out.split('\0')
     const found: Array<{ path: string; behind: number }> = []
     for (let i = 0; i + 1 < parts.length; i += 2) {
