@@ -1,6 +1,7 @@
 // F30: hidden branches leave the graph completely, even when a remote's HEAD alias or a tag points into them, and
 // their labels go with them.
 import { test, expect } from '@playwright/test'
+import { execFileSync } from 'node:child_process'
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { gitIn, grid, launch, makeRepo, seed, writeAndCommit, type Harness } from './harness'
@@ -84,4 +85,25 @@ test('F30-H7: hide all tags from the Tags section, then show them again', async 
   await expect(row('Only on feat')).not.toHaveAccessibleName(/v-feat/)
   await h.page.getByRole('button', { name: 'Show all tags' }).click()
   await expect(row('Start')).toHaveAccessibleName(/v-start/)
+})
+
+test('F30-E5: with hundreds of long branch names hidden, the shown branches still draw', async () => {
+  // A big team repository: 800 remote branches whose names alone pass Windows' command-line limit.
+  const feat = h.git(repo, 'rev-parse', 'feat')
+  const many = Array.from({ length: 800 }, (_, i) => `refs/remotes/origin/PLATFORM_HYD-${1000 + i}/review-the-driver-and-address-comments`)
+  execFileSync('git', ['update-ref', '--stdin'], { cwd: repo, env: h.env, input: many.map((r) => `create ${r} ${feat}`).join('\n') + '\n' })
+  await expect(tree('Remotes').getByRole('treeitem', { name: 'PLATFORM_HYD-1799 folder' })).toHaveCount(1)
+  // The remote's eye hides all of its branches at once, as on the real repository; then feat, which must leave.
+  await tree('Remotes').getByRole('treeitem', { name: 'origin', exact: true }).getByRole('button', { name: 'Hide origin' }).click()
+  await tree('Local branches').getByRole('treeitem', { name: 'feat' }).getByRole('button', { name: 'Hide feat' }).click()
+  await expect(row('Only on feat')).toHaveCount(0)
+  await expect(row('Only on other')).toHaveCount(1)
+  await expect(row('Start')).toHaveCount(1)
+  // A fresh load (a restart, or reopening the tab) has no earlier graph to fall back on.
+  await h.page.reload()
+  await h.page.getByRole('tab', { name: 'hiding' }).click()
+  await expect(row('Only on other')).toHaveCount(1)
+  await expect(row('Only on feat')).toHaveCount(0)
+  await h.page.getByRole('button', { name: 'Show all', exact: true }).click()
+  await expect(row('Only on feat')).toHaveCount(1)
 })

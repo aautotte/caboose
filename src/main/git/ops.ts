@@ -71,9 +71,9 @@ export class RepoOps {
   }
 
   /** Like git() but returns null instead of throwing on a non-zero exit. */
-  async tryGit(args: string[]): Promise<string | null> {
+  async tryGit(args: string[], opts: Partial<RunOptions> = {}): Promise<string | null> {
     try {
-      return await this.git(args)
+      return await this.git(args, opts)
     } catch {
       return null
     }
@@ -128,17 +128,13 @@ export class RepoOps {
     // A remote's HEAD (origin/HEAD) is only an alias for one of its branches, so it never brings commits in itself:
     // otherwise hiding that branch would leave all its commits on screen. Likewise, while anything is hidden, tags
     // only label commits that shown branches bring in; a tag on a hidden branch's commit would keep it in view.
-    const which = view.soloed.length
-      ? [...view.soloed, 'HEAD']
-      : [
-          ...EXCLUDE_OWN,
-          '--exclude=refs/stash',
-          '--exclude=refs/remotes/*/HEAD',
-          ...(view.hidden.length ? ['--exclude=refs/tags/*'] : []),
-          ...view.hidden.map((r) => `--exclude=${r}`),
-          '--all'
-        ]
-    const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--'])
+    // Those refs go to git on stdin, not the command line: hundreds of them would pass Windows' limit of about
+    // 32,000 characters per command line, and git wouldn't start at all (an empty graph).
+    const revs = view.soloed.length ? [...view.soloed, 'HEAD'] : view.hidden.length ? [...(await this.shownRefs(view.hidden)), 'HEAD'] : null
+    const which = revs ? ['--stdin'] : [...EXCLUDE_OWN, '--exclude=refs/stash', '--exclude=refs/remotes/*/HEAD', '--all']
+    const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--'], {
+      stdin: revs ? `${revs.join('\n')}\n` : undefined
+    })
     if (out === null) return { commits: [], hasMore: false } // unborn repo
     const commits = parseLog(out)
     const hasMore = commits.length > limit
@@ -164,6 +160,17 @@ export class RepoOps {
       rows.push(c)
     }
     return { commits: rows, hasMore }
+  }
+
+  /** Local and remote branches that aren't hidden, leaving out remotes' HEAD aliases. */
+  private async shownRefs(hidden: string[]): Promise<string[]> {
+    const skip = new Set(hidden)
+    const out = await this.git(['for-each-ref', '--format=%(refname) %(symref)', 'refs/heads', 'refs/remotes'])
+    return out
+      .split('\n')
+      .map((line) => line.split(' '))
+      .filter(([name, symref]) => name && !symref && !skip.has(name))
+      .map(([name]) => name)
   }
 
   async refs(): Promise<Refs> {
