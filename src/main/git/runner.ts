@@ -30,6 +30,7 @@ export interface RunResult {
 
 const MAX_TAIL = 8 * 1024
 const PROGRESS = /^([A-Za-z ]+):\s+(\d+)%/
+const CLONING = /^Cloning into '(.+)'/
 const LOCKED = /index\.lock|cannot lock ref|could not write index|unable to write new index file/i
 
 /**
@@ -140,6 +141,9 @@ export class GitRunner extends EventEmitter {
           for (const line of s.split(/[\r\n]+/)) {
             const m = PROGRESS.exec(line.trim())
             if (m) opts.onProgress(m[1].trim(), Number(m[2]))
+            // `git submodule update`: which submodule it's on.
+            const c = CLONING.exec(line.trim())
+            if (c) opts.onProgress(`Setting up ${c[1].split(/[\\/]/).filter(Boolean).pop()}`)
           }
         }
       })

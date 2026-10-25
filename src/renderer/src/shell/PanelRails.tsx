@@ -1,4 +1,4 @@
-import { Archive, Cloud, GitBranch, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Tag } from 'lucide-react'
+import { Archive, Boxes, Cloud, GitBranch, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Tag } from 'lucide-react'
 import { IconButton, Tooltip } from '@/ui'
 import { setPrefs, useRepo } from '@/store'
 
@@ -38,12 +38,15 @@ export function CollapseDetailsButton(): React.JSX.Element {
 /** The left panel, collapsed: a way back, and a shortcut to each section with its count. */
 export function LeftRail({ repoId }: { repoId: string }): React.JSX.Element {
   const refs = useRepo(repoId, (r) => r.refs)
+  const subs = useRepo(repoId, (r) => r.submodules)
   const all = refs?.refs ?? []
   const sections = [
     { title: 'Local branches', icon: GitBranch, count: all.filter((r) => r.kind === 'local').length },
     { title: 'Remotes', icon: Cloud, count: refs?.remotes.length ?? 0 },
     { title: 'Tags', icon: Tag, count: all.filter((r) => r.kind === 'tag').length },
-    { title: 'Stashes', icon: Archive, count: refs?.stashes.length ?? 0 }
+    { title: 'Stashes', icon: Archive, count: refs?.stashes.length ?? 0 },
+    // Like the section: only when there are submodules and their handling is on.
+    ...(subs?.settings.on && subs.list.length ? [{ title: 'Submodules', icon: Boxes, count: subs.list.length }] : [])
   ]
   const open = (title?: string): void => {
     collapseLeft(false)

@@ -83,6 +83,8 @@ export interface Change {
   conflicted: boolean
   /** .gitattributes sends this path through Git LFS. */
   lfs?: boolean
+  /** A submodule: whether it's on another commit than recorded, or has changes or new files inside. */
+  submodule?: { commit: boolean; modified: boolean; untracked: boolean }
 }
 
 export type OperationKind = 'none' | 'merge' | 'rebase' | 'cherry_pick' | 'revert'
@@ -194,6 +196,38 @@ export interface ConflictFile {
 }
 
 export type PullMode = 'ff' | 'ff-only' | 'rebase'
+
+/** How the app treats a submodule once it's set up. */
+export type SubmoduleMode = 'follow' | 'manual' | 'working'
+
+/** One submodule of the checked-out commit, as .gitmodules, the index and its own folder say. */
+export interface Submodule {
+  /** Its name in .gitmodules (stays the same when its path moves). */
+  name: string
+  path: string
+  url: string | null
+  /** The commit the repository expects (the index's pointer). */
+  expected: string | null
+  /** Its folder has a checkout. */
+  setUp: boolean
+  /** The commit it's on, when set up. */
+  current: string | null
+  /** The branch it's on; null when detached or not set up. */
+  branch: string | null
+  /** Set for this submodule in the repository's .git/config; null means the repository's default. */
+  mode: SubmoduleMode | null
+}
+
+/** Per-repository submodule settings. */
+export interface SubmoduleSettings {
+  /** Off: the app treats submodules as plain git does and doesn't list them. */
+  on: boolean
+  mode: SubmoduleMode
+  shallow: boolean
+  nested: boolean
+  /** How many at once (git's submodule.fetchJobs). */
+  jobs: number
+}
 
 /** Git LFS in one repository, as the system git sees it. */
 export interface LfsState {

@@ -18,6 +18,8 @@ import type {
   FileDiff,
   GraphPage,
   LfsState,
+  Submodule,
+  SubmoduleMode,
   OperationState,
   OpResult,
   PullMode,
@@ -196,6 +198,123 @@ export class RepoOps {
   async lfsTurnOn(opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
     await this.mut(['lfs', 'install'], { opId })
     await this.mut(['lfs', 'pull'], { opId, onProgress, timeoutMs: 600_000 })
+  }
+
+  // ---------- submodules ----------
+
+  /** `git config -z --get-regexp` output as [section.subsection, variable, value]; a submodule's name can hold dots. */
+  private async configEntries(args: string[], pattern: string): Promise<Array<{ sub: string; key: string; value: string }>> {
+    const out = (await this.tryGit(['config', '-z', ...args, '--get-regexp', pattern])) ?? ''
+    return out
+      .split('\0')
+      .filter(Boolean)
+      .map((e) => {
+        const nl = e.indexOf('\n')
+        const full = nl < 0 ? e : e.slice(0, nl)
+        const first = full.indexOf('.')
+        const last = full.lastIndexOf('.')
+        return { sub: full.slice(first + 1, last), key: full.slice(last + 1), value: nl < 0 ? '' : e.slice(nl + 1) }
+      })
+  }
+
+  /** Whether the index has any submodule, without reading anything else. */
+  async hasSubmodules(): Promise<boolean> {
+    return (await this.git(['ls-files', '-z', '-s'])).split('\0').some((e) => e.startsWith('160000 '))
+  }
+
+  /**
+   * The submodules of the checked-out commit: .gitmodules as staged (else the file), the pointers in the index, this
+   * repository's own config, and for each one that's set up, the commit and branch it's on. A few git calls in all,
+   * plus one per submodule that's set up.
+   */
+  async submodules(): Promise<Submodule[]> {
+    const links = new Map<string, string>()
+    for (const e of (await this.git(['ls-files', '-z', '-s'])).split('\0')) if (e.startsWith('160000 ')) links.set(e.slice(e.indexOf('\t') + 1), e.split(' ')[1])
+    if (!links.size) return []
+    const staged = await this.tryGit(['cat-file', '-e', ':.gitmodules'])
+    const declared = await this.configEntries(staged !== null ? ['--blob', ':.gitmodules'] : ['--file', join(this.repo.path, '.gitmodules')], '^submodule\\.')
+    const local = await this.configEntries(['--local'], '^caboose-submodule\\.')
+    const byName = new Map<string, { path?: string; url?: string }>()
+    for (const d of declared) {
+      const s = byName.get(d.sub) ?? {}
+      if (d.key === 'path') s.path = d.value
+      if (d.key === 'url') s.url = d.value
+      byName.set(d.sub, s)
+    }
+    const nameOf = new Map([...byName].filter(([, s]) => s.path).map(([name, s]) => [s.path!, name]))
+    const modes = new Map(local.filter((e) => e.key === 'mode').map((e) => [e.sub, e.value]))
+    return Promise.all(
+      [...links].sort(([a], [b]) => a.localeCompare(b)).map(async ([path, expected]): Promise<Submodule> => {
+        const name = nameOf.get(path) ?? path
+        const setUp = existsSync(join(this.repo.path, path, '.git'))
+        const head = setUp ? (await this.tryGit(['-C', path, 'rev-parse', 'HEAD', '--abbrev-ref', 'HEAD']))?.split('\n') : undefined
+        const mode = modes.get(name)
+        return {
+          name,
+          path,
+          url: byName.get(name)?.url ?? null,
+          expected,
+          setUp: !!head?.[0],
+          current: head?.[0] || null,
+          branch: head?.[1] && head[1] !== 'HEAD' ? head[1] : null,
+          mode: mode === 'follow' || mode === 'manual' || mode === 'working' ? mode : null
+        }
+      })
+    )
+  }
+
+  /**
+   * Sets up submodules (all of them, or these paths) at the commits the repository expects. One submodule failing
+   * doesn't stop the others; git reports them at the end.
+   */
+  async submoduleSetup(paths: string[] | 'all', o: { shallow: boolean; nested: boolean; jobs: number }, opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
+    // Not queued: it can take minutes, and it only writes inside the submodules' folders, .git/modules and .git/config.
+    await this.git(
+      ['submodule', 'update', '--init', '--progress', `--jobs=${o.jobs}`, ...(o.nested ? ['--recursive'] : []), ...(o.shallow ? ['--depth=1'] : []), '--', ...(paths === 'all' ? [] : this.safePaths(paths))],
+      { opId, onProgress, timeoutMs: 3_600_000 }
+    )
+  }
+
+  /** Refuses when a submodule has changes inside, so updating or removing it can't lose work. */
+  private async submodulesClean(paths: string[]): Promise<void> {
+    for (const p of paths) {
+      if (!existsSync(join(this.repo.path, p, '.git'))) continue
+      const out = await this.git(['-C', p, 'status', '--porcelain', '--ignore-submodules=none'])
+      if (out.trim()) throw invalid(`${p} has changes inside. Commit or discard them there first.`)
+    }
+  }
+
+  /** Moves set-up submodules to the commits the repository expects. */
+  async submoduleUpdate(paths: string[], o: { nested: boolean; jobs: number }, opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
+    const safe = this.safePaths(paths)
+    await this.submodulesClean(safe)
+    await this.git(['submodule', 'update', '--progress', `--jobs=${o.jobs}`, ...(o.nested ? ['--recursive'] : []), '--', ...safe], { opId, onProgress, timeoutMs: 3_600_000 })
+  }
+
+  /** Empties submodules' folders (git keeps their data under .git/modules, so setting them up again is quick). */
+  async submoduleRemove(paths: string[]): Promise<void> {
+    const safe = this.safePaths(paths)
+    await this.submodulesClean(safe)
+    await this.mut(['submodule', 'deinit', '--', ...safe])
+  }
+
+  /** A submodule's mode in this repository's .git/config; null goes back to the repository's default. */
+  async submoduleSetMode(names: string[], mode: SubmoduleMode | null): Promise<void> {
+    for (const n of names) {
+      if (!n || /[\0\r\n"\\]/.test(n)) throw invalid(`Not a submodule name: ${n}`)
+      if (mode) await this.mut(['config', '--local', `caboose-submodule.${n}.mode`, mode])
+      else await this.tryGit(['config', '--local', '--unset', `caboose-submodule.${n}.mode`])
+    }
+  }
+
+  /** git's submodule.fetchJobs, which `git submodule update` also uses. */
+  async submoduleJobs(): Promise<number | null> {
+    const v = Number((await this.tryGit(['config', '--local', '--get', 'submodule.fetchJobs']))?.trim())
+    return Number.isInteger(v) && v > 0 ? v : null
+  }
+
+  async setSubmoduleJobs(n: number): Promise<void> {
+    await this.mut(['config', '--local', 'submodule.fetchJobs', String(n)])
   }
 
   async headSha(): Promise<string | null> {

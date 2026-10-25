@@ -23,6 +23,9 @@ import type {
   FileDiff,
   GraphPage,
   LfsState,
+  Submodule,
+  SubmoduleMode,
+  SubmoduleSettings,
   OpResult,
   ProgressEvent,
   PullMode,
@@ -62,6 +65,12 @@ export interface Api {
   'lfs.turnOn': { in: R & { opId: string }; out: null }
   'lfs.track': { in: R & { pattern: string; exact: boolean }; out: null }
   'lfs.untrack': { in: R & { pattern: string }; out: null }
+  'submodule.list': { in: R; out: { list: Submodule[]; settings: SubmoduleSettings; present: boolean } }
+  'submodule.setup': { in: R & { paths: string[] | 'all'; shallow?: boolean; opId: string }; out: null }
+  'submodule.update': { in: R & { paths: string[] | 'all'; opId: string }; out: null }
+  'submodule.remove': { in: R & { paths: string[] }; out: null }
+  'submodule.setMode': { in: R & { names: string[]; mode: SubmoduleMode | null }; out: null }
+  'submodule.settings': { in: R & Partial<SubmoduleSettings>; out: SubmoduleSettings }
 
   'index.stage': { in: R & { paths: string[] | 'all' }; out: null }
   'index.unstage': { in: R & { paths: string[] | 'all' }; out: null }
