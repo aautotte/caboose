@@ -108,3 +108,45 @@ test('F45-H7: in a commit, an added LFS file has the badge, and its diff gives i
   await files.getByRole('option', { name: /second\.bin/ }).click()
   await expect(h.page.getByText('A new file of 25 KB. Its content is in Git LFS, so there are no lines to compare.')).toBeVisible()
 })
+
+const attributes = (): string => readFileSync(join(repo, '.gitattributes'), 'utf8')
+const notStaged = () => h.page.getByRole('listbox', { name: /Not staged/ })
+async function lfsItem(file: RegExp, ...path: string[]): Promise<void> {
+  await notStaged().getByRole('option', { name: file }).click({ button: 'right' })
+  const last = path.pop()!
+  for (const sub of path) await h.page.getByRole('menuitem', { name: sub }).click()
+  // In a small window a submenu can open over its parent, so pick the last item from the keyboard.
+  await h.page.getByRole('menu').last().getByRole('menuitem', { name: last, exact: true }).press('Enter')
+}
+
+test('F45-H8: Track with Git LFS › All *.psd files: the rule goes in .gitattributes, and the file commits as a pointer', async () => {
+  writeFileSync(join(repo, 'cover.psd'), big(5))
+  await openWip(h.page)
+  await expect(notStaged().getByRole('option', { name: /cover\.psd/ })).not.toContainText('LFS')
+  await lfsItem(/cover\.psd/, 'Track with Git LFS', 'All *.psd files')
+  await expect(toasts().getByText('Tracking *.psd files with Git LFS')).toBeVisible()
+  expect(attributes()).toMatch(/^\*\.psd filter=lfs diff=lfs merge=lfs -text$/m)
+  await expect(notStaged().getByRole('option', { name: /cover\.psd/ })).toContainText('LFS')
+  await h.page.getByRole('button', { name: 'Stage all', exact: true }).click()
+  await h.page.getByLabel('Commit summary').fill('Add the cover, in LFS')
+  await h.page.getByRole('button', { name: /^Commit 2 files$/ }).click()
+  await expect.poll(h.gitOr(repo, 'log', '-1', '--format=%s')).toBe('Add the cover, in LFS')
+  expect(h.git(repo, 'cat-file', '-p', 'HEAD:cover.psd') + '\n').toMatch(POINTER)
+})
+
+test('F45-H9: Track one file whose name has a space and brackets, then Stop tracking it; the other rules stay', async () => {
+  writeFileSync(join(repo, 'big [v2].dat'), big(6))
+  await lfsItem(/big \[v2\]\.dat/, 'Track with Git LFS', 'Only big [v2].dat')
+  await expect(toasts().getByText('Tracking big [v2].dat with Git LFS')).toBeVisible()
+  // How git-lfs writes one file's rule: the space as [[:space:]], the brackets escaped.
+  const rule = String.raw`big[[:space:]]\[v2\].dat`
+  expect(attributes()).toContain(`${rule} filter=lfs`)
+  expect(h.git(repo, 'check-attr', 'filter', '--', 'big [v2].dat')).toMatch(/filter: lfs$/)
+  await expect(notStaged().getByRole('option', { name: /big \[v2\]\.dat/ })).toContainText('LFS')
+  await lfsItem(/big \[v2\]\.dat/, `Stop tracking ${rule} with Git LFS`)
+  await expect(toasts().getByText(`Stopped tracking ${rule} with Git LFS`)).toBeVisible()
+  expect(attributes()).not.toContain('big[[:space:]]')
+  expect(attributes()).toContain('*.bin filter=lfs')
+  expect(attributes()).toContain('*.psd filter=lfs')
+  await expect(notStaged().getByRole('option', { name: /big \[v2\]\.dat/ })).not.toContainText('LFS')
+})

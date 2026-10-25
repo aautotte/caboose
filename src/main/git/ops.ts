@@ -132,10 +132,48 @@ export class RepoOps {
           return false // listed but deleted from the working copy
         }
       })
-    if (!uses) return { uses, installed: false, on: false }
+    // Asked even where LFS isn't used yet: the file menus offer to start tracking with it.
     const installed = (await this.tryGit(['lfs', 'version'], { plain: true })) !== null
-    const on = !!(await this.tryGit(['config', '--get', 'filter.lfs.process']))?.trim() || !!(await this.tryGit(['config', '--get', 'filter.lfs.clean']))?.trim()
-    return { uses, installed, on }
+    const on = installed && (!!(await this.tryGit(['config', '--get', 'filter.lfs.process']))?.trim() || !!(await this.tryGit(['config', '--get', 'filter.lfs.clean']))?.trim())
+    return { uses, installed, on, patterns: this.lfsPatterns() }
+  }
+
+  /** The first field of each root .gitattributes line that sends files through LFS. */
+  private lfsPatterns(): string[] {
+    let text = ''
+    try {
+      text = readFileSync(join(this.repo.path, '.gitattributes'), 'utf8')
+    } catch {
+      return []
+    }
+    return text
+      .split(/\r?\n/)
+      .filter((l) => !l.trimStart().startsWith('#') && /\sfilter=lfs(\s|$)/.test(l))
+      .map((l) => l.trim().split(/\s+/)[0])
+  }
+
+  /** `git lfs track`: a glob, or with `exact` one file by its name (git-lfs escapes it). Writes the root .gitattributes. */
+  async lfsTrack(pattern: string, exact: boolean): Promise<void> {
+    await this.mut(['lfs', 'track', ...(exact ? ['--filename'] : []), '--', this.safeLfsPattern(pattern)])
+  }
+
+  /**
+   * Takes the rule out of the root .gitattributes by hand: `git lfs untrack` can't remove the escaped rules its own
+   * `--filename` writes (a space becomes [[:space:]]). Other lines and the file's line endings stay as they were.
+   */
+  async lfsUntrack(pattern: string): Promise<void> {
+    const file = join(this.repo.path, '.gitattributes')
+    const text = readFileSync(file, 'utf8')
+    const eol = text.includes('\r\n') ? '\r\n' : '\n'
+    const lines = text.split(/\r?\n/)
+    const kept = lines.filter((l) => !(l.trim().split(/\s+/)[0] === pattern && /\sfilter=lfs(\s|$)/.test(l)))
+    if (kept.length === lines.length) throw invalid(`.gitattributes has no Git LFS rule “${pattern}”.`)
+    writeFileSync(file, kept.join(eol))
+  }
+
+  private safeLfsPattern(p: string): string {
+    if (!p || p.startsWith('-') || /[\0\r\n]/.test(p)) throw invalid(`Not a pattern Git LFS can track: ${p}`)
+    return p
   }
 
   /**

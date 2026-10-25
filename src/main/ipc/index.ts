@@ -149,6 +149,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('status.get', z.object(R), ({ repoId }) => ops(repoId).status())
   handle('lfs.state', z.object(R), ({ repoId }) => ops(repoId).lfsState())
   handle('lfs.turnOn', z.object({ ...R, opId }), async ({ repoId, opId }) => (await ops(repoId).lfsTurnOn(opId, progress(opId)), null))
+  handle('lfs.track', z.object({ ...R, pattern: z.string().min(1).max(4096), exact: z.boolean() }), async ({ repoId, pattern, exact }) => (await ops(repoId).lfsTrack(pattern, exact), null))
+  handle('lfs.untrack', z.object({ ...R, pattern: z.string().min(1).max(4096) }), async ({ repoId, pattern }) => (await ops(repoId).lfsUntrack(pattern), null))
   handle('commit.details', z.object({ ...R, sha: ref }), ({ repoId, sha }) => ops(repoId).details(sha))
   handle(
     'diff.get',

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, History, Trash2, UserSearch } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Trash2, UserSearch } from 'lucide-react'
 import type { Change, EffectiveIdentity } from '../../../shared/types'
-import { Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
+import { Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { plural } from '@/lib/format'
+import { plural, splitPath } from '@/lib/format'
+import { extensionRule, ruleFor } from '@/lib/lfs'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
@@ -23,6 +24,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
   const refs = useRepo(repoId, (r) => r.refs)
   const center = useRepo(repoId, (r) => r.center)
   const busy = useRepo(repoId, (r) => r.busy)
+  const lfs = useRepo(repoId, (r) => r.lfs)
   const pushAfter = useApp((s) => s.prefs.pushAfterCommit)
   const draft = useRepo(repoId, (r) => r.draft)
   const summary = draft.summary
@@ -106,7 +108,30 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     }
   }
 
-  const fileMenu = (f: FileItem, side: 'staged' | 'unstaged') => [
+  // Track a file's kind (or just the file) with Git LFS, or stop: git lfs track writes the root .gitattributes.
+  const lfsMenu = (f: FileItem): MenuEntry => {
+    const icon = <HardDrive size={14} />
+    if (!lfs?.installed) return { type: 'item', label: 'Git LFS isn’t installed', icon, disabled: true }
+    if (f.lfs) {
+      const rule = ruleFor(f.path, lfs.patterns)
+      return rule
+        ? { type: 'item', label: `Stop tracking ${rule} with Git LFS`, icon, onSelect: () => void act.lfsUntrack(repoId, rule) }
+        : { type: 'item', label: 'In Git LFS by another .gitattributes rule', icon, disabled: true }
+    }
+    const ext = extensionRule(f.path)
+    const { name } = splitPath(f.path)
+    return {
+      type: 'sub',
+      label: 'Track with Git LFS',
+      icon,
+      items: [
+        ...(ext ? [{ type: 'item' as const, label: `All ${ext} files`, onSelect: () => void act.lfsTrack(repoId, ext, false, `${ext} files`) }] : []),
+        { type: 'item', label: `Only ${name}`, onSelect: () => void act.lfsTrack(repoId, f.path, true, name) }
+      ]
+    }
+  }
+
+  const fileMenu = (f: FileItem, side: 'staged' | 'unstaged'): MenuEntry[] => [
     side === 'unstaged'
       ? { type: 'item' as const, label: 'Stage', onSelect: () => void act.stage(repoId, [f.path]) }
       : { type: 'item' as const, label: 'Unstage', onSelect: () => void act.unstage(repoId, [f.path]) },
@@ -133,6 +158,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
       disabled: f.status === 'conflicted',
       onSelect: () => act.openDialog({ kind: 'ignore', repoId, path: f.path, tracked: f.status !== 'untracked' })
     },
+    lfsMenu(f),
     { type: 'separator' as const },
     { type: 'item' as const, label: 'Discard changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, [f.path]) }
   ]

@@ -60,6 +60,8 @@ export interface Api {
   'search.commits': { in: R & { query: string }; out: string[] }
   'lfs.state': { in: R; out: LfsState }
   'lfs.turnOn': { in: R & { opId: string }; out: null }
+  'lfs.track': { in: R & { pattern: string; exact: boolean }; out: null }
+  'lfs.untrack': { in: R & { pattern: string }; out: null }
 
   'index.stage': { in: R & { paths: string[] | 'all' }; out: null }
   'index.unstage': { in: R & { paths: string[] | 'all' }; out: null }

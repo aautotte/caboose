@@ -188,6 +188,24 @@ export async function turnOnLfs(repoId: string): Promise<void> {
   await loadRepo(repoId, { keepSelection: true })
 }
 
+export async function lfsTrack(repoId: string, pattern: string, exact: boolean, label: string): Promise<void> {
+  const ok = await attempt(() => call('lfs.track', { repoId, pattern, exact }), 'Couldn’t track that with Git LFS')
+  if (ok !== undefined) {
+    toast({ tone: 'success', title: `Tracking ${label} with Git LFS`, body: 'New and changed ones go to LFS when you stage them. Commit .gitattributes so other clones do the same.' })
+  }
+  await checkLfs(repoId)
+  await loadStatus(repoId)
+}
+
+export async function lfsUntrack(repoId: string, pattern: string): Promise<void> {
+  const ok = await attempt(() => call('lfs.untrack', { repoId, pattern }), 'Couldn’t stop tracking that with Git LFS')
+  if (ok !== undefined) {
+    toast({ tone: 'success', title: `Stopped tracking ${pattern} with Git LFS`, body: 'From now on they’re committed into git itself; what’s already committed stays in LFS. Commit .gitattributes too.' })
+  }
+  await checkLfs(repoId)
+  await loadStatus(repoId)
+}
+
 export function dismissLfs(repoId: string): void {
   patchRepo(repoId, { lfsDismissed: true })
 }
