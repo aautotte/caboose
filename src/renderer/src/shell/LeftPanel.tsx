@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, ChevronDown, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload } from 'lucide-react'
-import type { Ref, RefViewState } from '../../../shared/types'
-import { Badge, Button, ContextMenu, IconButton, TextInput, Tooltip, type MenuEntry } from '@/ui'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload } from 'lucide-react'
+import type { Ref, RefViewState, Submodule, SubmoduleMode } from '../../../shared/types'
+import { Badge, Button, ContextMenu, IconButton, Spinner, TextInput, Tooltip, type MenuEntry } from '@/ui'
+import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
 import { pushEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
@@ -15,19 +16,24 @@ function Section({
   children,
   empty,
   action,
-  eye
+  eye,
+  menu,
+  note
 }: {
   title: string
   count: number
   children: ReactNode
   empty: string
-  action?: { label: string; onClick: () => void }
+  action?: { label: string; onClick: () => void; icon?: ReactNode; disabled?: boolean }
   eye?: Eye
+  /** Right-click on the header. */
+  menu?: MenuEntry[]
+  /** A line under the header, e.g. what's running. */
+  note?: ReactNode
 }): React.JSX.Element {
   const [open, setOpen] = useState(true)
-  return (
-    <section id={leftSectionId(title)} className="flex flex-col">
-      <div className="flex items-center pr-1">
+  const header = (
+    <div className="flex items-center pr-1">
         <button
           aria-expanded={open}
           onClick={() => setOpen(!open)}
@@ -46,12 +52,17 @@ function Section({
         ) : null}
         {action ? (
           <Tooltip content={action.label}>
-            <IconButton label={action.label} size="sm" onClick={action.onClick}>
-              <Plus size={14} />
+            <IconButton label={action.label} size="sm" disabled={action.disabled} onClick={action.onClick}>
+              {action.icon ?? <Plus size={14} />}
             </IconButton>
           </Tooltip>
         ) : null}
       </div>
+  )
+  return (
+    <section id={leftSectionId(title)} className="flex flex-col">
+      {menu ? <ContextMenu items={menu}>{header}</ContextMenu> : header}
+      {note}
       {open ? (
         count === 0 ? (
           <p className="px-7 py-1 pb-3 text-sm text-muted">{empty}</p>
@@ -93,7 +104,7 @@ function EyeButton({ eye, name }: { eye: Eye; name: string }): React.JSX.Element
   )
 }
 
-function Row({ icon, label, name, indent = 0, level, current, selected, badges, onActivate, onSelect, menu, title, dim, pinned, eye }: { icon: ReactNode; label: string; name?: string; indent?: number; current?: boolean; selected?: boolean; badges?: ReactNode; onActivate?: () => void; onSelect?: () => void; menu: MenuEntry[]; title?: string; dim?: boolean; pinned?: boolean; level?: number; eye?: Eye }): React.JSX.Element {
+function Row({ icon, label, name, indent = 0, level, current, selected, badges, onActivate, onSelect, menu, title, dim, faded, pinned, eye }: { icon: ReactNode; label: string; name?: string; indent?: number; current?: boolean; selected?: boolean; badges?: ReactNode; onActivate?: () => void; onSelect?: () => void; menu: MenuEntry[]; title?: string; dim?: boolean; /** Greyed, without dim's "not in the graph" mark. */ faded?: boolean; pinned?: boolean; level?: number; eye?: Eye }): React.JSX.Element {
   return (
     <ContextMenu items={menu}>
       <div
@@ -117,7 +128,7 @@ function Row({ icon, label, name, indent = 0, level, current, selected, badges, 
         className={cn(
           'group flex h-(--gc-list-row-h) cursor-default items-center gap-1.5 pr-2 text-base outline-none select-none hover:bg-row-hover focus-visible:bg-row-hover',
           selected && 'bg-row-selected',
-          current ? 'font-semibold text-text' : dim ? 'text-muted' : 'text-text'
+          current ? 'font-semibold text-text' : dim || faded ? 'text-muted' : 'text-text'
         )}
         style={{ paddingLeft: 24 + indent * 12 }}
       >
@@ -502,7 +513,129 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
             />
           ))}
         </Section>
+        <SubmoduleSection repoId={repoId} match={match} />
       </div>
     </nav>
+  )
+}
+
+const modeLabel: Record<SubmoduleMode, string> = { follow: 'Follow', manual: 'Manual', working: 'Working in it' }
+
+type SubState = 'not set up' | 'changes' | 'out of step' | 'up to date'
+
+/** Submodules of the checked-out commit. Hidden when the repository has none, or when submodule handling is off. */
+function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string) => boolean }): React.JSX.Element | null {
+  const subs = useRepo(repoId, (r) => r.submodules)
+  const changes = useRepo(repoId, (r) => r.status?.changes)
+  const running = useRepo(repoId, (r) => r.subOp)
+  if (!subs || !subs.settings.on || !subs.list.length) return null
+  const { list, settings } = subs
+  const stateOf = (m: Submodule): SubState => {
+    if (!m.setUp) return 'not set up'
+    const c = changes?.find((x) => x.path === m.path)?.submodule
+    if (c?.modified || c?.untracked) return 'changes'
+    return m.current !== m.expected ? 'out of step' : 'up to date'
+  }
+  const notSetUp = list.filter((m) => !m.setUp)
+  const outOfStep = list.filter((m) => stateOf(m) === 'out of step')
+  const setUp = list.filter((m) => m.setUp)
+  const shown = list.filter((m) => match(m.path))
+  const busy = !!running
+
+  const headerMenu: MenuEntry[] = [
+    { type: 'item', label: `Set up all (${notSetUp.length})`, icon: <Download size={14} />, disabled: busy || !notSetUp.length, onSelect: () => void act.setUpSubmodules(repoId, 'all') },
+    { type: 'item', label: settings.shallow ? 'Set up all with full history' : 'Set up all as shallow copies', disabled: busy || !notSetUp.length, onSelect: () => void act.setUpSubmodules(repoId, 'all', !settings.shallow) },
+    { type: 'item', label: `Update all to the expected commits (${outOfStep.length})`, icon: <RefreshCw size={14} />, disabled: busy || !outOfStep.length, onSelect: () => void act.updateSubmodules(repoId, 'all') },
+    { type: 'separator' },
+    { type: 'item', label: 'Submodule settings…', icon: <Settings size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'prefs' }) },
+    { type: 'separator' },
+    { type: 'item', label: 'Remove all local copies…', icon: <Trash2 size={14} />, danger: true, disabled: busy || !setUp.length, onSelect: () => act.removeSubmodules(repoId, setUp.map((m) => m.path)) }
+  ]
+
+  const rowMenu = (m: Submodule, state: SubState): MenuEntry[] => {
+    const mode = m.mode ?? settings.mode
+    if (!m.setUp)
+      return [
+        { type: 'item', label: 'Set up', icon: <Download size={14} />, disabled: busy, onSelect: () => void act.setUpSubmodules(repoId, [m.path]) },
+        { type: 'item', label: settings.shallow ? 'Set up with full history' : 'Set up as a shallow copy', disabled: busy, onSelect: () => void act.setUpSubmodules(repoId, [m.path], !settings.shallow) },
+        { type: 'separator' },
+        { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(m.path) }
+      ]
+    return [
+      { type: 'item', label: 'Open', icon: <FolderGit2 size={14} />, onSelect: () => void act.openSubmodule(repoId, m.path) },
+      {
+        type: 'item',
+        label: state === 'changes' ? 'Update to the expected commit (has changes)' : 'Update to the expected commit',
+        icon: <RefreshCw size={14} />,
+        disabled: busy || state !== 'out of step',
+        onSelect: () => void act.updateSubmodules(repoId, [m.path])
+      },
+      {
+        type: 'sub',
+        label: `Mode: ${modeLabel[mode]}`,
+        items: [
+          ...(['follow', 'manual', 'working'] as const).map((k) => ({
+            type: 'item' as const,
+            label: `${modeLabel[k]}${k === settings.mode ? ' (repository default)' : ''}${m.mode === k || (!m.mode && k === settings.mode) ? ' ✓' : ''}`,
+            onSelect: () => void act.setSubmoduleMode(repoId, [m.name], k === settings.mode ? null : k)
+          }))
+        ]
+      },
+      { type: 'separator' },
+      { type: 'item', label: 'Show in folder', icon: <FolderOpen size={14} />, onSelect: () => void act.openIn(repoId, 'folder', m.path) },
+      { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(m.path) },
+      { type: 'separator' },
+      { type: 'item', label: 'Remove local copy…', icon: <Trash2 size={14} />, danger: true, disabled: busy || state === 'changes', onSelect: () => act.removeSubmodules(repoId, [m.path]) }
+    ]
+  }
+
+  return (
+    <Section
+      title="Submodules"
+      count={shown.length}
+      empty="No matches"
+      menu={headerMenu}
+      action={notSetUp.length ? { label: `Set up all ${notSetUp.length} submodules`, icon: <Download size={14} />, disabled: busy, onClick: () => void act.setUpSubmodules(repoId, 'all') } : undefined}
+      note={
+        running ? (
+          <div role="status" aria-label="Submodules" className="mx-2 mb-1 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2 py-1 text-sm text-muted">
+            <Spinner size={12} />
+            <span className="min-w-0 flex-1 truncate">
+              {running.phase && running.phase.startsWith('Setting up') ? running.phase : running.label}
+              {running.percent !== undefined ? ` · ${running.percent}%` : ''}
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => void call('op.cancel', { opId: running.opId })}>
+              Cancel
+            </Button>
+          </div>
+        ) : null
+      }
+    >
+      {shown.map((m) => {
+        const state = stateOf(m)
+        const mode = m.mode ?? settings.mode
+        const at = m.setUp ? (m.branch ? `on ${m.branch}` : `at ${m.current?.slice(0, 7)} (detached)`) : 'not set up'
+        return (
+          <Row
+            key={m.path}
+            icon={<Boxes size={14} />}
+            label={m.path.split('/').pop() ?? m.path}
+            name={`${m.path}, ${state}`}
+            faded={!m.setUp}
+            title={`${m.path}\n${at}${m.expected ? ` · expects ${m.expected.slice(0, 7)}` : ''}${m.setUp ? `\nMode: ${modeLabel[mode]}${m.mode ? '' : ' (repository default)'}` : ''}`}
+            onActivate={() => (m.setUp ? void act.openSubmodule(repoId, m.path) : undefined)}
+            menu={rowMenu(m, state)}
+            badges={
+              <>
+                {m.setUp && m.mode && m.mode !== settings.mode ? <Badge>{modeLabel[m.mode].toLowerCase()}</Badge> : null}
+                {state === 'changes' ? <Badge tone="warning">changes</Badge> : null}
+                {state === 'out of step' ? <Badge tone="warning">out of step</Badge> : null}
+                {state === 'not set up' ? <span className="text-xs text-muted">not set up</span> : null}
+              </>
+            }
+          />
+        )
+      })}
+    </Section>
   )
 }

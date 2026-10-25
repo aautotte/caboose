@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState } from '../../shared/types'
+import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 
@@ -54,6 +54,10 @@ export interface RepoState {
   lfs: LfsState | null
   /** "Not now" on the LFS notice, for this session. */
   lfsDismissed: boolean
+  /** The checked-out commit's submodules and this repository's submodule settings; null until read. */
+  submodules: { list: Submodule[]; settings: SubmoduleSettings; present: boolean } | null
+  /** A submodule set-up or update running in the background. */
+  subOp: { label: string; opId: string; phase?: string; percent?: number } | null
 }
 
 // Mirrors --gc-col-*-w in the tokens: the starting widths before the user drags a column.
@@ -181,7 +185,9 @@ export const emptyRepo = (): RepoState => ({
   graphWidth: null,
   draft: { summary: '', body: '' },
   lfs: null,
-  lfsDismissed: false
+  lfsDismissed: false,
+  submodules: null,
+  subOp: null
 })
 
 export interface AppState {

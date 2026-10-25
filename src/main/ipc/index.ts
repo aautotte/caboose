@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { z, type ZodType } from 'zod'
 import type { Api, Channel } from '../../shared/api'
-import type { ActivityEntry, ProgressEvent, Result } from '../../shared/types'
+import type { ActivityEntry, ProgressEvent, Result, SubmoduleSettings } from '../../shared/types'
 import type { Db } from '../db'
 import { uuid } from '../db'
 import { GcFail } from '../errors'
@@ -151,6 +151,54 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('lfs.turnOn', z.object({ ...R, opId }), async ({ repoId, opId }) => (await ops(repoId).lfsTurnOn(opId, progress(opId)), null))
   handle('lfs.track', z.object({ ...R, pattern: z.string().min(1).max(4096), exact: z.boolean() }), async ({ repoId, pattern, exact }) => (await ops(repoId).lfsTrack(pattern, exact), null))
   handle('lfs.untrack', z.object({ ...R, pattern: z.string().min(1).max(4096) }), async ({ repoId, pattern }) => (await ops(repoId).lfsUntrack(pattern), null))
+  // ---------- submodules ----------
+  const subSettings = async (repoId: string): Promise<SubmoduleSettings> => {
+    const p = repoPrefs.getAll(repoId)
+    const mode = p['submodules.mode']
+    return {
+      on: p['submodules.on'] !== false,
+      mode: mode === 'manual' || mode === 'working' ? mode : 'follow',
+      shallow: p['submodules.shallow'] === true,
+      nested: p['submodules.nested'] !== false,
+      jobs: (await ops(repoId).submoduleJobs()) ?? 4
+    }
+  }
+  const subMode = z.enum(['follow', 'manual', 'working'])
+  handle('submodule.list', z.object(R), async ({ repoId }) => {
+    const o = ops(repoId)
+    const settings = await subSettings(repoId)
+    const list = settings.on ? await o.submodules() : []
+    return { list, settings, present: list.length > 0 || (!settings.on && (await o.hasSubmodules())) }
+  })
+  handle('submodule.setup', z.object({ ...R, paths, shallow: z.boolean().optional(), opId }), async ({ repoId, paths: which, shallow, opId: id }) => {
+    const s = await subSettings(repoId)
+    await ops(repoId).submoduleSetup(which, { shallow: shallow ?? s.shallow, nested: s.nested, jobs: s.jobs }, id, progress(id))
+    return null
+  })
+  handle('submodule.update', z.object({ ...R, paths, opId }), async ({ repoId, paths: which, opId: id }) => {
+    const o = ops(repoId)
+    const s = await subSettings(repoId)
+    const list = which === 'all' ? (await o.submodules()).filter((m) => m.setUp && m.current !== m.expected).map((m) => m.path) : which
+    if (list.length) await o.submoduleUpdate(list, { nested: s.nested, jobs: s.jobs }, id, progress(id))
+    return null
+  })
+  handle('submodule.remove', z.object({ ...R, paths: z.array(z.string().min(1).max(4096)).min(1).max(5000) }), ({ repoId, paths: which }) =>
+    exclusive(repoId, async () => (await ops(repoId).submoduleRemove(which), null))
+  )
+  handle('submodule.setMode', z.object({ ...R, names: z.array(z.string().min(1).max(4096)).min(1).max(5000), mode: subMode.nullable() }), async ({ repoId, names, mode }) => {
+    await ops(repoId).submoduleSetMode(names, mode)
+    return null
+  })
+  handle(
+    'submodule.settings',
+    z.object({ ...R, on: z.boolean().optional(), mode: subMode.optional(), shallow: z.boolean().optional(), nested: z.boolean().optional(), jobs: z.number().int().min(1).max(16).optional() }),
+    async ({ repoId, jobs, ...rest }) => {
+      for (const k of ['on', 'mode', 'shallow', 'nested'] as const) if (rest[k] !== undefined) repoPrefs.set(repoId, `submodules.${k}`, rest[k])
+      if (jobs !== undefined) await ops(repoId).setSubmoduleJobs(jobs)
+      return subSettings(repoId)
+    }
+  )
+
   handle('commit.details', z.object({ ...R, sha: ref }), ({ repoId, sha }) => ops(repoId).details(sha))
   handle(
     'diff.get',

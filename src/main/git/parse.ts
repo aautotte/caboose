@@ -87,6 +87,9 @@ export function parseStashes(out: string): Stash[] {
 }
 
 const code = (c: string): StatusCode => (c === '.' ? '.' : (c as StatusCode))
+/** Porcelain v2's submodule field: "N..." for a plain file, "S<c><m><u>" for a submodule. */
+const sub = (f: string): Pick<Change, 'submodule'> =>
+  f?.[0] === 'S' ? { submodule: { commit: f[1] === 'C', modified: f[2] === 'M', untracked: f[3] === 'U' } } : {}
 
 export interface ParsedStatus {
   branch: string | null
@@ -119,7 +122,7 @@ export function parseStatus(out: string): ParsedStatus {
       }
     } else if (p[0] === '1') {
       const f = p.split(' ')
-      s.changes.push({ path: f.slice(8).join(' '), index: code(f[1][0]), worktree: code(f[1][1]), conflicted: false })
+      s.changes.push({ path: f.slice(8).join(' '), index: code(f[1][0]), worktree: code(f[1][1]), conflicted: false, ...sub(f[2]) })
     } else if (p[0] === '2') {
       const f = p.split(' ')
       s.changes.push({
@@ -127,7 +130,8 @@ export function parseStatus(out: string): ParsedStatus {
         origPath: parts[++i],
         index: code(f[1][0]),
         worktree: code(f[1][1]),
-        conflicted: false
+        conflicted: false,
+        ...sub(f[2])
       })
     } else if (p[0] === 'u') {
       const f = p.split(' ')

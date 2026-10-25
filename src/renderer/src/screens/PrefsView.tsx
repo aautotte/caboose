@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Copy, KeyRound, X } from 'lucide-react'
-import type { GitConfigKey, GitIdentity, GpuState, PullMode, SshKey } from '../../../shared/types'
+import type { GitConfigKey, GitIdentity, GpuState, PullMode, SshKey, SubmoduleMode, SubmoduleSettings } from '../../../shared/types'
 import { Button, Field, IconButton, Select, Switch, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
@@ -17,13 +17,16 @@ const sections = [
   { id: 'signing', label: 'Commit signing' },
   { id: 'tools', label: 'External tools' },
   { id: 'ssh', label: 'SSH keys' },
-  { id: 'repo', label: 'This repository' }
+  { id: 'repo', label: 'This repository' },
+  { id: 'submodules', label: 'Submodules' }
 ] as const
 
 /** S13: settings. App settings are saved in the app's database; names and emails go into Git's own config. */
 export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
   const prefs = useApp((s) => s.prefs)
   const tab = useApp((s) => s.tabs.find((t) => t.id === repoId))
+  const hasSubmodules = useApp((s) => !!s.repos[repoId]?.submodules?.present)
+  const shownSections = sections.filter((s) => s.id !== 'submodules' || hasSubmodules)
   const [active, setActive] = useState<string>('general')
   const body = useRef<HTMLDivElement>(null)
 
@@ -63,7 +66,7 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
       </header>
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Settings sections" className="hidden w-52 shrink-0 border-r border-border bg-surface p-2 @2xl:block">
-          {sections.map((s) => (
+          {shownSections.map((s) => (
             <button
               key={s.id}
               aria-current={active === s.id ? 'true' : undefined}
@@ -187,10 +190,52 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
               <IdentityForm repoId={repoId} />
               <SigningForm repoId={repoId} />
             </Group>
+
+            {hasSubmodules ? <SubmoduleGroup repoId={repoId} /> : null}
           </div>
         </div>
       </div>
     </section>
+  )
+}
+
+/** How this repository's submodules are handled. Caboose's own settings, except "At once", which is git's submodule.fetchJobs. */
+function SubmoduleGroup({ repoId }: { repoId: string }): React.JSX.Element | null {
+  const subs = useApp((s) => s.repos[repoId]?.submodules)
+  if (!subs) return null
+  const st = subs.settings
+  const set = (patch: Partial<SubmoduleSettings>): void => void act.setSubmoduleSettings(repoId, patch)
+  return (
+    <Group id="submodules" title="Submodules" note="For this repository only. Saved on this computer; nothing here is committed.">
+      <Row label="Handle submodules" help="Off: Caboose leaves submodules to Git, as the git command does, and doesn’t list them.">
+        <Switch hideLabel label="Handle submodules" checked={st.on} onCheckedChange={(v) => set({ on: v })} />
+      </Row>
+      {st.on ? (
+        <>
+          <Row label="Default mode" help="For each submodule you set up, unless you pick another mode for it. Follow keeps it at the commit the branch expects; Manual only moves it when you ask; Working in it never moves it while it has changes or commits that aren’t pushed.">
+            <Select
+              label="Default mode"
+              value={st.mode}
+              onValueChange={(v) => set({ mode: v as SubmoduleMode })}
+              options={[
+                { value: 'follow', label: 'Follow' },
+                { value: 'manual', label: 'Manual' },
+                { value: 'working', label: 'Working in it' }
+              ]}
+            />
+          </Row>
+          <Row label="Set up as shallow copies" help="Downloads only the commit each submodule needs (git’s --depth 1): much smaller for big submodules, but without their history.">
+            <Switch hideLabel label="Set up as shallow copies" checked={st.shallow} onCheckedChange={(v) => set({ shallow: v })} />
+          </Row>
+          <Row label="Include nested submodules" help="Setting up or updating a submodule does the same for the submodules inside it.">
+            <Switch hideLabel label="Include nested submodules" checked={st.nested} onCheckedChange={(v) => set({ nested: v })} />
+          </Row>
+          <Row label="At once" help="How many submodules are set up or updated at the same time (git’s submodule.fetchJobs).">
+            <Select label="At once" value={String(st.jobs)} onValueChange={(v) => set({ jobs: Number(v) })} options={[1, 2, 4, 8, 16].map((n) => ({ value: String(n), label: String(n) }))} />
+          </Row>
+        </>
+      ) : null}
+    </Group>
   )
 }
 

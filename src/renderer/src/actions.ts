@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode } from '../../shared/types'
+import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
@@ -57,7 +57,8 @@ export async function boot(): Promise<void> {
   on('op:progress', (p) => {
     const s = useApp.getState()
     for (const [id, r] of Object.entries(s.repos)) {
-      if (Object.keys(r.busy).length) patchRepo(id, { progress: { phase: p.phase, percent: p.percent } })
+      if (r.subOp?.opId === p.opId) patchRepo(id, { subOp: { ...r.subOp, phase: p.phase, percent: p.percent } })
+      else if (Object.keys(r.busy).length) patchRepo(id, { progress: { phase: p.phase, percent: p.percent } })
     }
   })
   window.addEventListener('focus', () => {
@@ -164,6 +165,8 @@ export async function loadStatus(repoId: string): Promise<void> {
       if (!isLatest(statusSeq, repoId, seq) || useApp.getState().repos[repoId]?.commits !== commits) return
       patchRepo(repoId, { status, undo, layout })
     } else patchRepo(repoId, { status, undo })
+    // A submodule's own commit or changes show up in the status; its row in the list follows.
+    if (r?.submodules?.list.length) void loadSubmodules(repoId)
   } catch {
     // shown by the next full load
   }
@@ -187,6 +190,87 @@ export async function turnOnLfs(repoId: string): Promise<void> {
   }
   await checkLfs(repoId)
   await loadRepo(repoId, { keepSelection: true })
+}
+
+// ---------- submodules ----------
+
+const subSeq = new Map<string, number>()
+
+export async function loadSubmodules(repoId: string): Promise<void> {
+  const seq = next(subSeq, repoId)
+  try {
+    const submodules = await call('submodule.list', { repoId })
+    if (isLatest(subSeq, repoId, seq) && useApp.getState().repos[repoId]) patchRepo(repoId, { submodules })
+  } catch {
+    // the list stays as it was; the next load tries again
+  }
+}
+
+/** Runs a set-up or update in the background: the rest of the app stays usable, and the section shows progress. */
+async function subOp(repoId: string, label: string, fn: (opId: string) => Promise<unknown>, failTitle: string): Promise<boolean> {
+  if (useApp.getState().repos[repoId]?.subOp) return false
+  const opId = newOpId()
+  patchRepo(repoId, { subOp: { label, opId } })
+  try {
+    await fn(opId)
+    return true
+  } catch (err) {
+    fail(err, failTitle)
+    return false
+  } finally {
+    patchRepo(repoId, { subOp: null })
+    await loadSubmodules(repoId)
+    await loadStatus(repoId)
+  }
+}
+
+const subName = (paths: string[] | 'all'): string => (paths === 'all' ? 'all submodules' : paths.length === 1 ? paths[0] : plural(paths.length, 'submodule'))
+
+export async function setUpSubmodules(repoId: string, paths: string[] | 'all', shallow?: boolean): Promise<void> {
+  const ok = await subOp(repoId, `Setting up ${subName(paths)}`, (opId) => call('submodule.setup', { repoId, paths, shallow, opId }), 'Couldn’t set up every submodule')
+  const list = useApp.getState().repos[repoId]?.submodules?.list ?? []
+  const missing = list.filter((m) => !m.setUp && (paths === 'all' || paths.includes(m.path)))
+  if (ok && !missing.length) toast({ tone: 'success', title: paths === 'all' ? 'Submodules set up' : `Set up ${subName(paths)}` })
+  else if (missing.length) toast({ tone: 'error', title: `${plural(missing.length, 'submodule')} not set up`, body: missing.map((m) => m.path).join(', ') })
+}
+
+export async function updateSubmodules(repoId: string, paths: string[] | 'all'): Promise<void> {
+  const ok = await subOp(repoId, `Updating ${subName(paths)}`, (opId) => call('submodule.update', { repoId, paths, opId }), 'Couldn’t update the submodules')
+  if (ok) toast({ tone: 'success', title: paths === 'all' ? 'Submodules are at the expected commits' : `Updated ${subName(paths)}` })
+}
+
+/** git submodule deinit: empties the folders; git keeps their data, so setting them up again needs no download. */
+export function removeSubmodules(repoId: string, paths: string[]): void {
+  confirm({
+    title: `Remove the local copy of ${subName(paths)}?`,
+    body: 'This empties the folder. The repository doesn’t change, and Git keeps the submodule’s history, so setting it up again is quick. Submodules with changes inside are left alone.',
+    confirmLabel: 'Remove local copy',
+    danger: true,
+    undoable: false,
+    onConfirm: async () => {
+      const ok = await attempt(() => call('submodule.remove', { repoId, paths }), 'Couldn’t remove the local copy')
+      if (ok !== undefined) toast({ tone: 'success', title: `Removed the local copy of ${subName(paths)}` })
+      await loadSubmodules(repoId)
+      await loadStatus(repoId)
+    }
+  })
+}
+
+export async function setSubmoduleMode(repoId: string, names: string[], mode: SubmoduleMode | null): Promise<void> {
+  await attempt(() => call('submodule.setMode', { repoId, names, mode }), 'Couldn’t change the mode')
+  await loadSubmodules(repoId)
+}
+
+export async function setSubmoduleSettings(repoId: string, patch: Partial<SubmoduleSettings>): Promise<void> {
+  const settings = await attempt(() => call('submodule.settings', { repoId, ...patch }), 'Couldn’t save that setting')
+  if (settings) patchRepo(repoId, (r) => ({ submodules: { list: r.submodules?.list ?? [], present: r.submodules?.present ?? true, settings } }))
+  if (patch.on !== undefined) await loadSubmodules(repoId)
+}
+
+/** A submodule is a repository of its own: open it in a tab. */
+export async function openSubmodule(repoId: string, path: string): Promise<void> {
+  const root = useApp.getState().tabs.find((t) => t.id === repoId)?.path
+  if (root) await openRepo(`${root.replace(/[\\/]+$/, '')}/${path}`)
 }
 
 export async function lfsTrack(repoId: string, pattern: string, exact: boolean, label: string): Promise<void> {
@@ -215,6 +299,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   if (!useApp.getState().repos[repoId]) patchRepo(repoId, emptyRepo())
   patchRepo(repoId, { loading: true })
   if (!useApp.getState().repos[repoId].lfs) void checkLfs(repoId)
+  void loadSubmodules(repoId)
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
