@@ -1,6 +1,6 @@
 # Security
 
-Mergatroid runs git on your repositories and passes credential prompts (HTTPS passwords, SSH passphrases) from git
+Caboose runs git on your repositories and passes credential prompts (HTTPS passwords, SSH passphrases) from git
 to its window. A bug there could expose a secret or run something it shouldn't. Please report it privately.
 
 ## Reporting
@@ -10,7 +10,7 @@ a public issue for it.
 
 Include what you did, what happened, and the version or commit you were on. I'll reply as soon as I can.
 
-## What Mergatroid does with secrets
+## What Caboose does with secrets
 
 - **It never stores a credential.** Saving passwords and tokens is left to git's own credential helper (for example
   Git Credential Manager) and to ssh-agent.

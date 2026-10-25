@@ -482,11 +482,11 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
     <span
       draggable={canDrag}
       onDragStart={(e: DragEvent) => {
-        e.dataTransfer.setData('application/x-mergatroid-ref', JSON.stringify({ repoId, name: r.name, kind: r.kind }))
+        e.dataTransfer.setData('application/x-caboose-ref', JSON.stringify({ repoId, name: r.name, kind: r.kind }))
         e.dataTransfer.effectAllowed = 'move'
       }}
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('application/x-mergatroid-ref')) {
+        if (e.dataTransfer.types.includes('application/x-caboose-ref')) {
           e.preventDefault()
           setOver(true)
         }
@@ -494,7 +494,7 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
         setOver(false)
-        const data = e.dataTransfer.getData('application/x-mergatroid-ref')
+        const data = e.dataTransfer.getData('application/x-caboose-ref')
         if (!data) return
         const src = JSON.parse(data) as { repoId: string; name: string; kind: string }
         if (src.repoId !== repoId || src.name === r.name) return

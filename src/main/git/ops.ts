@@ -52,9 +52,9 @@ export interface RepoCtx {
 const MAX_DIFF_BYTES = 1_000_000
 const MAX_DIFF_LINES = 20_000
 
-/** Where undo safety refs live. Refs from before the rename (refs/gitclone/) are still hidden and pruned. */
-export const UNDO_REFS = 'refs/mergatroid/undo/'
-const OWN_REFS = ['refs/mergatroid/', 'refs/gitclone/']
+/** Where undo safety refs live. Refs from before the renames (refs/mergatroid/, refs/gitclone/) are still hidden and pruned. */
+export const UNDO_REFS = 'refs/caboose/undo/'
+const OWN_REFS = ['refs/caboose/', 'refs/mergatroid/', 'refs/gitclone/']
 const EXCLUDE_OWN = OWN_REFS.map((r) => `--exclude=${r}*`)
 
 /** Git operations for one repository. Mutating calls go through the runner's per-repo queue. */
@@ -317,7 +317,7 @@ export class RepoOps {
   async discard(paths: string[] | 'all', snapshotRef: string): Promise<string | null> {
     const before = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     const spec = paths === 'all' ? [] : ['--', ...this.safePaths(paths)]
-    await this.mut(['stash', 'push', '--include-untracked', '-q', '-m', 'Mergatroid: discarded changes', ...spec])
+    await this.mut(['stash', 'push', '--include-untracked', '-q', '-m', 'Caboose: discarded changes', ...spec])
     const after = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     if (!after || after === before) return null
     const sha = after.trim()
@@ -500,7 +500,7 @@ export class RepoOps {
 
   /** Re-merges the three versions in a temp folder with the ancestor's lines kept (git merge-file --diff3). */
   private async diff3(base: string, ours: string, theirs: string): Promise<string | null> {
-    const dir = mkdtempSync(join(tmpdir(), 'mergatroid-merge-'))
+    const dir = mkdtempSync(join(tmpdir(), 'caboose-merge-'))
     try {
       const f = (name: string, text: string): string => {
         const p = join(dir, name)
@@ -974,7 +974,7 @@ export class RepoOps {
 
   /** Deletes undo safety refs that no undo entry points at any more (entries are capped at 100 per repo). */
   async pruneUndoRefs(keep: Set<string>): Promise<number> {
-    const out = await this.git(['for-each-ref', '--format=%(refname) %(objectname)', UNDO_REFS, 'refs/gitclone/undo/'])
+    const out = await this.git(['for-each-ref', '--format=%(refname) %(objectname)', UNDO_REFS, 'refs/mergatroid/undo/', 'refs/gitclone/undo/'])
     let n = 0
     for (const line of out.split('\n').filter(Boolean)) {
       const [name, sha] = line.split(' ')

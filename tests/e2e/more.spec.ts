@@ -47,7 +47,8 @@ test.beforeAll(async () => {
   mkdirSync(home, { recursive: true })
   writeFileSync(gitconfig, '[user]\n\tname = E2E\n\temail = signer@example.com\n[init]\n\tdefaultBranch = main\n')
   // Orphaned undo safety refs, as left behind once their entries were trimmed: the app should clean them up,
-  // including one from before the rename (refs/gitclone/).
+  // including ones from before the renames (refs/mergatroid/, refs/gitclone/).
+  git('update-ref', 'refs/caboose/undo/orphan', 'HEAD~2')
   git('update-ref', 'refs/mergatroid/undo/orphan', 'HEAD~2')
   git('update-ref', 'refs/gitclone/undo/orphan', 'HEAD~2')
   const userData = join(seed, 'userdata-e2e-more')
@@ -88,7 +89,7 @@ async function openSettings(): Promise<void> {
 }
 
 test('orphaned undo refs are cleaned up when the repo loads', async () => {
-  await expect.poll(gitOr('for-each-ref', 'refs/mergatroid/undo/', 'refs/gitclone/undo/')).toBe('')
+  await expect.poll(gitOr('for-each-ref', 'refs/caboose/undo/', 'refs/mergatroid/undo/', 'refs/gitclone/undo/')).toBe('')
 })
 
 test('rename a stash', async () => {

@@ -141,7 +141,7 @@ export function DesignPage(): React.JSX.Element {
         <main className="mx-auto max-w-(--gc-design-w) px-8 pb-16">
           <header className="flex items-center justify-between py-6">
             <div>
-              <h1 className="text-xl text-text">Mergatroid design system</h1>
+              <h1 className="text-xl text-text">Caboose design system</h1>
               <p className="text-base text-muted">The building blocks every screen uses. Tokens only, no raw colours.</p>
             </div>
             <Button icon={theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />} onClick={switchTheme}>

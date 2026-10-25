@@ -1,4 +1,4 @@
--- Mergatroid app-state schema (SQLite, first migration: user_version = 1)
+-- Caboose app-state schema (SQLite, first migration: user_version = 1)
 --
 -- Only app state lives here. Git data (commits, refs, tags, stashes, status,
 -- diffs) is read live from each repo with the git CLI and is never copied in.
@@ -103,7 +103,7 @@ create unique index preferences_repo   on preferences (repo_id, key)    where re
 -- before/after hold what is needed to move refs back:
 --   { "head": "refs/heads/main" | "<sha>", "refs": { "<full ref>": "<sha>"|null },
 --     "indexTree": "<tree sha>"|null, "worktreeStash": "<sha>"|null }
--- worktreeStash is a `git stash create` commit pinned under refs/mergatroid/undo/<id> (refs/gitclone/undo/ before the rename)
+-- worktreeStash is a `git stash create` commit pinned under refs/caboose/undo/<id> (refs/mergatroid/undo/ and refs/gitclone/undo/ before the renames)
 -- so a discard can be brought back.
 create table undo_entries (
   id           text primary key,

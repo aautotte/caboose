@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="resources/icon.png" width="112" alt="Mergatroid's icon: a slightly worried robot whose antenna is two lanes merging into one">
+  <img src="resources/icon.png" width="112" alt="Caboose's icon: a slightly worried robot whose antenna is two lanes merging into one">
 </p>
 
-<h1 align="center">Mergatroid</h1>
+<h1 align="center">Caboose</h1>
 
 <p align="center">A desktop Git client with a commit graph, built on the git you already have.</p>
 
 ![The commit graph, with branches on the left and uncommitted changes on the right](docs/images/graph.png)
 
-Mergatroid runs **your installed git**, with your config, your SSH setup, your credential manager and your hooks.
+Caboose runs **your installed git**, with your config, your SSH setup, your credential manager and your hooks.
 Every command it runs is listed in the Git log view, ready to copy. There's no account and no subscription. It
 works offline, and it doesn't phone home.
 
@@ -33,7 +33,7 @@ works offline, and it doesn't phone home.
   - with several remotes, push the current branch or a tag to whichever one you pick (tags to all of them too);
   - set upstreams, manage remotes;
   - background fetch that never asks for a password.
-- **Undo:** most actions can be undone, even after a restart, and Mergatroid refuses safely if the repository
+- **Undo:** most actions can be undone, even after a restart, and Caboose refuses safely if the repository
   changed in between.
 - **Profiles:** separate tabs, settings and identity for work and personal projects, including the name, email,
   signing key and SSH key used.
@@ -52,8 +52,8 @@ works offline, and it doesn't phone home.
 ## Run it from source
 
 ```bash
-git clone https://github.com/aautotte/mergatroid.git
-cd mergatroid
+git clone https://github.com/aautotte/mergatroid.git caboose
+cd caboose
 nvm use          # or install Node 24 another way
 npm ci
 npm run dev
@@ -72,7 +72,7 @@ That builds for the system you're on, into `dist/`:
 
 | system | what you get |
 | --- | --- |
-| Windows | `Mergatroid-Setup-<version>.exe` (installer: Start menu entry, uninstaller, no admin rights needed) and `Mergatroid-<version>-portable.exe` (one file, no install) |
+| Windows | `Caboose-Setup-<version>.exe` (installer: Start menu entry, uninstaller, no admin rights needed) and `Caboose-<version>-portable.exe` (one file, no install) |
 | macOS | a `.dmg` (build it on a Mac) |
 | Linux | an `.AppImage` (build it on Linux) |
 
@@ -81,8 +81,8 @@ Your build isn't code-signed, so the first launch shows a warning:
 - **Windows:** "Windows protected your PC". Click **More info**, then **Run anyway**.
 - **macOS:** right-click the app, choose **Open**, then **Open** again.
 
-Settings, profiles and the repository list live in your user data folder (for example `%APPDATA%\Mergatroid`). They
-survive reinstalls, and a newer build picks them up. Git still has to be installed, since Mergatroid uses yours.
+Settings, profiles and the repository list live in your user data folder (for example `%APPDATA%\Caboose`). They
+survive reinstalls, and a newer build picks them up. Git still has to be installed, since Caboose uses yours.
 
 ## Tests
 

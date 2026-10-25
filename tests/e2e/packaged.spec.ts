@@ -11,7 +11,7 @@ function packagedExe(): string | null {
   const dist = join(app, 'dist')
   if (!existsSync(dist)) return null
   for (const dir of readdirSync(dist).filter((d) => d.endsWith('-unpacked') || d === 'mac' || d === 'mac-arm64')) {
-    for (const name of ['Mergatroid.exe', 'mergatroid', 'Mergatroid.app/Contents/MacOS/Mergatroid']) {
+    for (const name of ['Caboose.exe', 'caboose', 'Caboose.app/Contents/MacOS/Caboose']) {
       const p = join(dist, dir, name)
       if (existsSync(p)) return p
     }
@@ -42,7 +42,7 @@ test.afterAll(async () => {
 test.afterEach(() => h.expectClean())
 
 test('PKG-H1: the packaged app starts with its name and its own icon files', async () => {
-  expect(await h.page.title()).toBe('Mergatroid')
+  expect(await h.page.title()).toBe('Caboose')
   const icons = await h.electronApp.evaluate(({ app: a }) => ({ packaged: a.isPackaged, dir: process.resourcesPath }))
   expect(icons.packaged).toBe(true)
   expect(existsSync(join(icons.dir, 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'))).toBe(true)

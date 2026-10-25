@@ -206,10 +206,10 @@ function GraphicsRow(): React.JSX.Element {
       label="Graphics acceleration"
       help={
         pending
-          ? `Turns ${gpu.nextStart ? 'on' : 'off'} when Mergatroid restarts.`
+          ? `Turns ${gpu.nextStart ? 'on' : 'off'} when Caboose restarts.`
           : gpu.enabled
             ? 'Draws with your graphics card. Turn it off if the window goes blank or the app crashes on start.'
-            : 'Off: Mergatroid is drawing in software. That’s slower, but it works with any graphics driver.'
+            : 'Off: Caboose is drawing in software. That’s slower, but it works with any graphics driver.'
       }
     >
       <div className="flex items-center gap-2">

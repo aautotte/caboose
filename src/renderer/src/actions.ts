@@ -41,7 +41,7 @@ export async function boot(): Promise<void> {
   void call('gpu.get', {})
     .then((g) => {
       if (g.fellBack)
-        toast({ tone: 'info', title: 'Started without graphics acceleration', body: 'It crashed last time, so Mergatroid is drawing in software. You can turn it back on in Settings.' })
+        toast({ tone: 'info', title: 'Started without graphics acceleration', body: 'It crashed last time, so Caboose is drawing in software. You can turn it back on in Settings.' })
     })
     .catch(() => {})
   const list = await attempt(() => call('repo.list', {}))
