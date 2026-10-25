@@ -89,7 +89,8 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
           </IconButton>
         </Tooltip>
       </header>
-      <div className="flex shrink-0 flex-col gap-3 border-b border-border p-3">
+      {/* A long message scrolls on its own, up to 60% of the panel, so the file list keeps room. */}
+      <div className="flex max-h-[60%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-border p-3">
         <div className="flex items-center gap-2">
           <Avatar name={d.author.name} email={d.author.email} size={28} decorative />
           <div className="min-w-0 leading-tight">
