@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell, type IpcMainInvokeEvent } from 'electron'
-import { join, resolve } from 'node:path'
-import { cpSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
+import { appendFileSync, cpSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { openDb } from './db'
 import { GitRunner } from './git/runner'
 import { registerIpc } from './ipc'
@@ -19,6 +19,7 @@ import { applyGpuSetting } from './gpu'
 //   --open=<path>[|<path>]   open these repos at startup (used with the seed repos)
 //   --theme=light|dark       screenshot mode only: capture in this theme
 //   GC_USER_DATA=<dir>       separate app data folder (screenshots and tests)
+//   GC_APP_DATA=<dir>        stand-in for the system's app data folder (the data-move test)
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`))
   return hit ? hit.slice(name.length + 3) : undefined
@@ -28,26 +29,61 @@ const view = arg('view') ?? process.env.GC_VIEW ?? 'app'
 const screenshotDir = arg('screenshot')
 const screens = (arg('screens') ?? '').split(',').filter(Boolean)
 const openAtStart = arg('open')
+const DB_FILE = 'caboose.db'
 
-if (process.env.GC_USER_DATA) app.setPath('userData', resolve(process.env.GC_USER_DATA))
-else moveLegacyData()
+/** Earlier names of the app, newest first, with their database files. Their data folders sit next to ours. */
+const LEGACY = [
+  { name: 'Mergatroid', db: 'mergatroid.db' },
+  { name: 'gitclone', db: 'gitclone.db' }
+]
+// Lock files (Chromium's, LevelDB's) are held open while that version runs and mean nothing in a copy.
+const LOCKS = new Set(['lockfile', 'LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket'])
 
-/** Early development builds were called gitclone: copy that data folder over once, and leave the old one alone. */
+/**
+ * After a rename, the data folder follows the new name. Once, before the database opens: if ours has no database
+ * and an older name's folder has one, copy it over (settings, profiles, the repository list). The old folder is only
+ * read, never changed or deleted.
+ */
 function moveLegacyData(): void {
   const dir = app.getPath('userData')
-  const old = join(app.getPath('appData'), 'gitclone')
-  if (existsSync(join(dir, 'caboose.db')) || !existsSync(join(old, 'gitclone.db'))) return
-  cpSync(old, dir, { recursive: true })
-  for (const ext of ['', '-wal', '-shm']) {
-    if (existsSync(join(dir, `gitclone.db${ext}`))) renameSync(join(dir, `gitclone.db${ext}`), join(dir, `caboose.db${ext}`))
+  if (existsSync(join(dir, DB_FILE))) return
+  const from = LEGACY.map((l) => ({ ...l, path: join(app.getPath('appData'), l.name) })).find((l) => existsSync(join(l.path, l.db)))
+  if (!from) return
+  try {
+    mkdirSync(dir, { recursive: true })
+    cpSync(from.path, dir, { recursive: true, filter: (src) => !LOCKS.has(basename(src)) })
+    for (const ext of ['', '-wal', '-shm']) {
+      if (existsSync(join(dir, `${from.db}${ext}`))) renameSync(join(dir, `${from.db}${ext}`), join(dir, `${DB_FILE}${ext}`))
+    }
+    logMove(dir, `Copied settings, profiles and the repository list from ${from.path} to ${dir}. The old folder was left as it was.`)
+  } catch (e) {
+    logMove(dir, `Couldn't copy the data from ${from.path} (${(e as Error).message}); it will be tried again next start. The old folder was left as it was.`)
   }
 }
+
+/** To the console, and to data-move.log in the data folder, where it can still be read in a packaged build. */
+function logMove(dir: string, message: string): void {
+  console.info(`[caboose] ${message}`)
+  try {
+    appendFileSync(join(dir, 'data-move.log'), `${new Date().toISOString()} ${message}\n`)
+  } catch {
+    // the console line is enough
+  }
+}
+
+if (process.env.GC_APP_DATA) {
+  // Tests: a throwaway app data folder with our own folder inside it, as on a real machine, so the move below runs.
+  app.setPath('appData', resolve(process.env.GC_APP_DATA))
+  app.setPath('userData', join(app.getPath('appData'), app.getName()))
+}
+if (process.env.GC_USER_DATA) app.setPath('userData', resolve(process.env.GC_USER_DATA))
+else moveLegacyData()
 
 applyGpuSetting()
 // Groups the window under Caboose's own taskbar entry and icon on Windows, not Electron's.
 if (process.platform === 'win32') app.setAppUserModelId('app.caboose')
 
-const db = openDb(join(app.getPath('userData'), 'caboose.db'))
+const db = openDb(join(app.getPath('userData'), DB_FILE))
 const send = (channel: string, payload: unknown): void => {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
 }

@@ -29,7 +29,7 @@ const ALLOWED = [/Failed to load resource/i]
 
 export async function launch(
   name: string,
-  opts: { open?: string[]; reseed?: boolean; extraEnv?: Record<string, string>; setup?: (env: NodeJS.ProcessEnv) => void; keepUserData?: boolean; exe?: string } = {}
+  opts: { open?: string[]; reseed?: boolean; extraEnv?: Record<string, string>; setup?: (env: NodeJS.ProcessEnv) => void; keepUserData?: boolean; exe?: string; appData?: string } = {}
 ): Promise<Harness> {
   const home = join(seed, `home-${name}`)
   const env: NodeJS.ProcessEnv = {
@@ -56,7 +56,8 @@ export async function launch(
   const electronApp = await electron.launch({
     cwd: app,
     ...(opts.exe ? { executablePath: opts.exe, args: openArgs } : { args: ['.', ...openArgs] }),
-    env: { ...env, GC_USER_DATA: userData }
+    // appData: a stand-in for the system's app data folder, with the app's own folder inside it (the data-move test).
+    env: { ...env, ...(opts.appData ? { GC_APP_DATA: opts.appData } : { GC_USER_DATA: userData }) }
   })
   const page = await electronApp.firstWindow()
   await ciSize(electronApp)
