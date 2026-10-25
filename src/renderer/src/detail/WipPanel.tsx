@@ -7,6 +7,7 @@ import { call } from '@/lib/api'
 import { plural } from '@/lib/format'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList, toStatus, type FileItem } from './FileList'
 
 const opText = {
@@ -146,6 +147,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+        <CollapseDetailsButton />
         <h2 className="flex-1 text-md text-text">Uncommitted changes</h2>
         <Tooltip content="Stash changes">
           <IconButton label="Stash changes" disabled={changes.length === 0 || !!paused || !refs?.head.sha} onClick={() => act.openDialog({ kind: 'stash', repoId })}>

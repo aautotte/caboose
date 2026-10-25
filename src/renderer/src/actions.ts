@@ -239,7 +239,6 @@ export function withWip<T extends { sha: string; parents: string[] }>(rows: T[],
 
 export function select(repoId: string, sel: string | null): void {
   patchRepo(repoId, { selected: sel, multi: [] })
-  useApp.setState({ detailOpen: true })
 }
 
 /** Selects a commit and opens its message for editing in the details panel. */
@@ -256,7 +255,6 @@ export function toggleSelect(repoId: string, sha: string, order: string[]): void
   const next = cur.includes(sha) ? cur.filter((s) => s !== sha) : [...cur, sha]
   const sorted = order.filter((s) => next.includes(s))
   patchRepo(repoId, { multi: sorted.length > 1 ? sorted : [], selected: cur.includes(sha) ? (sorted[0] ?? null) : sha })
-  useApp.setState({ detailOpen: true })
 }
 
 /** Shift-click or Shift+arrows: everything between the anchor (the single selection) and `sha`. */
@@ -269,7 +267,6 @@ export function extendSelect(repoId: string, sha: string, order: string[]): void
   if (a < 0 || b < 0 || a === b) return select(repoId, sha)
   const span = order.slice(Math.min(a, b), Math.max(a, b) + 1).filter((s) => s !== 'wip')
   patchRepo(repoId, { multi: span.length > 1 ? span : [], selected: anchor })
-  useApp.setState({ detailOpen: true })
 }
 
 /** The current branch's first-parent line among the loaded commits, newest first. */

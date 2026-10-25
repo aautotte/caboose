@@ -584,6 +584,7 @@
     "detail-panel-w": 380,
     "detail-panel-min": 300,
     "detail-panel-max": 720,
+    "rail-w": 36,
     "graph-row-h": 28,
     "list-row-h": 26,
     "lane-w": 16,

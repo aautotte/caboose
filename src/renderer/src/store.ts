@@ -112,6 +112,9 @@ export interface Prefs {
   diffIgnoreWs: boolean
   /** List files Git doesn't track yet among the unstaged changes. */
   showUntracked: boolean
+  /** The side panels shrunk to a thin rail (Ctrl+J, Ctrl+K). */
+  leftCollapsed: boolean
+  detailCollapsed: boolean
 }
 
 // Preferences live in the app database (main process). A copy in localStorage paints the right theme
@@ -135,7 +138,9 @@ export const defaultPrefs: Prefs = {
   editorCommand: '',
   mergeShowBase: true,
   diffIgnoreWs: false,
-  showUntracked: true
+  showUntracked: true,
+  leftCollapsed: false,
+  detailCollapsed: false
 }
 
 function loadPrefs(): Prefs {
@@ -181,8 +186,6 @@ export interface AppState {
   repos: Record<string, RepoState>
   dialog: Dialog | null
   paletteOpen: boolean
-  leftOpen: boolean
-  detailOpen: boolean
   /** "Use the full width" in a diff: hides both side panels while a diff is open, and only then. */
   diffWide: boolean
   prefs: Prefs
@@ -200,8 +203,6 @@ export const useApp = create<AppState>(() => ({
   repos: {},
   dialog: null,
   paletteOpen: false,
-  leftOpen: true,
-  detailOpen: true,
   diffWide: false,
   prefs: loadPrefs(),
   authPrompt: null,

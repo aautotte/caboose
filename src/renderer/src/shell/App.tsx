@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { ToastProvider, TooltipProvider } from '@/ui'
-import { useApp } from '@/store'
+import { setPrefs, useApp } from '@/store'
 import * as act from '@/actions'
 import { HomeView } from '@/home/HomeView'
 import { DialogHost } from '@/dialogs/Dialogs'
@@ -43,8 +43,8 @@ function useShortcuts(): void {
       }
       if (!repo) return
       if (ctrl && k === 'w') return run(() => void act.closeTab(repo))
-      if (ctrl && k === 'j') return run(() => useApp.setState({ leftOpen: !s.leftOpen }))
-      if (ctrl && k === 'k') return run(() => useApp.setState({ detailOpen: !s.detailOpen }))
+      if (ctrl && k === 'j') return run(() => setPrefs({ leftCollapsed: !s.prefs.leftCollapsed }))
+      if (ctrl && k === 'k') return run(() => setPrefs({ detailCollapsed: !s.prefs.detailCollapsed }))
       if (ctrl && k === 'l') return run(() => void act.fetchAll(repo))
       if (ctrl && !e.shiftKey && k === 'b') {
         const head = s.repos[repo]?.refs?.head

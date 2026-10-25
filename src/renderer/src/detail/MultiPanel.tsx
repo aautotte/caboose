@@ -3,6 +3,7 @@ import { Avatar, Button, IconButton, Tooltip } from '@/ui'
 import { relativeTime, shortSha } from '@/lib/format'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
+import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { squashProblem } from '@/graph/GraphView'
 
 /** Several commits picked in the graph (Ctrl / Shift-click): what they are and what can be done with them together. */
@@ -21,6 +22,7 @@ export function MultiPanel({ repoId, shas }: { repoId: string; shas: string[] })
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
+        <CollapseDetailsButton />
         <h2 className="flex-1 text-md text-text">{shas.length} commits selected</h2>
         <Tooltip content="Clear the selection" shortcut="Esc">
           <IconButton label="Clear the selection" size="sm" onClick={() => act.select(repoId, shas[0])}>
