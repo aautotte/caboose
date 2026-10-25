@@ -101,12 +101,12 @@
     },
     "mac": {
       "target": "dmg",
-      "icon": "resources/icon-1024.png",
+      "icon": "resources/icon.icns",
       "category": "public.app-category.developer-tools"
     },
     "linux": {
       "target": "AppImage",
-      "icon": "resources/icon.png",
+      "icon": "resources/linux",
       "category": "Development"
     }
   }

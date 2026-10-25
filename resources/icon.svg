@@ -1,16 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-<defs><clipPath id="t"><rect x="8" y="8" width="240" height="240" rx="56"/></clipPath>
-<radialGradient id="g"><stop offset="0" stop-color="#ff6a50" stop-opacity=".7"/><stop offset="1" stop-color="#ff6a50" stop-opacity="0"/></radialGradient>
-<radialGradient id="w"><stop offset="0" stop-color="#ffd76a" stop-opacity=".45"/><stop offset="1" stop-color="#ffd76a" stop-opacity="0"/></radialGradient></defs>
-<rect x="8" y="8" width="240" height="240" rx="56" fill="#22313f"/>
-<g clip-path="url(#t)"><circle cx="36" cy="44" r="2.5" fill="#fff" opacity=".75"/><circle cx="60" cy="76" r="1.8" fill="#fff" opacity=".75"/><circle cx="206" cy="40" r="2.2" fill="#fff" opacity=".75"/><circle cx="224" cy="84" r="1.8" fill="#fff" opacity=".75"/><circle cx="178" cy="30" r="1.5" fill="#fff" opacity=".75"/><circle cx="34" cy="120" r="1.6" fill="#fff" opacity=".75"/><path d="M0 216 H256" stroke="#cfc8b6" stroke-width="5"/><path d="M140 216 C176 216 180 236 216 236" stroke="#cfc8b6" stroke-width="5" fill="none"/><circle cx="34" cy="216" r="9" fill="#4fc3f7" stroke="#fff" stroke-width="3"/><circle cx="226" cy="216" r="9" fill="#f6c33b" stroke="#fff" stroke-width="3"/><circle cx="202" cy="236" r="9" fill="#ff8a65" stroke="#fff" stroke-width="3"/><g fill="#2a2f35" stroke="#8b939b" stroke-width="3"><circle cx="92" cy="206" r="11"/><circle cx="164" cy="206" r="11"/></g><circle cx="128" cy="86" r="62" fill="url(#w)"/><rect x="60" y="104" width="136" height="92" rx="10" fill="#d93a2b"/>
-<path d="M52 108 Q128 84 204 108 L204 116 Q128 92 52 116 Z" fill="#7a1f17"/>
-<rect x="90" y="62" width="76" height="40" rx="6" fill="#d93a2b"/>
-<path d="M84 66 Q128 50 172 66 L172 72 Q128 56 84 72 Z" fill="#7a1f17"/>
-<rect x="100" y="74" width="22" height="20" rx="4" fill="#ffd76a"/><rect x="134" y="74" width="22" height="20" rx="4" fill="#ffd76a"/><circle cx="117" cy="89" r="5" fill="#22313f"/><circle cx="151" cy="89" r="5" fill="#22313f"/>
-<rect x="112" y="124" width="32" height="64" rx="3" fill="#7a1f17"/><rect x="118" y="131" width="20" height="18" rx="2" fill="#ffd76a"/>
-<path d="M60 160 H196 M60 160 V188 M196 160 V188 M86 160 V188 M170 160 V188" stroke="#e8e2d0" stroke-width="4" fill="none"/>
-<rect x="56" y="188" width="144" height="8" rx="2" fill="#2a2f35"/>
-<circle cx="184" cy="132" r="22" fill="url(#g)"/><rect x="177" y="124" width="14" height="16" rx="3" fill="#ff5a4a" stroke="#fff" stroke-width="1.5"/></g>
-<rect x="9" y="9" width="238" height="238" rx="55" fill="none" stroke="#000" stroke-opacity=".14" stroke-width="2"/>
+<!-- Caboose: a friendly caboose glancing at a fork in the rails. Transparent background; palette from the app's design tokens. -->
+<defs>
+<linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a66f0"/><stop offset="1" stop-color="#7148e0"/></linearGradient>
+<linearGradient id="win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f1fb"/><stop offset="1" stop-color="#dcd5f0"/></linearGradient>
+<radialGradient id="lamp"><stop offset="0" stop-color="#e0659a" stop-opacity=".55"/><stop offset="1" stop-color="#e0659a" stop-opacity="0"/></radialGradient>
+</defs>
+<g transform="translate(128 130) scale(1.1) translate(-128 -148)">
+<g fill="none" stroke="#a79fc4" stroke-width="6" stroke-linecap="round"><path d="M22 216 H234"/><path d="M140 216 C176 216 180 236 210 236"/></g>
+<circle cx="34" cy="216" r="10" fill="#4f9dff" stroke="#16181d" stroke-opacity=".25" stroke-width="2"/>
+<circle cx="224" cy="216" r="10" fill="#e8a33c" stroke="#16181d" stroke-opacity=".25" stroke-width="2"/>
+<circle cx="204" cy="236" r="10" fill="#e0659a" stroke="#16181d" stroke-opacity=".25" stroke-width="2"/>
+<g fill="#2a2a38" stroke="#8b86a3" stroke-width="3"><circle cx="92" cy="206" r="11"/><circle cx="164" cy="206" r="11"/></g>
+<rect x="60" y="104" width="136" height="92" rx="10" fill="url(#body)"/>
+<path d="M52 108 Q128 84 204 108 L204 116 Q128 92 52 116 Z" fill="#4b2fa8"/>
+<rect x="90" y="62" width="76" height="40" rx="6" fill="url(#body)"/>
+<path d="M84 66 Q128 50 172 66 L172 72 Q128 56 84 72 Z" fill="#4b2fa8"/>
+<rect x="100" y="74" width="22" height="20" rx="5" fill="url(#win)"/><rect x="134" y="74" width="22" height="20" rx="5" fill="url(#win)"/>
+<circle cx="116" cy="88" r="6" fill="#16181d"/><circle cx="150" cy="88" r="6" fill="#16181d"/>
+<circle cx="118" cy="86" r="1.9" fill="#f4f1fb"/><circle cx="152" cy="86" r="1.9" fill="#f4f1fb"/>
+<rect x="112" y="124" width="32" height="64" rx="3" fill="#4b2fa8"/><rect x="118" y="131" width="20" height="18" rx="3" fill="url(#win)"/>
+<path d="M60 160 H196 M60 160 V188 M196 160 V188 M86 160 V188 M170 160 V188" stroke="#f4f1fb" stroke-width="4" fill="none" stroke-linecap="round"/>
+<rect x="56" y="188" width="144" height="8" rx="2" fill="#3b3456"/>
+<circle cx="184" cy="132" r="18" fill="url(#lamp)"/><rect x="177" y="124" width="14" height="16" rx="3" fill="#e0659a" stroke="#f4f1fb" stroke-width="1.5"/>
+</g>
 </svg>

@@ -52,10 +52,11 @@ npm run e2e
 
 ## The icon
 
-A friendly red caboose whose cupola windows are its eyes, on rails that fork into commit dots.
-`resources/icon.svg` is the master for 48 px and up; `icon-small.svg` is a simplified close-up for 32 px and below.
-After editing either, run
-`npm run icons` to regenerate the PNG and ICO files.
+A friendly purple caboose whose cupola windows are its eyes, on rails that fork into commit dots, in the colours of
+`design/tokens.json`, on a transparent background. `resources/icon.svg` is the master for 48 px and up,
+`icon-small.svg` a simplified close-up for 32 px and below, and `icon-macos.svg` the same artwork on Apple's rounded
+tile, used only for the macOS `.icns`. After editing any of them, run
+`npm run icons` to regenerate the PNG, ICO and ICNS files.
 
 ## License
 
