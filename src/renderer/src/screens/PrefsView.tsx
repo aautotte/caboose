@@ -236,6 +236,18 @@ function SubmoduleGroup({ repoId }: { repoId: string }): React.JSX.Element | nul
           <Row label="Warn about pointers moving back" help="Asks before a commit that moves a submodule to an older commit, which usually undoes someone’s update after a pull.">
             <Switch hideLabel label="Warn about pointers moving back" checked={st.warnBack} onCheckedChange={(v) => set({ warnBack: v })} />
           </Row>
+          <Row label="Before pushing" help="Checks that the submodule commits a push points at are on their remotes, so others can set them up. Push first pushes those submodules before the repository, when each is on a branch that tracks a remote.">
+            <Select
+              label="Before pushing"
+              value={st.pushCheck}
+              onValueChange={(v) => set({ pushCheck: v as SubmoduleSettings['pushCheck'] })}
+              options={[
+                { value: 'check', label: 'Check' },
+                { value: 'push', label: 'Push submodules first' },
+                { value: 'off', label: 'Don’t check' }
+              ]}
+            />
+          </Row>
           <Row label="At once" help="How many submodules are set up or updated at the same time (git’s submodule.fetchJobs).">
             <Select label="At once" value={String(st.jobs)} onValueChange={(v) => set({ jobs: Number(v) })} options={[1, 2, 4, 8, 16].map((n) => ({ value: String(n), label: String(n) }))} />
           </Row>

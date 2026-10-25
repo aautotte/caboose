@@ -401,6 +401,50 @@ export class RepoOps {
     return at
   }
 
+  /**
+   * Before pushing `branch`: submodules whose pointer, in the commits about to go out, names commits that aren't on
+   * any of the submodule's remotes, so nobody else could get them. Only submodules set up here can be checked.
+   * `canPush`: it's on a branch with an upstream that holds the commit, so a plain push in it sends it.
+   */
+  async submodulesUnpushed(branch: string | null): Promise<Array<{ path: string; count: number; canPush: boolean }>> {
+    const b = branch ? this.safeRev(branch) : (await this.status()).branch
+    if (!b) return []
+    const upstream = (await this.tryGit(['rev-parse', '--abbrev-ref', `${b}@{upstream}`]))?.trim()
+    const range = upstream ? [`${upstream}..${b}`] : [b, '--not', '--remotes']
+    // Newest first: the first pointer seen for a path is the one this push leaves it at.
+    const out = (await this.tryGit(['log', '--format=', '--raw', '--no-abbrev', '-z', '--no-renames', ...range, '--'])) ?? ''
+    const newest = new Map<string, string>()
+    const parts = out.split('\0')
+    for (let i = 0; i + 1 < parts.length; i++) {
+      const meta = parts[i].replace(/^\n+/, '')
+      if (!meta.startsWith(':')) continue
+      const [, dstMode, , dst] = meta.slice(1).split(' ')
+      const path = parts[++i]
+      if (dstMode === '160000' && !newest.has(path)) newest.set(path, dst)
+    }
+    const found: Array<{ path: string; count: number; canPush: boolean }> = []
+    for (const [path, sha] of newest) {
+      if (!existsSync(join(this.repo.path, path, '.git')) || (await this.tryGit(['-C', path, 'cat-file', '-e', `${sha}^{commit}`])) === null) continue
+      const count = Number((await this.tryGit(['-C', path, 'rev-list', '--count', sha, '--not', '--remotes']))?.trim() ?? 0)
+      if (!count) continue
+      const onBranch = (await this.tryGit(['-C', path, 'rev-parse', '--abbrev-ref', 'HEAD']))?.trim()
+      const tracks = onBranch && onBranch !== 'HEAD' ? await this.tryGit(['-C', path, 'rev-parse', '--abbrev-ref', '@{upstream}']) : null
+      const holds = tracks ? (await this.tryGit(['-C', path, 'merge-base', '--is-ancestor', sha, 'HEAD'])) !== null : false
+      found.push({ path, count, canPush: holds })
+    }
+    return found
+  }
+
+  /** `git push` inside a submodule, to its branch's upstream. */
+  async submodulePush(path: string, opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
+    await this.mut(['-C', this.safePath(path), 'push', '--progress'], { opId, onProgress, timeoutMs: 300_000 })
+  }
+
+  /** The repository this one is a submodule of, or null. */
+  async superproject(): Promise<string | null> {
+    return (await this.tryGit(['rev-parse', '--show-superproject-working-tree']))?.trim() || null
+  }
+
   /** A submodule's mode in this repository's .git/config; null goes back to the repository's default. */
   async submoduleSetMode(names: string[], mode: SubmoduleMode | null): Promise<void> {
     for (const n of names) {

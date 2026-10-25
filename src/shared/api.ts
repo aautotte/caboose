@@ -66,10 +66,12 @@ export interface Api {
   'lfs.turnOn': { in: R & { opId: string }; out: null }
   'lfs.track': { in: R & { pattern: string; exact: boolean }; out: null }
   'lfs.untrack': { in: R & { pattern: string }; out: null }
-  'submodule.list': { in: R; out: { list: Submodule[]; settings: SubmoduleSettings; present: boolean } }
+  'submodule.list': { in: R; out: { list: Submodule[]; settings: SubmoduleSettings; present: boolean; superproject: string | null } }
   'submodule.goingBack': { in: R; out: Array<{ path: string; behind: number }> }
   'submodule.sync': { in: R & { from: string; to: string; opId: string }; out: SubmoduleSyncResult }
   'submodule.atRisk': { in: R & { to: string }; out: string[] }
+  'submodule.unpushed': { in: R & { branch?: string }; out: Array<{ path: string; count: number; canPush: boolean }> }
+  'submodule.push': { in: R & { path: string; opId: string }; out: null }
   'submodule.setup': { in: R & { paths: string[] | 'all'; shallow?: boolean; opId: string }; out: null }
   'submodule.update': { in: R & { paths: string[] | 'all'; opId: string }; out: null }
   'submodule.remove': { in: R & { paths: string[] }; out: null }

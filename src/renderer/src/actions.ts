@@ -255,7 +255,8 @@ const subName = (paths: string[] | 'all'): string => (paths === 'all' ? 'all sub
 
 export async function setUpSubmodules(repoId: string, paths: string[] | 'all', shallow?: boolean): Promise<void> {
   const ok = await subOp(repoId, `Setting up ${subName(paths)}`, (opId) => call('submodule.setup', { repoId, paths, shallow, opId }), 'Couldn’t set up every submodule')
-  const list = useApp.getState().repos[repoId]?.submodules?.list ?? []
+  // Asked again rather than read from the store: a refresh started meanwhile may not have landed yet.
+  const list = (await call('submodule.list', { repoId }).catch(() => null))?.list ?? useApp.getState().repos[repoId]?.submodules?.list ?? []
   const missing = list.filter((m) => !m.setUp && (paths === 'all' || paths.includes(m.path)))
   if (ok && !missing.length) toast({ tone: 'success', title: paths === 'all' ? 'Submodules set up' : `Set up ${subName(paths)}` })
   else if (missing.length) toast({ tone: 'error', title: `${plural(missing.length, 'submodule')} not set up`, body: missing.map((m) => m.path).join(', ') })
@@ -290,7 +291,7 @@ export async function setSubmoduleMode(repoId: string, names: string[], mode: Su
 
 export async function setSubmoduleSettings(repoId: string, patch: Partial<SubmoduleSettings>): Promise<void> {
   const settings = await attempt(() => call('submodule.settings', { repoId, ...patch }), 'Couldn’t save that setting')
-  if (settings) patchRepo(repoId, (r) => ({ submodules: { list: r.submodules?.list ?? [], present: r.submodules?.present ?? true, settings } }))
+  if (settings) patchRepo(repoId, (r) => ({ submodules: { list: r.submodules?.list ?? [], present: r.submodules?.present ?? true, superproject: r.submodules?.superproject ?? null, settings } }))
   if (patch.on !== undefined) await loadSubmodules(repoId)
 }
 
@@ -616,7 +617,7 @@ export function discard(repoId: string, paths: string[] | 'all'): void {
   })
 }
 
-type CommitInput = { summary: string; body: string; amend: boolean; noVerify: boolean; push: boolean; messageOnly?: boolean }
+type CommitInput = { summary: string; body: string; amend: boolean; noVerify: boolean; push: boolean; messageOnly?: boolean; detachedOk?: boolean }
 
 /**
  * Commits, but first asks when a staged submodule pointer would move back: the usual way a teammate's update gets
@@ -624,6 +625,24 @@ type CommitInput = { summary: string; body: string; amend: boolean; noVerify: bo
  */
 export async function commit(repoId: string, input: CommitInput): Promise<boolean> {
   const r = useApp.getState().repos[repoId]
+  // Inside a submodule that isn't on a branch, new commits hang off nothing: the parent's next update moves away.
+  const parent = r?.submodules?.superproject
+  const head = r?.refs?.head
+  // The store can lag a moment behind (a branch just created): ask git before asking the user.
+  const detached = parent && head?.sha && !head.branch && !input.messageOnly && !input.amend && !input.detachedOk && !(await call('status.get', { repoId }).catch(() => null))?.branch
+  if (detached && head?.sha) {
+    const name = parent.split(/[\\/]/).filter(Boolean).pop() ?? parent
+    confirm({
+      title: 'Commit without a branch?',
+      body: `This is a submodule of ${name}, and it isn’t on a branch (detached at ${head.sha.slice(0, 7)}). Commits made like this are easy to lose: the next time ${name} updates this submodule, it moves away from them. Create a branch to keep them.`,
+      confirmLabel: 'Commit anyway',
+      danger: false,
+      undoable: true,
+      onConfirm: () => void commit(repoId, { ...input, detachedOk: true }),
+      alt: { label: 'Create a branch…', onSelect: () => openDialog({ kind: 'createBranch', repoId, at: head.sha!, atLabel: head.sha!.slice(0, 7) }) }
+    })
+    return false
+  }
   if (!input.messageOnly && r?.submodules?.list.length) {
     const back = await call('submodule.goingBack', { repoId }).catch(() => [])
     if (back.length) {
@@ -808,7 +827,43 @@ export async function pull(repoId: string, mode?: PullMode): Promise<void> {
   await loadRepo(repoId, { keepSelection: true })
 }
 
-export async function push(repoId: string, opts: { setUpstream?: boolean; force?: boolean; remote?: string; branch?: string } = {}): Promise<void> {
+type PushOpts = { setUpstream?: boolean; force?: boolean; remote?: string; branch?: string }
+
+/**
+ * Pushes, but first looks at the submodule pointers in the commits going out: if one names commits that aren't on
+ * that submodule's remote, nobody else could set it up there. Depending on the setting it asks, or pushes those
+ * submodules first (when each is on a branch that tracks a remote).
+ */
+export async function push(repoId: string, opts: PushOpts = {}, subChecked = false): Promise<void> {
+  const subs = useApp.getState().repos[repoId]?.submodules
+  if (!subChecked && !opts.force && subs?.settings.on && subs.settings.pushCheck !== 'off' && subs.list.some((m) => m.setUp)) {
+    const missing = await call('submodule.unpushed', { repoId, branch: opts.branch }).catch(() => [])
+    if (missing.length) {
+      const pushable = missing.filter((m) => m.canPush)
+      const stuck = missing.filter((m) => !m.canPush)
+      const pushSubsFirst = async (): Promise<void> => {
+        for (const m of pushable) {
+          const ok = await remoteOp(repoId, 'push', `Pushing ${m.path}`, (opId) => call('submodule.push', { repoId, path: m.path, opId }), `Couldn’t push ${m.path}`)
+          if (ok === undefined) return
+        }
+        await push(repoId, opts, true)
+      }
+      if (subs.settings.pushCheck === 'push' && !stuck.length) return pushSubsFirst()
+      const list = missing.map((m) => `${m.path} (${plural(m.count, 'commit')})`).join(', ')
+      confirm({
+        title: missing.length === 1 ? `${missing[0].path} isn’t pushed` : `${plural(missing.length, 'submodule')} aren’t pushed`,
+        body:
+          `This push points at submodule commits that aren’t on their remote yet: ${list}. Anyone who pulls it couldn’t set ${missing.length === 1 ? 'that submodule' : 'those submodules'} up at those commits.` +
+          (stuck.length ? ` ${stuck.map((m) => m.path).join(', ')} ${stuck.length === 1 ? 'isn’t' : 'aren’t'} on a branch that tracks a remote: open ${stuck.length === 1 ? 'it' : 'them'} and push from there.` : ''),
+        confirmLabel: 'Push anyway',
+        danger: true,
+        undoable: false,
+        onConfirm: () => void push(repoId, opts, true),
+        alt: pushable.length ? { label: pushable.length === 1 ? `Push ${pushable[0].path} first` : `Push ${plural(pushable.length, 'submodule')} first`, onSelect: () => void pushSubsFirst() } : undefined
+      })
+      return
+    }
+  }
   const res = await remoteOp(repoId, 'push', 'Pushing', (opId) => call('remote.push', { repoId, opId, ...opts }), 'Push failed')
   const branch = opts.branch ?? useApp.getState().repos[repoId]?.refs?.head.branch ?? ''
   if (res?.result === 'needsUpstream') openDialog({ kind: 'publish', repoId, branch })

@@ -595,7 +595,7 @@ function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string
       count={shown.length}
       empty="No matches"
       menu={headerMenu}
-      action={notSetUp.length ? { label: `Set up all ${notSetUp.length} submodules`, icon: <Download size={14} />, disabled: busy, onClick: () => void act.setUpSubmodules(repoId, 'all') } : undefined}
+      action={notSetUp.length ? { label: notSetUp.length === 1 ? 'Set up the submodule' : `Set up all ${notSetUp.length} submodules`, icon: <Download size={14} />, disabled: busy, onClick: () => void act.setUpSubmodules(repoId, 'all') } : undefined}
       note={
         running ? (
           <div role="status" aria-label="Submodules" className="mx-2 mb-1 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2 py-1 text-sm text-muted">

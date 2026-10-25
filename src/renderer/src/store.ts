@@ -55,7 +55,7 @@ export interface RepoState {
   /** "Not now" on the LFS notice, for this session. */
   lfsDismissed: boolean
   /** The checked-out commit's submodules and this repository's submodule settings; null until read. */
-  submodules: { list: Submodule[]; settings: SubmoduleSettings; present: boolean } | null
+  submodules: { list: Submodule[]; settings: SubmoduleSettings; present: boolean; superproject: string | null } | null
   /** A submodule set-up or update running in the background. */
   subOp: { label: string; opId: string; phase?: string; percent?: number } | null
 }
@@ -91,6 +91,7 @@ export type Dialog =
       danger: boolean
       undoable: boolean
       onConfirm: () => void
+      alt?: { label: string; onSelect: () => void }
     }
 
 export type DiffMode = 'hunk' | 'inline' | 'split'

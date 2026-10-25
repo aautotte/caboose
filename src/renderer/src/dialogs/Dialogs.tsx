@@ -53,6 +53,7 @@ export function DialogHost(): React.JSX.Element | null {
           danger={d.danger}
           undoable={d.undoable}
           onConfirm={d.onConfirm}
+          alt={d.alt}
         />
       )
   }

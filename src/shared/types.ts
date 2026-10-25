@@ -250,6 +250,8 @@ export interface SubmoduleSettings {
   warnBack: boolean
   /** After a checkout, remove the folders git leaves behind for submodules the new commit doesn't have (when clean). */
   tidy: boolean
+  /** Before pushing: off, check that the submodule commits it points at are pushed, or push those submodules first. */
+  pushCheck: 'off' | 'check' | 'push'
 }
 
 /** What happened to the submodules after HEAD moved. */
