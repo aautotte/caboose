@@ -52,11 +52,14 @@ npm run e2e
 
 ## The icon
 
-A determined purple caboose whose cupola windows are its eyes, with a Git branch on its door, on rails that fork
-into commit dots, in the colours of `design/tokens.json`, on a transparent background. `resources/icon.svg` is the
-master for 64 px and up, `icon-small.svg` a close-up that fills the canvas for 48 px and below (the Windows
-taskbar's sizes), and `icon-macos.svg` the same artwork on Apple's rounded tile, used only for the macOS `.icns`.
-After editing any of them, run `npm run icons` to regenerate the PNG, ICO and ICNS files.
+A red caboose with big eyes, riding the rails, with five Git branches fanning out behind it, on a transparent
+background. `resources/icon.svg` is the master for 64 px and up, `icon-small.svg` a simplified version (two branches,
+thicker strokes, cropped to fill the canvas) for 48 px and below (the Windows taskbar's sizes), and `icon-macos.svg`
+the same artwork on Apple's rounded tile, used only for the macOS `.icns`. After editing any of them, run
+`npm run icons` to regenerate the PNG, ICO and ICNS files.
+
+The README's header is the full logo with the name, `docs/images/logo.png`, and `logo-dark.png` for GitHub's dark
+theme (the same image with "GIT CLIENT" in white, as the navy text would vanish there).
 
 ## License
 

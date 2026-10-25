@@ -7,3 +7,6 @@ test-results/
 playwright-report/
 .e2e-gitconfig
 docs/screenshots/
+
+# Source artwork for the icon and logo, kept out of the repo
+new-icon/
