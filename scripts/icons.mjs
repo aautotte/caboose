@@ -1,4 +1,5 @@
-// Renders the app icon from resources/icon.svg (and icon-small.svg for 16 to 32 px) with Electron's own Chromium,
+// Renders the app icon with Electron's own Chromium: resources/icon-small.svg (a simplified close-up) for 32 px and
+// below, icon.svg for 48 px and up. Each small size is drawn from the SVG at that size, so it stays crisp.
 // then writes the PNGs and a Windows .ico. Run: npx electron scripts/icons.mjs
 import { app, BrowserWindow, nativeImage } from 'electron'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -63,8 +64,9 @@ app.on('window-all-closed', () => {})
 app.whenReady().then(async () => {
   try {
     const big = await render('icon.svg', RENDER)
-    const small = await render('icon-small.svg', 256)
-    const at = (size) => (size <= 32 ? small : big).resize({ width: size, height: size, quality: 'best' }).toPNG()
+    const small = new Map()
+    for (const size of [16, 24, 32]) small.set(size, await render('icon-small.svg', size))
+    const at = (size) => (size <= 32 ? small.get(size) : big.resize({ width: size, height: size, quality: 'best' })).toPNG()
     writeFileSync(join(res, 'icon-1024.png'), big.toPNG())
     writeFileSync(join(res, 'icon.png'), at(512))
     writeFileSync(join(res, 'icon.ico'), ico([16, 24, 32, 48, 64, 128, 256].map((size) => ({ size, data: at(size) }))))
