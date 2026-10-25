@@ -52,7 +52,7 @@ works offline, and it doesn't phone home.
 ## Run it from source
 
 ```bash
-git clone https://github.com/aautotte/mergatroid.git caboose
+git clone https://github.com/aautotte/caboose.git
 cd caboose
 nvm use          # or install Node 24 another way
 npm ci

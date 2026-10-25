@@ -6,13 +6,13 @@
   "description": "A desktop Git client with a commit graph, built on the git you already have installed.",
   "license": "MIT",
   "author": "aautotte (https://github.com/aautotte)",
-  "homepage": "https://github.com/aautotte/mergatroid",
+  "homepage": "https://github.com/aautotte/caboose",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aautotte/mergatroid.git"
+    "url": "git+https://github.com/aautotte/caboose.git"
   },
   "bugs": {
-    "url": "https://github.com/aautotte/mergatroid/issues"
+    "url": "https://github.com/aautotte/caboose/issues"
   },
   "engines": {
     "node": ">=22.12"
