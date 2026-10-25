@@ -12,8 +12,8 @@
 <rect x="68" y="34" width="120" height="64" rx="10" fill="url(#cbs-body)"/>
 <path d="M58 40 Q128 14 198 40 L198 50 Q128 24 58 50 Z" fill="#4b2fa8"/>
 <rect x="82" y="54" width="38" height="34" rx="7" fill="url(#cbs-win)"/><rect x="136" y="54" width="38" height="34" rx="7" fill="url(#cbs-win)"/>
-<circle cx="106" cy="76" r="10" fill="#16181d"/><circle cx="160" cy="76" r="10" fill="#16181d"/>
-<rect x="104" y="128" width="48" height="80" rx="5" fill="#4b2fa8"/><rect x="113" y="138" width="30" height="24" rx="4" fill="url(#cbs-win)"/>
-<rect x="196" y="122" width="18" height="22" rx="5" fill="#e0659a" stroke="#f4f1fb" stroke-width="2.5"/>
+<circle cx="101" cy="76" r="10" fill="#16181d"/><circle cx="155" cy="76" r="10" fill="#16181d"/><circle cx="104" cy="74" r="3.5" fill="#f4f1fb"/><circle cx="158" cy="74" r="3.5" fill="#f4f1fb"/><path d="M82 54 H120 V66 Q101 72 82 62 Z" fill="#7148e0"/><path d="M136 54 H174 V62 Q155 72 136 66 Z" fill="#7148e0"/>
+<rect x="88" y="124" width="80" height="84" rx="8" fill="#4b2fa8"/><g fill="none" stroke="#f4f1fb" stroke-width="7" stroke-linecap="round"><path d="M110 192 V142"/><path d="M148 152 C148 176 110 168 110 184"/></g><circle cx="110" cy="192" r="9" fill="#4f9dff" stroke="#f4f1fb" stroke-width="3"/><circle cx="110" cy="140" r="9" fill="#4f9dff" stroke="#f4f1fb" stroke-width="3"/><circle cx="148" cy="148" r="9" fill="#e0659a" stroke="#f4f1fb" stroke-width="3"/>
+<rect x="194" y="128" width="18" height="22" rx="5" fill="#e0659a" stroke="#f4f1fb" stroke-width="2.5"/>
 </g>
 </svg>
