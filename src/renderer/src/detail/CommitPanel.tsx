@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Copy, GitCommitHorizontal, History, ShieldAlert, ShieldCheck, ShieldQuestion, UserSearch } from 'lucide-react'
+import { AlertTriangle, Copy, GitCommitHorizontal, History, Pencil, ShieldAlert, ShieldCheck, ShieldQuestion, UserSearch } from 'lucide-react'
 import type { CommitDetails, CommitSignature } from '../../../shared/types'
 import { Avatar, Badge, Button, EmptyState, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
 import { call } from '@/lib/api'
@@ -135,23 +135,27 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <p className="text-md break-words text-text">{stash ? stash.message : d.summary}</p>
+            {/* The pencil sits on the summary line, right under the author, so a long message doesn't push it away. */}
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 text-md break-words text-text">{stash ? stash.message : d.summary}</p>
+              {canEdit ? (
+                <Tooltip content="Edit message">
+                  <IconButton
+                    label="Edit message"
+                    size="sm"
+                    disabled={behindMerge}
+                    onClick={() => {
+                      setSummary(d.summary)
+                      setBody(d.body)
+                      setEditing(true)
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </IconButton>
+                </Tooltip>
+              ) : null}
+            </div>
             {d.body ? <p className="text-base break-words whitespace-pre-wrap text-muted">{d.body}</p> : null}
-            {canEdit ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="-ml-2 self-start text-accent-text"
-                disabled={behindMerge}
-                onClick={() => {
-                  setSummary(d.summary)
-                  setBody(d.body)
-                  setEditing(true)
-                }}
-              >
-                Edit message
-              </Button>
-            ) : null}
             {behindMerge ? <p className="text-sm text-muted">Its message can’t be changed here: there’s a merge commit after it on this branch, and rewriting would flatten that merge.</p> : null}
           </div>
         )}
