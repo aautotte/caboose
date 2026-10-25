@@ -3,7 +3,6 @@ import { KeyRound } from 'lucide-react'
 import type { ResetMode } from '../../../shared/types'
 import { Button, Checkbox, Dialog, Field, Select, TextArea, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
-import { splitPath } from '@/lib/format'
 import { call } from '@/lib/api'
 import { useApp, type Dialog as D } from '@/store'
 import * as act from '@/actions'
@@ -232,59 +231,6 @@ export function ResetDialog({ d }: { d: Extract<D, { kind: 'reset' }> }): React.
           </label>
         ))}
       </fieldset>
-    </Dialog>
-  )
-}
-
-/** F22: ignore this file, its extension or its folder. */
-export function IgnoreDialog({ d }: { d: Extract<D, { kind: 'ignore' }> }): React.JSX.Element {
-  const { dir, name } = splitPath(d.path)
-  const ext = /\.[^./]+$/.exec(name)?.[0]
-  const esc = (s: string): string => s.replace(/[\\*?[\]!#]/g, (c) => `\\${c}`)
-  const options = [
-    { value: `/${esc(d.path)}`, label: `This file only (${name})` },
-    ...(ext ? [{ value: `*${esc(ext)}`, label: `All ${ext} files` }] : []),
-    ...(dir ? [{ value: `/${esc(dir)}`, label: `The folder ${dir}` }] : [])
-  ]
-  const [pattern, setPattern] = useState(options[0].value)
-  const [stop, setStop] = useState(d.tracked)
-  const [busy, setBusy] = useState(false)
-  const target = pattern.startsWith('*') ? null : pattern.replace(/^\//, '').replace(/\\(.)/g, '$1').replace(/\/$/, '')
-  const submit = async (): Promise<void> => {
-    setBusy(true)
-    const stopPaths = d.tracked && stop ? [target ?? d.path] : []
-    const ok = await act.ignore(d.repoId, pattern, stopPaths)
-    setBusy(false)
-    if (ok) close()
-  }
-  return (
-    <Dialog
-      open
-      onOpenChange={(o) => !o && close()}
-      title="Ignore"
-      footer={
-        <>
-          <Button onClick={close}>Cancel</Button>
-          <Button variant="primary" loading={busy} onClick={() => void submit()}>
-            Add to .gitignore
-          </Button>
-        </>
-      }
-    >
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-sm text-muted">Ignore</span>
-        <Select label="What to ignore" value={pattern} onValueChange={setPattern} options={options} />
-      </div>
-      <p className="text-sm text-muted">
-        Adds <span className="font-mono text-xs text-text">{pattern}</span> to the .gitignore at the top of the repository.
-      </p>
-      {d.tracked ? (
-        <Checkbox
-          label="Also stop tracking it (keeps the file on disk, removes it from the next commit)"
-          checked={stop}
-          onCheckedChange={setStop}
-        />
-      ) : null}
     </Dialog>
   )
 }

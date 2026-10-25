@@ -5,7 +5,7 @@ import * as act from '@/actions'
 import { CloneDialog, InitDialog } from '@/home/RepoDialogs'
 import { ShortcutSheet } from '@/screens/Stubs'
 import { ProfilesDialog } from './ProfilesDialog'
-import { AddRemoteDialog, CreateTagDialog, GroupNameDialog, IgnoreDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog } from './MoreDialogs'
+import { AddRemoteDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
 export function DialogHost(): React.JSX.Element | null {
@@ -32,8 +32,6 @@ export function DialogHost(): React.JSX.Element | null {
       return <AddRemoteDialog d={d} />
     case 'reset':
       return <ResetDialog d={d} />
-    case 'ignore':
-      return <IgnoreDialog d={d} />
     case 'upstream':
       return <UpstreamDialog d={d} />
     case 'renameStash':

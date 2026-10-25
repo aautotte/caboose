@@ -131,6 +131,13 @@ export async function menu(page: Page, target: ReturnType<Page['locator']>, item
   await page.getByRole('menuitem', { name: item }).click()
 }
 
+/** Right-click › submenu › item. In a small window a submenu can open over its parent, so the item is picked from the keyboard. */
+export async function subMenu(page: Page, target: ReturnType<Page['locator']>, sub: string, item: string): Promise<void> {
+  await target.click({ button: 'right' })
+  await page.getByRole('menuitem', { name: sub }).click()
+  await page.getByRole('menu').last().getByRole('menuitem', { name: item, exact: true }).press('Enter')
+}
+
 export async function toGraph(page: Page): Promise<void> {
   await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')

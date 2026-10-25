@@ -100,7 +100,7 @@ export interface Api {
     in: R & { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }
     out: null
   }
-  'ignore.add': { in: R & { pattern: string; stopTracking: string[] }; out: null }
+  'ignore.add': { in: R & { patterns: string[]; label: string }; out: { untracked: number } }
 
   'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean }; out: OpResult }
   'stash.apply': { in: R & { sha: string }; out: OpResult }

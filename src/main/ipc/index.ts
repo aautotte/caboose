@@ -313,8 +313,14 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
         return null
       })
   )
-  handle('ignore.add', z.object({ ...R, pattern: z.string().min(1).max(1000), stopTracking: z.array(filePath).max(5000) }), ({ repoId, pattern, stopTracking }) =>
-    exclusive(repoId, async () => (await ops(repoId).ignore(pattern, stopTracking), null))
+  handle('ignore.add', z.object({ ...R, patterns: z.array(z.string().min(1).max(4096)).min(1).max(5000), label: z.string().min(1).max(300) }), ({ repoId, patterns, label }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const r = await o.ignore(patterns)
+      undo.record(repoId, 'ignore', `Ignore ${label}`, { ...head, gitignore: r.before, index: r.index }, { ...head, gitignore: r.after, paths: r.untracked })
+      return { untracked: r.untracked.length }
+    })
   )
 
   // ---------- stash ----------
