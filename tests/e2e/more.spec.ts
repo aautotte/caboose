@@ -244,6 +244,8 @@ test('sparse clone checks out only the chosen folder', async () => {
   await expect.poll(() => existsSync(join(dest, 'src', 'fetch.js'))).toBe(true)
   expect(execFileSync('git', ['sparse-checkout', 'list'], { cwd: dest, env, encoding: 'utf8' }).trim()).toBe('src')
   expect(readdirSync(dest).sort()).toEqual(['.git', '.gitignore', 'CHANGELOG.md', 'README.md', 'src'])
+  // The clone opens in its own tab a moment after the files land; wait for it, so the next test's home screen stays.
+  await expect(page.getByRole('tab', { name: 'sparse-copy' })).toHaveAttribute('aria-selected', 'true')
 })
 
 test('group repositories on the home screen', async () => {
@@ -251,7 +253,6 @@ test('group repositories on the home screen', async () => {
   const recent = page.getByRole('region', { name: 'Recent' })
   // The list refreshes after the clone in the previous test; wait for it to include that repo.
   await expect(recent.getByRole('listitem').filter({ hasText: 'sparse-copy' })).toHaveCount(1)
-  await page.waitForTimeout(500)
   await recent.getByRole('listitem').filter({ hasText: 'demo' }).first().click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Move to group' }).click()
   await page.getByRole('menuitem', { name: 'New group…' }).click()
