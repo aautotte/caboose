@@ -52,7 +52,9 @@ npm run e2e
 
 ## The icon
 
-`resources/icon.svg` (and `icon-small.svg` for 16 to 32 px) are the masters. After editing them, run
+A friendly red caboose whose cupola windows are its eyes, on rails that fork into commit dots.
+`resources/icon.svg` is the master for 48 px and up; `icon-small.svg` is a simplified close-up for 32 px and below.
+After editing either, run
 `npm run icons` to regenerate the PNG and ICO files.
 
 ## License
