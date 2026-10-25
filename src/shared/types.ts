@@ -203,6 +203,8 @@ export interface LfsState {
   installed: boolean
   /** LFS's filters are in git's config (what `git lfs install` sets up); without them files commit and check out raw. */
   on: boolean
+  /** The LFS rules in the root .gitattributes (where `git lfs track` writes), as written there. */
+  patterns: string[]
 }
 
 export interface OpResult {
