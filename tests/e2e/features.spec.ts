@@ -106,7 +106,8 @@ test('stash with a name, then pop it', async () => {
   await dialog().getByLabel('Name (optional)').fill('e2e stash')
   await dialog().getByRole('button', { name: 'Stash', exact: true }).click()
   await expect.poll(() => git('stash', 'list')).toContain('e2e stash')
-  expect(git('status', '--porcelain')).toBe('')
+  // git writes the stash before it cleans the working copy; wait for both.
+  await expect.poll(() => git('status', '--porcelain')).toBe('')
 
   await toolbar(/^Pop the newest stash: .*e2e stash/).click()
   await expect.poll(() => git('stash', 'list')).not.toContain('e2e stash')
