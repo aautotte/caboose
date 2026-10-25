@@ -120,8 +120,6 @@ test('focus on this branch, then show all', async () => {
 })
 
 test('hide a column, and the choice is saved for the repo', async () => {
-  // At 1024 wide the Author column only fits with the left panel out of the way.
-  await page.keyboard.press('Control+J')
   await expect(page.getByRole('columnheader', { name: /Author$/ })).toBeVisible()
   await menu(page.getByRole('row', { name: /^Columns/ }), 'Hide the Author column')
   await expect(page.getByRole('columnheader', { name: /Author$/ })).toHaveCount(0)
@@ -134,7 +132,6 @@ test('hide a column, and the choice is saved for the repo', async () => {
   expect(saved.find((c) => c.key === 'author')?.visible).toBe(false)
   await menu(page.getByRole('row', { name: /^Columns/ }), 'Reset columns')
   await expect(page.getByRole('columnheader', { name: /Author$/ })).toBeVisible()
-  await page.keyboard.press('Control+J')
 })
 
 test('pin a branch to the left of the graph', async () => {
