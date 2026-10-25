@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-<!-- Caboose: a friendly caboose glancing at a fork in the rails. Transparent background; palette from the app's design tokens. -->
+<!-- Caboose: a friendly caboose with a Git branch on its door, at a fork in the rails. Transparent background; palette from the app's design tokens. -->
 <defs>
-<linearGradient id="body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a66f0"/><stop offset="1" stop-color="#7148e0"/></linearGradient>
-<linearGradient id="win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f1fb"/><stop offset="1" stop-color="#dcd5f0"/></linearGradient>
-<radialGradient id="lamp"><stop offset="0" stop-color="#e0659a" stop-opacity=".55"/><stop offset="1" stop-color="#e0659a" stop-opacity="0"/></radialGradient>
+<linearGradient id="cbm-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8a66f0"/><stop offset="1" stop-color="#7148e0"/></linearGradient>
+<linearGradient id="cbm-win" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f1fb"/><stop offset="1" stop-color="#dcd5f0"/></linearGradient>
+<radialGradient id="cbm-lamp"><stop offset="0" stop-color="#e0659a" stop-opacity=".55"/><stop offset="1" stop-color="#e0659a" stop-opacity="0"/></radialGradient>
 </defs>
 <g transform="translate(128 130) scale(1.1) translate(-128 -148)">
 <g fill="none" stroke="#a79fc4" stroke-width="6" stroke-linecap="round"><path d="M22 216 H234"/><path d="M140 216 C176 216 180 236 210 236"/></g>
@@ -11,16 +11,15 @@
 <circle cx="224" cy="216" r="10" fill="#e8a33c" stroke="#16181d" stroke-opacity=".25" stroke-width="2"/>
 <circle cx="204" cy="236" r="10" fill="#e0659a" stroke="#16181d" stroke-opacity=".25" stroke-width="2"/>
 <g fill="#2a2a38" stroke="#8b86a3" stroke-width="3"><circle cx="92" cy="206" r="11"/><circle cx="164" cy="206" r="11"/></g>
-<rect x="60" y="104" width="136" height="92" rx="10" fill="url(#body)"/>
+<rect x="60" y="104" width="136" height="92" rx="10" fill="url(#cbm-body)"/>
 <path d="M52 108 Q128 84 204 108 L204 116 Q128 92 52 116 Z" fill="#4b2fa8"/>
-<rect x="90" y="62" width="76" height="40" rx="6" fill="url(#body)"/>
+<rect x="90" y="62" width="76" height="40" rx="6" fill="url(#cbm-body)"/>
 <path d="M84 66 Q128 50 172 66 L172 72 Q128 56 84 72 Z" fill="#4b2fa8"/>
-<rect x="100" y="74" width="22" height="20" rx="5" fill="url(#win)"/><rect x="134" y="74" width="22" height="20" rx="5" fill="url(#win)"/>
-<circle cx="116" cy="88" r="6" fill="#16181d"/><circle cx="150" cy="88" r="6" fill="#16181d"/>
-<circle cx="118" cy="86" r="1.9" fill="#f4f1fb"/><circle cx="152" cy="86" r="1.9" fill="#f4f1fb"/>
-<rect x="112" y="124" width="32" height="64" rx="3" fill="#4b2fa8"/><rect x="118" y="131" width="20" height="18" rx="3" fill="url(#win)"/>
-<path d="M60 160 H196 M60 160 V188 M196 160 V188 M86 160 V188 M170 160 V188" stroke="#f4f1fb" stroke-width="4" fill="none" stroke-linecap="round"/>
+<rect x="100" y="74" width="22" height="20" rx="5" fill="url(#cbm-win)"/><rect x="134" y="74" width="22" height="20" rx="5" fill="url(#cbm-win)"/>
+<circle cx="111" cy="85" r="6" fill="#16181d"/><circle cx="145" cy="85" r="6" fill="#16181d"/><circle cx="113" cy="84" r="2" fill="#f4f1fb"/><circle cx="147" cy="84" r="2" fill="#f4f1fb"/><path d="M100 74 H122 V81 Q111 85 100 79 Z" fill="#7148e0"/><path d="M134 74 H156 V79 Q145 85 134 81 Z" fill="#7148e0"/>
+<rect x="104" y="122" width="48" height="66" rx="5" fill="#4b2fa8"/><g fill="none" stroke="#f4f1fb" stroke-width="4.5" stroke-linecap="round"><path d="M117 176 V138"/><path d="M139 146 C139 163 117 158 117 168"/></g><circle cx="117" cy="177" r="5.5" fill="#4f9dff" stroke="#f4f1fb" stroke-width="2"/><circle cx="117" cy="136" r="5.5" fill="#4f9dff" stroke="#f4f1fb" stroke-width="2"/><circle cx="139" cy="142" r="5.5" fill="#e0659a" stroke="#f4f1fb" stroke-width="2"/>
+<path d="M60 160 H104 M152 160 H196 M60 160 V188 M196 160 V188 M86 160 V188 M170 160 V188" stroke="#f4f1fb" stroke-width="4" fill="none" stroke-linecap="round"/>
 <rect x="56" y="188" width="144" height="8" rx="2" fill="#3b3456"/>
-<circle cx="184" cy="132" r="18" fill="url(#lamp)"/><rect x="177" y="124" width="14" height="16" rx="3" fill="#e0659a" stroke="#f4f1fb" stroke-width="1.5"/>
+<circle cx="184" cy="132" r="18" fill="url(#cbm-lamp)"/><rect x="177" y="124" width="14" height="16" rx="3" fill="#e0659a" stroke="#f4f1fb" stroke-width="1.5"/>
 </g>
 </svg>
