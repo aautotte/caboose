@@ -114,7 +114,8 @@ export interface Prefs {
 
 // Preferences live in the app database (main process). A copy in localStorage paints the right theme
 // before that answer arrives.
-const PREFS_KEY = 'mergatroid.prefs'
+const PREFS_KEY = 'caboose.prefs'
+const LEGACY_PREFS_KEY = 'mergatroid.prefs'
 export const defaultPrefs: Prefs = {
   pullMode: 'ff',
   leftWidth: 240,
@@ -137,7 +138,7 @@ export const defaultPrefs: Prefs = {
 
 function loadPrefs(): Prefs {
   try {
-    return { ...defaultPrefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? '{}') }
+    return { ...defaultPrefs, ...JSON.parse(localStorage.getItem(PREFS_KEY) ?? localStorage.getItem(LEGACY_PREFS_KEY) ?? '{}') }
   } catch {
     return defaultPrefs
   }

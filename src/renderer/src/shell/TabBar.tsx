@@ -58,10 +58,10 @@ export function TabBar(): React.JSX.Element {
                 draggable
                 onDragStart={(e) => {
                   setDragId(t.id)
-                  e.dataTransfer.setData('application/x-mergatroid-tab', t.id)
+                  e.dataTransfer.setData('application/x-caboose-tab', t.id)
                 }}
                 onDragOver={(e) => {
-                  if (dragId && e.dataTransfer.types.includes('application/x-mergatroid-tab')) e.preventDefault()
+                  if (dragId && e.dataTransfer.types.includes('application/x-caboose-tab')) e.preventDefault()
                 }}
                 onDrop={() => {
                   if (!dragId || dragId === t.id) return

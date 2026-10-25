@@ -36,18 +36,18 @@ else moveLegacyData()
 function moveLegacyData(): void {
   const dir = app.getPath('userData')
   const old = join(app.getPath('appData'), 'gitclone')
-  if (existsSync(join(dir, 'mergatroid.db')) || !existsSync(join(old, 'gitclone.db'))) return
+  if (existsSync(join(dir, 'caboose.db')) || !existsSync(join(old, 'gitclone.db'))) return
   cpSync(old, dir, { recursive: true })
   for (const ext of ['', '-wal', '-shm']) {
-    if (existsSync(join(dir, `gitclone.db${ext}`))) renameSync(join(dir, `gitclone.db${ext}`), join(dir, `mergatroid.db${ext}`))
+    if (existsSync(join(dir, `gitclone.db${ext}`))) renameSync(join(dir, `gitclone.db${ext}`), join(dir, `caboose.db${ext}`))
   }
 }
 
 applyGpuSetting()
-// Groups the window under Mergatroid's own taskbar entry and icon on Windows, not Electron's.
-if (process.platform === 'win32') app.setAppUserModelId('app.mergatroid')
+// Groups the window under Caboose's own taskbar entry and icon on Windows, not Electron's.
+if (process.platform === 'win32') app.setAppUserModelId('app.caboose')
 
-const db = openDb(join(app.getPath('userData'), 'mergatroid.db'))
+const db = openDb(join(app.getPath('userData'), 'caboose.db'))
 const send = (channel: string, payload: unknown): void => {
   for (const w of BrowserWindow.getAllWindows()) w.webContents.send(channel, payload)
 }
@@ -121,7 +121,7 @@ function createWindow(): BrowserWindow {
     show: false,
     backgroundColor: '#16181d',
     autoHideMenuBar: true,
-    title: 'Mergatroid',
+    title: 'Caboose',
     // Made by scripts/icons.mjs from resources/icon.svg; Windows takes the .ico with all its sizes. A packaged build
     // carries them next to the app (extraResources in package.json), outside the asar archive.
     icon: join(app.isPackaged ? join(process.resourcesPath, 'icons') : join(__dirname, '../../resources'), process.platform === 'win32' ? 'icon.ico' : 'icon.png'),

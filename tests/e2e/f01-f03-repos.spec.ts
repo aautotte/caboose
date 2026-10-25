@@ -8,7 +8,7 @@ import { demo, dialog, grid, invoke, launch, makeRepo, seed, type Harness } from
 let h: Harness
 let unicodeRepo = ''
 let goneRepo = ''
-const plain = join(tmpdir(), 'mergatroid-e2e-plain-folder')
+const plain = join(tmpdir(), 'caboose-e2e-plain-folder')
 
 test.describe.configure({ mode: 'serial' })
 test.beforeAll(async () => {

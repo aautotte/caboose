@@ -13,7 +13,7 @@ const RENDER = 1024
 async function render(svgFile, size) {
   // The SVG is drawn onto a canvas of the exact size, so neither the screen's size nor its scale gets in the way.
   const win = new BrowserWindow({ width: 200, height: 200, show: false })
-  const dir = mkdtempSync(join(tmpdir(), 'mergatroid-icon-'))
+  const dir = mkdtempSync(join(tmpdir(), 'caboose-icon-'))
   const page = join(dir, 'icon.html')
   writeFileSync(page, '<html><body></body></html>')
   await win.loadFile(page)

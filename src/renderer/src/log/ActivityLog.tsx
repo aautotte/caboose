@@ -49,7 +49,7 @@ export function ActivityLog({ repoId }: { repoId: string }): React.JSX.Element {
         </Tooltip>
       </header>
       {rows && shown.length === 0 ? (
-        <EmptyState icon={ScrollText} title={filter === 'error' ? 'No failed commands' : 'No Git commands yet'} body="Every git command Mergatroid runs here lands in this list. Nothing happens behind your back." />
+        <EmptyState icon={ScrollText} title={filter === 'error' ? 'No failed commands' : 'No Git commands yet'} body="Every git command Caboose runs here lands in this list. Nothing happens behind your back." />
       ) : (
         <div className="flex min-h-0 flex-1 divide-x divide-border">
           <div role="listbox" aria-label="Commands" className="min-h-0 w-1/2 overflow-y-auto">

@@ -7,7 +7,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { join } from 'node:path'
 import type { AuthPromptEvent } from '../shared/types'
 
-const HELPER_JS = `// Mergatroid askpass helper: forwards git's prompt to the app and prints the answer.
+const HELPER_JS = `// Caboose askpass helper: forwards git's prompt to the app and prints the answer.
 const net = require('net')
 const prompt = process.argv.slice(2).join(' ')
 const s = net.connect(process.env.GC_ASKPASS_PIPE, () => {
@@ -43,7 +43,7 @@ export class Askpass {
   ) {
     mkdirSync(dir, { recursive: true })
     const id = randomBytes(8).toString('hex')
-    this.pipe = process.platform === 'win32' ? `\\\\.\\pipe\\mergatroid-askpass-${id}` : join(dir, `askpass-${id}.sock`)
+    this.pipe = process.platform === 'win32' ? `\\\\.\\pipe\\caboose-askpass-${id}` : join(dir, `askpass-${id}.sock`)
     this.helper = join(dir, 'askpass-helper.js')
     this.script = join(dir, 'askpass.sh')
     writeFileSync(this.helper, HELPER_JS)

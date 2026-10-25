@@ -1,5 +1,5 @@
 {
-  "_about": "Mergatroid design tokens, LIGHT theme. Same role names as tokens.json (dark). `npm run tokens` regenerates the CSS, `npm run contrast` checks the pairs.",
+  "_about": "Caboose design tokens, LIGHT theme. Same role names as tokens.json (dark). `npm run tokens` regenerates the CSS, `npm run contrast` checks the pairs.",
   "theme": "light",
   "color": {
     "bg": "#ffffff",

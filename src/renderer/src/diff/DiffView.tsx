@@ -226,7 +226,7 @@ export function DiffView({
             ))}
           </div>
         ) : diff.binary ? (
-          <EmptyState icon={FileWarning} title="Binary file" body="This file isn’t text, so there are no lines to compare. All Mergatroid can say is that it changed." />
+          <EmptyState icon={FileWarning} title="Binary file" body="This file isn’t text, so there are no lines to compare. All Caboose can say is that it changed." />
         ) : diff.tooLarge ? (
           <EmptyState
             icon={ScanSearch}

@@ -10,7 +10,7 @@ function classify(file: string): What | null {
   const f = file.split('\\').join('/')
   if (f === '.git' || f.startsWith('.git/')) {
     const rest = f.slice(5)
-    if (rest.startsWith('objects') || rest.startsWith('logs') || rest.endsWith('.lock') || rest.startsWith('mergatroid')) return null
+    if (rest.startsWith('objects') || rest.startsWith('logs') || rest.endsWith('.lock') || rest.startsWith('caboose')) return null
     if (rest === 'index') return 'index'
     if (rest === 'HEAD' || rest.startsWith('refs') || rest === 'packed-refs' || /^(MERGE|CHERRY_PICK|REVERT|ORIG)_HEAD$/.test(rest) || rest.startsWith('rebase-')) return 'refs'
     if (rest === 'FETCH_HEAD') return 'refs'

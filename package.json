@@ -1,6 +1,6 @@
 {
-  "name": "mergatroid",
-  "productName": "Mergatroid",
+  "name": "caboose",
+  "productName": "Caboose",
   "version": "0.1.0",
   "private": true,
   "description": "A desktop Git client with a commit graph, built on the git you already have installed.",
@@ -62,8 +62,8 @@
     "vite": "^8.3.5"
   },
   "build": {
-    "appId": "app.mergatroid",
-    "productName": "Mergatroid",
+    "appId": "app.caboose",
+    "productName": "Caboose",
     "directories": {
       "output": "dist",
       "buildResources": "resources"
@@ -94,10 +94,10 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "artifactName": "Mergatroid-Setup-${version}.${ext}"
+      "artifactName": "Caboose-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "Mergatroid-${version}-portable.${ext}"
+      "artifactName": "Caboose-${version}-portable.${ext}"
     },
     "mac": {
       "target": "dmg",

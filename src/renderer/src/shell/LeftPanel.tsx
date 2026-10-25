@@ -217,14 +217,14 @@ function buildTree(refs: Ref[], nameOf: (r: Ref) => string, key: string): TreeNo
   return sort(root.children)
 }
 
-const COLLAPSED_KEY = (repoId: string): string => `mergatroid.collapsed.${repoId}`
-const LEGACY_COLLAPSED_KEY = (repoId: string): string => `gitclone.collapsed.${repoId}`
+const COLLAPSED_KEY = (repoId: string): string => `caboose.collapsed.${repoId}`
+const LEGACY_COLLAPSED_KEYS = (repoId: string): string[] => [`mergatroid.collapsed.${repoId}`, `gitclone.collapsed.${repoId}`]
 
 /** Which folders and remotes are folded, per repository; a convenience, so it lives in this browser's storage. */
 function useCollapsed(repoId: string): [Set<string>, (key: string, open?: boolean) => void] {
   const [set, setSet] = useState<Set<string>>(() => {
     try {
-      return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY(repoId)) ?? localStorage.getItem(LEGACY_COLLAPSED_KEY(repoId)) ?? '[]') as string[])
+      return new Set(JSON.parse([COLLAPSED_KEY(repoId), ...LEGACY_COLLAPSED_KEYS(repoId)].map((k) => localStorage.getItem(k)).find((v) => v !== null) ?? '[]') as string[])
     } catch {
       return new Set()
     }

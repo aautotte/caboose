@@ -6,7 +6,7 @@ import { toast } from '@/ui/toastBus'
 import { useApp } from '@/store'
 import * as act from '@/actions'
 
-const LAST_DIR = 'mergatroid.lastParentDir'
+const LAST_DIR = 'caboose.lastParentDir'
 const rememberDir = (d: string): void => {
   try {
     localStorage.setItem(LAST_DIR, d)
@@ -16,7 +16,7 @@ const rememberDir = (d: string): void => {
 }
 const lastDir = (): string => {
   try {
-    return localStorage.getItem(LAST_DIR) ?? localStorage.getItem('gitclone.lastParentDir') ?? ''
+    return localStorage.getItem(LAST_DIR) ?? localStorage.getItem('mergatroid.lastParentDir') ?? localStorage.getItem('gitclone.lastParentDir') ?? ''
   } catch {
     return ''
   }

@@ -51,7 +51,7 @@ export async function launch(
   const userData = join(seed, `userdata-${name}`)
   if (!opts.keepUserData) rmSync(userData, { recursive: true, force: true })
   const open = opts.open ?? [demo, conflict]
-  // exe: a packaged Mergatroid (npm run dist) instead of the dev build.
+  // exe: a packaged Caboose (npm run dist) instead of the dev build.
   const openArgs = open.length ? [`--open=${open.join('|')}`] : []
   const electronApp = await electron.launch({
     cwd: app,
