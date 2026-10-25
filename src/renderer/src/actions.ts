@@ -193,6 +193,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       refView,
       columns: columns ?? DEFAULT_COLUMNS,
       focusHead: repoPrefs['graph.focusHead'] === true,
+      graphWidth: typeof repoPrefs['graph.width'] === 'number' ? repoPrefs['graph.width'] : null,
       commits: page.commits,
       hasMore: page.hasMore,
       layout,
@@ -1008,6 +1009,12 @@ export async function renameStash(repoId: string, sha: string, message: string):
 export function setColumns(repoId: string, columns: GraphColumn[]): void {
   patchRepo(repoId, { columns })
   void call('graph.setColumns', { repoId, columns }).catch(() => {})
+}
+
+/** Remembers the Graph column's width for this repository; null goes back to fitting the lanes. */
+export function setGraphWidth(repoId: string, width: number | null): void {
+  patchRepo(repoId, { graphWidth: width })
+  void call('repoPrefs.set', { repoId, key: 'graph.width', value: width }).catch(() => {})
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {

@@ -46,6 +46,8 @@ export interface RepoState {
   columns: GraphColumn[]
   /** Graph shows only the checked-out branch, its upstream and the main line. */
   focusHead: boolean
+  /** The Graph column's width as the user dragged it; null fits it to the lanes. */
+  graphWidth: number | null
   /** The commit message being written. Kept here, not in the panel, so it survives looking at other commits. */
   draft: { summary: string; body: string }
 }
@@ -168,6 +170,7 @@ export const emptyRepo = (): RepoState => ({
   openedAt: Date.now(),
   columns: DEFAULT_COLUMNS,
   focusHead: false,
+  graphWidth: null,
   draft: { summary: '', body: '' }
 })
 
