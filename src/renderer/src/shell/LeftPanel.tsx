@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload } from 'lucide-react'
-import type { Ref, RefViewState, Submodule, SubmoduleMode } from '../../../shared/types'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload } from 'lucide-react'
+import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, IconButton, Spinner, TextInput, Tooltip, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
@@ -171,7 +171,16 @@ function viewMenu(repoId: string, r: Ref, v: RefViewState): MenuEntry[] {
 
 function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState, remotes: string[]): MenuEntry[] {
   const m: MenuEntry[] = []
-  if (!r.isHead) m.push({ type: 'item', label: 'Check out', icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, r.short) })
+  if (r.worktree) m.push({ type: 'item', label: 'Open its worktree', icon: <FolderGit2 size={14} />, onSelect: () => void act.openWorktree(r.worktree!) })
+  else if (!r.isHead) {
+    m.push({ type: 'item', label: 'Check out', icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, r.short) })
+    m.push({
+      type: 'item',
+      label: 'Check out in a new worktree…',
+      icon: <FolderPlus size={14} />,
+      onSelect: () => act.openDialog(r.kind === 'remote' ? { kind: 'addWorktree', repoId, remote: r.short } : { kind: 'addWorktree', repoId, branch: r.short })
+    })
+  }
   if (head && r.short !== head) {
     m.push({ type: 'item', label: `Merge into ${head}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.short, head) })
     m.push({ type: 'item', label: `Rebase ${head} onto ${r.short}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, head, r.short) })
@@ -182,7 +191,7 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     m.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.short }) })
     m.push({ type: 'item', label: r.upstream ? 'Change upstream…' : 'Set upstream…', icon: <Link size={14} />, onSelect: () => act.openDialog({ kind: 'upstream', repoId, branch: r.short }) })
     m.push({ type: 'separator' })
-    m.push({ type: 'item', label: 'Delete…', icon: <Trash2 size={14} />, danger: true, disabled: r.isHead, onSelect: () => act.deleteBranch(repoId, r.short) })
+    m.push({ type: 'item', label: r.worktree ? 'Delete… (checked out in a worktree)' : 'Delete…', icon: <Trash2 size={14} />, danger: true, disabled: r.isHead || !!r.worktree, onSelect: () => act.deleteBranch(repoId, r.short) })
   }
   // The branch on the remote: this remote branch itself, or the one a local branch tracks.
   const onRemote = act.remoteBranchOf(repoId, r.kind === 'remote' ? r.name : r.upstream)
@@ -414,7 +423,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               icon={<GitBranch size={14} />}
               label={name}
               // The full name (the row shows only the part after its folder), plus what the badges say.
-              name={`${r.short}${r.ahead ? `, ${r.ahead} ahead` : ''}${r.behind ? `, ${r.behind} behind` : ''}${r.upstreamGone ? ', gone' : ''}`}
+              name={`${r.short}${r.ahead ? `, ${r.ahead} ahead` : ''}${r.behind ? `, ${r.behind} behind` : ''}${r.upstreamGone ? ', gone' : ''}${r.worktree ? `, in worktree ${folderName(r.worktree)}` : ''}`}
               level={level}
               indent={indent}
               eye={eyeOne(r)}
@@ -425,9 +434,10 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               menu={branchMenu(repoId, r, head, view, refs?.remotes ?? [])}
               dim={outOfGraph(view, r)}
               pinned={view.pinned === r.name}
-              title={r.upstream ? `${r.short} → ${r.upstream.replace('refs/remotes/', '')}${r.upstreamGone ? ' (gone)' : ''}` : `${r.short} (not pushed)`}
+              title={`${r.upstream ? `${r.short} → ${r.upstream.replace('refs/remotes/', '')}${r.upstreamGone ? ' (gone)' : ''}` : `${r.short} (not pushed)`}${r.worktree ? `\nChecked out in the worktree ${r.worktree}` : ''}`}
               badges={
                 <>
+                  {r.worktree ? <FolderGit2 size={12} aria-hidden className="shrink-0 text-muted" /> : null}
                   {r.ahead ? <Badge label={`${r.ahead} ahead`}>↑{r.ahead}</Badge> : null}
                   {r.behind ? <Badge label={`${r.behind} behind`}>↓{r.behind}</Badge> : null}
                   {r.upstreamGone ? <Badge tone="warning">gone</Badge> : null}
@@ -513,9 +523,71 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
             />
           ))}
         </Section>
+        <WorktreeSection repoId={repoId} match={match} />
         <SubmoduleSection repoId={repoId} match={match} />
       </div>
     </nav>
+  )
+}
+
+const folderName = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path
+
+/** Every working tree of the repository. Hidden while there's only the main one; branch and commit menus add the first. */
+function WorktreeSection({ repoId, match }: { repoId: string; match: (s: string) => boolean }): React.JSX.Element | null {
+  const list = useRepo(repoId, (r) => r.worktrees)
+  if (!list || list.length < 2) return null
+  const shown = list.filter((w) => match(folderName(w.path)) || (w.branch !== null && match(w.branch)))
+  const missing = list.filter((w) => w.missing && w.locked === null)
+  const headerMenu: MenuEntry[] = [
+    { type: 'item', label: 'New worktree…', icon: <FolderPlus size={14} />, onSelect: () => act.openDialog({ kind: 'addWorktree', repoId }) },
+    { type: 'item', label: `Forget missing worktrees (${missing.length})`, icon: <Trash2 size={14} />, disabled: !missing.length, onSelect: () => void act.pruneWorktrees(repoId) }
+  ]
+  const rowMenu = (w: Worktree): MenuEntry[] => {
+    const m: MenuEntry[] = [
+      { type: 'item', label: w.current ? 'Open (this tab)' : 'Open', icon: <FolderGit2 size={14} />, disabled: w.current || w.missing, onSelect: () => void act.openWorktree(w.path) },
+      { type: 'separator' },
+      { type: 'item', label: 'Show in folder', icon: <FolderOpen size={14} />, disabled: w.missing, onSelect: () => void act.openIn(repoId, 'folder', undefined, w.path) },
+      { type: 'item', label: 'Open in terminal', icon: <SquareTerminal size={14} />, disabled: w.missing, onSelect: () => void act.openIn(repoId, 'terminal', undefined, w.path) },
+      { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(w.path) }
+    ]
+    if (!w.main) {
+      m.push({ type: 'separator' })
+      m.push(
+        w.locked !== null
+          ? { type: 'item', label: 'Unlock', icon: <LockOpen size={14} />, onSelect: () => void act.lockWorktree(repoId, w.path, false) }
+          : { type: 'item', label: 'Lock (keep it from being removed)', icon: <Lock size={14} />, onSelect: () => void act.lockWorktree(repoId, w.path, true) }
+      )
+      m.push({ type: 'item', label: w.current ? 'Remove… (open it from another tab)' : 'Remove…', icon: <Trash2 size={14} />, danger: true, disabled: w.current, onSelect: () => act.removeWorktree(repoId, w.path, w.branch) })
+    }
+    return m
+  }
+  return (
+    <Section title="Worktrees" count={shown.length} empty="No matches" menu={headerMenu} action={{ label: 'New worktree', icon: <FolderPlus size={14} />, onClick: () => act.openDialog({ kind: 'addWorktree', repoId }) }}>
+      {shown.map((w) => {
+        const at = w.branch ?? (w.head ? `${w.head.slice(0, 7)} (detached)` : 'detached')
+        const states = [w.main ? 'main worktree' : '', w.current ? 'this tab' : '', w.locked !== null ? 'locked' : '', w.missing ? 'folder missing' : ''].filter(Boolean)
+        return (
+          <Row
+            key={w.path}
+            icon={<FolderGit2 size={14} />}
+            label={folderName(w.path)}
+            name={[folderName(w.path), at, ...states].join(', ')}
+            current={w.current}
+            faded={w.missing}
+            title={`${w.path}${w.main ? ' (main worktree)' : ''}\n${w.branch ? `On ${w.branch}` : `At ${at}`}${w.locked ? `\nLocked: ${w.locked}` : w.locked !== null ? '\nLocked' : ''}${w.missing ? '\nIts folder is gone; “Forget missing worktrees” clears it' : ''}`}
+            onActivate={() => (w.current || w.missing ? undefined : void act.openWorktree(w.path))}
+            menu={rowMenu(w)}
+            badges={
+              <>
+                <span className="max-w-24 truncate text-xs text-muted">{at}</span>
+                {w.locked !== null ? <Lock size={12} aria-hidden className="shrink-0 text-muted" /> : null}
+                {w.missing ? <Badge tone="warning">missing</Badge> : null}
+              </>
+            }
+          />
+        )
+      })}
+    </Section>
   )
 }
 

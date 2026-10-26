@@ -56,6 +56,8 @@ export interface Ref {
   upstreamGone?: boolean
   isHead: boolean
   annotation?: string
+  /** A local branch checked out in another worktree of this repository: that worktree's folder. */
+  worktree?: string
 }
 
 export interface Stash {
@@ -252,6 +254,22 @@ export interface SubmoduleSettings {
   tidy: boolean
   /** Before pushing: off, check that the submodule commits it points at are pushed, or push those submodules first. */
   pushCheck: 'off' | 'check' | 'push'
+}
+
+/** One working tree of the repository, as `git worktree list` reports it. */
+export interface Worktree {
+  path: string
+  /** The main working tree, the one that holds the .git folder. */
+  main: boolean
+  /** The worktree this tab shows. */
+  current: boolean
+  /** Short name of the branch checked out there; null when detached. */
+  branch: string | null
+  head: string | null
+  /** Locked against pruning and removal; the reason, or '' when none was given. */
+  locked: string | null
+  /** Its folder is gone; `git worktree prune` forgets it. */
+  missing: boolean
 }
 
 /** What happened to the submodules after HEAD moved. */

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings } from '../../shared/types'
+import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 
@@ -58,6 +58,8 @@ export interface RepoState {
   submodules: { list: Submodule[]; settings: SubmoduleSettings; present: boolean; superproject: string | null } | null
   /** A submodule set-up or update running in the background. */
   subOp: { label: string; opId: string; phase?: string; percent?: number } | null
+  /** Every worktree of the repository, this one included; null until read. */
+  worktrees: Worktree[] | null
 }
 
 // Mirrors --gc-col-*-w in the tokens: the starting widths before the user drags a column.
@@ -83,13 +85,15 @@ export type Dialog =
   | { kind: 'groupName'; mode: 'create' | 'rename'; name: string; groupId?: string; repoId?: string }
   | { kind: 'squash'; repoId: string; shas: string[]; message: string }
   | { kind: 'profiles'; edit?: string }
+  /** A new worktree: of `branch` (local, free), as a new branch tracking `remote` (a remote branch's short name), or from the commit `at`. */
+  | { kind: 'addWorktree'; repoId: string; branch?: string; remote?: string; at?: string; atLabel?: string }
   | {
       kind: 'confirm'
       title: string
       body: string
       confirmLabel: string
       danger: boolean
-      undoable: boolean
+      undoable: boolean | null
       onConfirm: () => void
       alt?: { label: string; onSelect: () => void }
     }
@@ -188,7 +192,8 @@ export const emptyRepo = (): RepoState => ({
   lfs: null,
   lfsDismissed: false,
   submodules: null,
-  subOp: null
+  subOp: null,
+  worktrees: null
 })
 
 export interface AppState {

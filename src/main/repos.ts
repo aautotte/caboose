@@ -147,6 +147,12 @@ export class Repos {
     return summary
   }
 
+  /** The open tab showing this folder, if any. */
+  openAt(path: string): string | null {
+    const row = this.db.prepare('SELECT id FROM repositories WHERE profile_id = ? AND path_key = ? AND is_open = 1').get(activeProfileId(this.db), pathKey(path)) as { id: string } | undefined
+    return row?.id ?? null
+  }
+
   close(repoId: string): void {
     this.db.prepare('UPDATE repositories SET is_open = 0, tab_order = NULL, updated_at = ? WHERE id = ?').run(now(), repoId)
     this.ops.delete(repoId)

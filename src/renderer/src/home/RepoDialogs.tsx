@@ -22,9 +22,9 @@ const lastDir = (): string => {
   }
 }
 
-function FolderField({ label, value, onChange, help }: { label: string; value: string; onChange: (v: string) => void; help?: string }): React.JSX.Element {
+export function FolderField({ label, value, onChange, help, error }: { label: string; value: string; onChange: (v: string) => void; help?: string; error?: string }): React.JSX.Element {
   return (
-    <Field label={label} help={help}>
+    <Field label={label} help={help} error={error}>
       {(p) => (
         <div className="flex gap-1">
           <TextInput {...p} value={value} onChange={(e) => onChange(e.target.value)} placeholder="C:\Users\you\code" />

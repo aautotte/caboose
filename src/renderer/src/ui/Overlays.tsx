@@ -133,7 +133,8 @@ export function ConfirmDialog({
   body: string
   confirmLabel: string
   danger?: boolean
-  undoable: boolean
+  /** null: nothing to undo (it only opens or shows something), so neither line is shown. */
+  undoable: boolean | null
   onConfirm: () => void
   /** Another way out, e.g. "Create a branch…": the dialog closes first, so it can open another one. */
   alt?: { label: string; onSelect: () => void }
@@ -146,7 +147,7 @@ export function ConfirmDialog({
       footer={
         <>
           {/* Cancel gets focus first when the action can't be undone. */}
-          <Button autoFocus={!undoable} onClick={() => onOpenChange(false)}>
+          <Button autoFocus={undoable === false} onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
           {alt ? (
@@ -160,7 +161,7 @@ export function ConfirmDialog({
             </Button>
           ) : null}
           <Button
-            autoFocus={undoable}
+            autoFocus={undoable !== false}
             variant={danger ? 'danger' : 'primary'}
             onClick={() => {
               onConfirm()
@@ -173,7 +174,7 @@ export function ConfirmDialog({
       }
     >
       <p className="text-base text-text">{body}</p>
-      <p className="text-sm text-muted">{undoable ? 'You can undo this with Ctrl+Z.' : 'This can’t be undone.'}</p>
+      {undoable === null ? null : <p className="text-sm text-muted">{undoable ? 'You can undo this with Ctrl+Z.' : 'This can’t be undone.'}</p>}
     </Dialog>
   )
 }

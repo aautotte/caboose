@@ -35,7 +35,8 @@ import type {
   RepoSummary,
   Refs,
   Status,
-  UndoPeek
+  UndoPeek,
+  Worktree
 } from './types'
 
 type R = { repoId: string }
@@ -77,6 +78,16 @@ export interface Api {
   'submodule.remove': { in: R & { paths: string[] }; out: null }
   'submodule.setMode': { in: R & { names: string[]; mode: SubmoduleMode | null }; out: null }
   'submodule.settings': { in: R & Partial<SubmoduleSettings>; out: SubmoduleSettings }
+
+  'worktrees.list': { in: R; out: Worktree[] }
+  /** Checks out `branch` in a new folder, or a new branch `newBranch` starting at `at` (tracking it with `track`), or `at` detached. */
+  'worktrees.add': { in: R & { path: string; branch?: string; newBranch?: string; at?: string; track?: boolean; opId: string }; out: { path: string } }
+  /** Without `force`, a worktree with uncommitted changes is left alone and `dirty` says so. Closes its tab first; `closed` is that tab. */
+  'worktrees.remove': { in: R & { path: string; force: boolean }; out: { removed: boolean; dirty: boolean; closed: string | null } }
+  'worktrees.lock': { in: R & { path: string; locked: boolean }; out: null }
+  'worktrees.prune': { in: R; out: null }
+  /** A folder next to the repository for a new worktree of `branch` that doesn't exist yet. */
+  'worktrees.suggestPath': { in: R & { branch: string }; out: string }
 
   'index.stage': { in: R & { paths: string[] | 'all' }; out: null }
   'index.unstage': { in: R & { paths: string[] | 'all' }; out: null }
@@ -173,7 +184,7 @@ export interface Api {
   'gitConfig.get': { in: { repoId?: string }; out: { global: Partial<Record<GitConfigKey, string>>; repo: Partial<Record<GitConfigKey, string>> | null } }
   'gitConfig.set': { in: { repoId?: string; key: GitConfigKey; value: string | null }; out: null }
   'commit.template': { in: R; out: string | null }
-  'shell.open': { in: R & { target: 'folder' | 'terminal' | 'editor'; path?: string }; out: null }
+  'shell.open': { in: R & { target: 'folder' | 'terminal' | 'editor'; path?: string; worktree?: string }; out: null }
   'file.externalDiff': { in: R & { path: string; staged: boolean }; out: null }
   'file.externalMerge': { in: R & { path: string }; out: null }
   'ssh.keys': { in: Record<string, never>; out: SshKey[] }
