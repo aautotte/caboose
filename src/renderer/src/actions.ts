@@ -291,8 +291,11 @@ export async function setSubmoduleMode(repoId: string, names: string[], mode: Su
 
 export async function setSubmoduleSettings(repoId: string, patch: Partial<SubmoduleSettings>): Promise<void> {
   const settings = await attempt(() => call('submodule.settings', { repoId, ...patch }), 'Couldn’t save that setting')
-  if (settings) patchRepo(repoId, (r) => ({ submodules: { list: r.submodules?.list ?? [], present: r.submodules?.present ?? true, superproject: r.submodules?.superproject ?? null, settings } }))
-  if (patch.on !== undefined) await loadSubmodules(repoId)
+  if (!settings) return
+  // A list loading since before the save would bring the old settings back: drop it, and load again.
+  next(subSeq, repoId)
+  patchRepo(repoId, (r) => ({ submodules: { list: r.submodules?.list ?? [], present: r.submodules?.present ?? true, superproject: r.submodules?.superproject ?? null, settings } }))
+  await loadSubmodules(repoId)
 }
 
 /** A submodule is a repository of its own: open it in a tab. */
