@@ -98,8 +98,12 @@ export interface Api {
   'branch.checkout': { in: R & { ref: string }; out: null }
   'branch.rename': { in: R & { name: string; newName: string }; out: null }
   'branch.delete': { in: R & { name: string; force: boolean }; out: null }
+  /** Deletes what it can; the ones with unmerged commits (when not forced) come back in `unmerged`, untouched. One undo for all. */
+  'branch.deleteMany': { in: R & { names: string[]; force: boolean }; out: { deleted: string[]; unmerged: string[]; failed: { name: string; message: string }[] } }
   /** Deletes the branch `name` on `remote`; returns the commit it pointed at, if known. */
   'branch.deleteRemote': { in: R & { remote: string; name: string; opId: string }; out: string | null }
+  /** One push that deletes several branches on `remote`. */
+  'branch.deleteRemoteMany': { in: R & { remote: string; names: string[]; opId: string }; out: null }
   'branch.merge': { in: R & { source: string }; out: OpResult }
   'branch.rebase': { in: R & { onto: string; branch?: string }; out: OpResult }
   'branch.setUpstream': { in: R & { name: string; upstream: string }; out: null }
@@ -137,6 +141,10 @@ export interface Api {
   'tag.delete': { in: R & { name: string }; out: null }
   'tag.push': { in: R & { name: string; remote: string; opId: string }; out: null }
   'tag.deleteRemote': { in: R & { name: string; remote: string; opId: string }; out: null }
+  /** Deletes several tags from your copy, with one undo. */
+  'tag.deleteMany': { in: R & { names: string[] }; out: { deleted: string[]; failed: { name: string; message: string }[] } }
+  /** One push of several tags to `remote`, or of their deletion there (`del`). */
+  'tag.pushMany': { in: R & { names: string[]; remote: string; opId: string; del: boolean }; out: null }
 
   'history.reset': { in: R & { target: string; mode: ResetMode }; out: null }
   'history.revert': { in: R & { sha: string }; out: OpResult }

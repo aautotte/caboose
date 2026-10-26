@@ -863,6 +863,13 @@ export class RepoOps {
     return sha
   }
 
+  /** Deletes several branches on `remote` in one push. */
+  async deleteRemoteBranches(remote: string, names: string[], opId: string): Promise<void> {
+    this.safeRev(remote)
+    for (const n of names) this.safeRev(n)
+    await this.mut(['push', remote, '--delete', ...names.map((n) => `refs/heads/${n}`)], { opId, timeoutMs: 300_000 })
+  }
+
   async merge(source: string): Promise<OpResult> {
     this.safeRev(source)
     try {
@@ -1243,6 +1250,13 @@ export class RepoOps {
     this.safeRev(remote)
     const spec = `refs/tags/${name}`
     await this.mut(del ? ['push', remote, '--delete', spec] : ['push', remote, spec], { opId, timeoutMs: 300_000 })
+  }
+
+  /** Pushes several tags in one go, or deletes them on `remote` (`del`). */
+  async pushTags(names: string[], remote: string, opId: string, del: boolean): Promise<void> {
+    this.safeRev(remote)
+    const specs = names.map((n) => `refs/tags/${this.safeRev(n)}`)
+    await this.mut(del ? ['push', remote, '--delete', ...specs] : ['push', remote, ...specs], { opId, timeoutMs: 300_000 })
   }
 
   // ---------- history edits ----------

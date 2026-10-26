@@ -48,6 +48,8 @@ export function DialogHost(): React.JSX.Element | null {
     case 'confirm':
       return (
         <ConfirmDialog
+          // A new question starts with its checkbox off.
+          key={d.title}
           open
           onOpenChange={(o) => !o && act.closeDialog()}
           title={d.title}
@@ -57,6 +59,7 @@ export function DialogHost(): React.JSX.Element | null {
           undoable={d.undoable}
           onConfirm={d.onConfirm}
           alt={d.alt}
+          check={d.check}
         />
       )
   }

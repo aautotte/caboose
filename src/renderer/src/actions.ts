@@ -865,17 +865,54 @@ export async function renameBranch(repoId: string, name: string, newName: string
   return ok !== undefined
 }
 
+const nameList = (names: string[], max = 8): string => (names.length > max ? `${names.slice(0, max).join(', ')} and ${names.length - max} more` : names.join(', '))
+
+/** Where each local branch lives on a remote (the branch it tracks), looked up before it's deleted. */
+function remoteBranchesOf(repoId: string, names: string[]): Map<string, { remote: string; name: string }> {
+  const locals = useApp.getState().repos[repoId]?.refs?.refs.filter((r) => r.kind === 'local' && names.includes(r.short)) ?? []
+  const m = new Map<string, { remote: string; name: string }>()
+  for (const r of locals) {
+    const on = remoteBranchOf(repoId, r.upstream)
+    if (on) m.set(r.short, on)
+  }
+  return m
+}
+
+/** The "Also delete on origin" checkbox for deleting `total` branches, when any of them is on a remote. */
+function remoteCheck(on: Map<string, { remote: string; name: string }>, total: number): { label: string; hint: string } | undefined {
+  if (!on.size) return undefined
+  const remotes = [...new Set([...on.values()].map((b) => b.remote))]
+  const which = total === 1 ? 'it' : on.size === total ? 'them' : `the ${on.size} that are there`
+  return { label: `Also delete ${which} on ${remotes.length === 1 ? remotes[0] : 'their remotes'}`, hint: 'Deleting on the remote can’t be undone, and affects everyone who uses it.' }
+}
+
+/** Deletes branches on their remotes, one push per remote. */
+async function deleteOnRemotes(repoId: string, on: { remote: string; name: string }[]): Promise<void> {
+  const byRemote = new Map<string, string[]>()
+  for (const b of on) byRemote.set(b.remote, [...(byRemote.get(b.remote) ?? []), b.name])
+  for (const [remote, list] of byRemote) {
+    const ok = await remoteOp(repoId, 'push', 'Deleting branches', (opId) => call('branch.deleteRemoteMany', { repoId, remote, names: list, opId }), `Couldn’t delete ${nameList(list)} from ${remote}`)
+    if (ok !== undefined) toast({ tone: 'success', title: list.length === 1 ? `Deleted ${list[0]} from ${remote}` : `Deleted ${list.length} branches from ${remote}` })
+  }
+}
+
 export function deleteBranch(repoId: string, name: string): void {
+  const on = remoteBranchesOf(repoId, [name])
+  const alsoRemote = async (checked: boolean): Promise<void> => {
+    if (checked && on.size) await deleteOnRemotes(repoId, [...on.values()])
+  }
   confirm({
     title: `Delete ${name}?`,
     body: `This removes the local branch ${name}. Its commits stay if another branch contains them.`,
     confirmLabel: 'Delete branch',
     danger: true,
     undoable: true,
-    onConfirm: async () => {
+    check: remoteCheck(on, 1),
+    onConfirm: async (checked) => {
       try {
         await call('branch.delete', { repoId, name, force: false })
         toast({ tone: 'success', title: `Deleted ${name}` })
+        await alsoRemote(checked)
       } catch (err) {
         if (err instanceof ApiError && /aren’t merged/.test(err.message)) {
           confirm({
@@ -885,7 +922,8 @@ export function deleteBranch(repoId: string, name: string): void {
             danger: true,
             undoable: true,
             onConfirm: async () => {
-              await attempt(() => call('branch.delete', { repoId, name, force: true }), 'Couldn’t delete the branch')
+              const ok = await attempt(() => call('branch.delete', { repoId, name, force: true }), 'Couldn’t delete the branch')
+              if (ok !== undefined) await alsoRemote(checked)
               await loadRepo(repoId, { keepSelection: true })
             }
           })
@@ -894,6 +932,115 @@ export function deleteBranch(repoId: string, name: string): void {
       await loadRepo(repoId, { keepSelection: true })
     }
   })
+}
+
+/** Several local branches at once: one question, one undo. The checked-out branch and ones in another worktree are left alone. */
+export function deleteBranches(repoId: string, names: string[]): void {
+  const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
+  const locals = refs.filter((r) => r.kind === 'local' && names.includes(r.short))
+  const kept = locals.filter((r) => r.isHead || r.worktree).map((r) => r.short)
+  const doomed = locals.filter((r) => !r.isHead && !r.worktree).map((r) => r.short)
+  if (!doomed.length) return
+  if (doomed.length === 1) return deleteBranch(repoId, doomed[0])
+  const on = remoteBranchesOf(repoId, doomed)
+  const run = async (list: string[], force: boolean, alsoRemote: boolean): Promise<void> => {
+    const res = await attempt(() => call('branch.deleteMany', { repoId, names: list, force }), 'Couldn’t delete the branches')
+    if (res) {
+      if (res.deleted.length) toast({ tone: 'success', title: res.deleted.length === 1 ? `Deleted ${res.deleted[0]}` : `Deleted ${res.deleted.length} branches` })
+      for (const f of res.failed) toast({ tone: 'error', title: `Couldn’t delete ${f.name}`, body: f.message })
+      if (alsoRemote) await deleteOnRemotes(repoId, res.deleted.flatMap((n) => on.get(n) ?? []))
+    }
+    await loadRepo(repoId, { keepSelection: true })
+    if (!res?.unmerged.length) return
+    const one = res.unmerged.length === 1
+    confirm({
+      title: one ? `${res.unmerged[0]} isn’t merged` : `${res.unmerged.length} branches aren’t merged`,
+      body: `${one ? 'It has' : `${nameList(res.unmerged)} have`} commits that aren’t merged anywhere else.${res.deleted.length ? ` The other ${res.deleted.length === 1 ? 'branch is' : `${res.deleted.length} are`} deleted.` : ''} Delete ${one ? 'it' : 'them'} anyway?`,
+      confirmLabel: one ? 'Delete anyway' : `Delete ${res.unmerged.length} anyway`,
+      danger: true,
+      undoable: true,
+      onConfirm: () => void run(res.unmerged, true, alsoRemote)
+    })
+  }
+  confirm({
+    title: `Delete ${doomed.length} branches?`,
+    body: `This removes the local branches ${nameList(doomed)}. Their commits stay if another branch contains them.${kept.length ? ` ${nameList(kept)} ${kept.length === 1 ? 'stays: it’s' : 'stay: they’re'} checked out.` : ''}`,
+    confirmLabel: `Delete ${doomed.length} branches`,
+    danger: true,
+    undoable: true,
+    check: remoteCheck(on, doomed.length),
+    onConfirm: (checked) => void run(doomed, false, checked)
+  })
+}
+
+/**
+ * Pushes several local branches, one after the other: each to the remote it tracks, or, if it tracks nothing yet, to
+ * origin (or the first remote), where it starts tracking. One that points at unpushed submodule commits is left for
+ * a push of its own, which asks about them.
+ */
+export async function pushBranches(repoId: string, names: string[]): Promise<void> {
+  const st = useApp.getState().repos[repoId]
+  const locals = st?.refs?.refs.filter((r) => r.kind === 'local' && names.includes(r.short)) ?? []
+  const fallback = defaultRemote(repoId)
+  const subs = st?.submodules
+  const checkSubs = !!subs?.settings.on && subs.settings.pushCheck !== 'off' && subs.list.some((m) => m.setUp)
+  const pushed: string[] = []
+  const rejected: string[] = []
+  const later: string[] = []
+  for (const r of locals) {
+    const remote = remoteBranchOf(repoId, r.upstream)?.remote ?? fallback
+    if (!remote) return void toast({ tone: 'error', title: 'No remote to push to', body: 'Add a remote first.' })
+    if (checkSubs && (await call('submodule.unpushed', { repoId, branch: r.short }).catch(() => [])).length) {
+      later.push(r.short)
+      continue
+    }
+    const res = await remoteOp(repoId, 'push', `Pushing ${r.short}`, (opId) => call('remote.push', { repoId, opId, branch: r.short, remote, setUpstream: !r.upstream }), `Couldn’t push ${r.short}`)
+    if (res?.result === 'ok') pushed.push(r.short)
+    else if (res?.result === 'rejected') rejected.push(r.short)
+  }
+  // The new upstreams first, so what the toast says is already on screen.
+  await loadRepo(repoId, { keepSelection: true })
+  if (pushed.length) toast({ tone: 'success', title: pushed.length === 1 ? `Pushed ${pushed[0]}` : `Pushed ${pushed.length} branches` })
+  if (rejected.length) toast({ tone: 'error', title: `${nameList(rejected)} ${rejected.length === 1 ? 'was' : 'were'} rejected`, body: 'The remote has commits you don’t. Pull first, or push each one on its own to force it.' })
+  if (later.length) toast({ tone: 'info', title: `${nameList(later)} not pushed`, body: 'They point at submodule commits that aren’t on their remote yet. Push each one on its own to sort that out first.' })
+}
+
+/** Several tags at once: one question, one undo. The checkbox also deletes them on the remote. */
+export function deleteTags(repoId: string, names: string[]): void {
+  if (names.length === 1) return deleteTag(repoId, names[0])
+  const remote = defaultRemote(repoId)
+  confirm({
+    title: `Delete ${names.length} tags?`,
+    body: `This removes the tags ${nameList(names)} from your copy.`,
+    confirmLabel: `Delete ${names.length} tags`,
+    danger: true,
+    undoable: true,
+    check: remote ? { label: `Also delete them on ${remote}`, hint: 'Deleting on the remote can’t be undone, and affects everyone who uses it.' } : undefined,
+    onConfirm: async (checked) => {
+      const res = await attempt(() => call('tag.deleteMany', { repoId, names }), 'Couldn’t delete the tags')
+      if (res) {
+        if (res.deleted.length) toast({ tone: 'success', title: res.deleted.length === 1 ? `Deleted tag ${res.deleted[0]}` : `Deleted ${res.deleted.length} tags` })
+        for (const f of res.failed) toast({ tone: 'error', title: `Couldn’t delete ${f.name}`, body: f.message })
+        if (checked && remote && res.deleted.length) await pushTagsTo(repoId, res.deleted, remote, true)
+      }
+      await loadRepo(repoId, { keepSelection: true })
+    }
+  })
+}
+
+async function pushTagsTo(repoId: string, names: string[], remote: string, del: boolean): Promise<boolean> {
+  const what = names.length === 1 ? names[0] : `${names.length} tags`
+  const ok = await remoteOp(repoId, 'push', del ? 'Deleting tags' : 'Pushing tags', (opId) => call('tag.pushMany', { repoId, names, remote, opId, del }), del ? `Couldn’t delete ${what} from ${remote}` : `Couldn’t push ${what} to ${remote}`)
+  if (ok !== undefined) toast({ tone: 'success', title: del ? `Deleted ${what} from ${remote}` : `Pushed ${what} to ${remote}` })
+  return ok !== undefined
+}
+
+/** Pushes several tags in one push per remote: origin (or the first one) by default, or every remote. */
+export async function pushTags(repoId: string, names: string[], remote?: string): Promise<void> {
+  const all = useApp.getState().repos[repoId]?.refs?.remotes ?? []
+  const targets = remote === ALL_REMOTES ? all : [remote ?? defaultRemote(repoId)].filter((r): r is string => !!r)
+  if (!targets.length) return void toast({ tone: 'error', title: 'No remote to push to', body: 'Add a remote first.' })
+  for (const r of targets) await pushTagsTo(repoId, names, r, false)
 }
 
 function afterOp(repoId: string, res: { result: string; message?: string } | undefined, okTitle: string): void {
