@@ -108,6 +108,23 @@ tests/e2e/       Playwright end-to-end tests
 resources/       the app icon (SVG masters and generated PNG / ICO)
 ```
 
+## Troubleshooting
+
+### `npm run dev` stops with "Error: Electron uninstall"
+
+The `electron` package is installed, but its binary isn't. Electron downloads it in an install script that runs
+during `npm ci`, and that script didn't run, usually because npm is set to skip install scripts
+(`npm config get ignore-scripts` prints `true`), or because `npm ci` was stopped before it finished. Run the script
+yourself:
+
+```bash
+node node_modules/electron/install.js
+npm run dev
+```
+
+If it can't download (behind a proxy, or offline), set `ELECTRON_MIRROR` to a mirror you can reach and run it again.
+With `ignore-scripts` on, you need that first line again after each `npm ci`.
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). For security problems, see

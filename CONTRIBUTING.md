@@ -13,6 +13,8 @@ npm run dev
 You need Git 2.30 or newer. `npm run seed` creates the demo repositories the tests and screenshots use, under
 `.seed/` (ignored by git).
 
+If `npm run dev` fails to start, see [Troubleshooting](README.md#troubleshooting) in the README.
+
 ## Before you open a pull request
 
 ```bash
