@@ -6,7 +6,7 @@ import type { Db } from '../db'
 import { uuid } from '../db'
 import { GcFail } from '../errors'
 import type { GitRunner } from '../git/runner'
-import { UNDO_REFS } from '../git/ops'
+import { UNDO_REFS, samePath } from '../git/ops'
 import type { Repos } from '../repos'
 import type { UndoStack } from '../undo'
 import type { GraphLayouts, Prefs, RefView, RepoPrefs } from '../settings'
@@ -216,6 +216,30 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       return subSettings(repoId)
     }
   )
+
+  // ---------- worktrees ----------
+
+  const folder = z.string().min(1).max(4096)
+  handle('worktrees.list', z.object(R), ({ repoId }) => ops(repoId).worktrees())
+  handle(
+    'worktrees.add',
+    z.object({ ...R, path: folder, branch: ref.optional(), newBranch: z.string().min(1).max(255).optional(), at: ref.optional(), track: z.boolean().optional(), opId }),
+    async ({ repoId, opId: id, ...input }) => ({ path: await ops(repoId).worktreeAdd(input, id) })
+  )
+  handle('worktrees.remove', z.object({ ...R, path: folder, force: z.boolean() }), ({ repoId, path, force }) =>
+    exclusive(repoId, async () => {
+      let closed: string | null = null
+      // Its tab goes first: on Windows that tab's file watcher would keep the folder from being deleted.
+      const res = await ops(repoId).worktreeRemove(path, force, (p) => {
+        closed = repos.openAt(p)
+        if (closed) repos.close(closed)
+      })
+      return { ...res, closed }
+    })
+  )
+  handle('worktrees.lock', z.object({ ...R, path: folder, locked: z.boolean() }), async ({ repoId, path, locked }) => (await ops(repoId).worktreeLock(path, locked), null))
+  handle('worktrees.prune', z.object(R), async ({ repoId }) => (await ops(repoId).worktreePrune(), null))
+  handle('worktrees.suggestPath', z.object({ ...R, branch: z.string().max(255) }), ({ repoId, branch }) => ops(repoId).worktreeSuggestPath(branch))
 
   handle('commit.details', z.object({ ...R, sha: ref }), ({ repoId, sha }) => ops(repoId).details(sha))
   handle(
@@ -627,12 +651,15 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('commit.template', z.object(R), ({ repoId }) => ops(repoId).commitTemplate())
 
   // ---------- other programs ----------
-  handle('shell.open', z.object({ ...R, target: z.enum(['folder', 'terminal', 'editor']), path: z.string().min(1).max(4096).optional() }), async ({ repoId, target, path }) => {
+  handle('shell.open', z.object({ ...R, target: z.enum(['folder', 'terminal', 'editor']), path: z.string().min(1).max(4096).optional(), worktree: z.string().min(1).max(4096).optional() }), async ({ repoId, target, path, worktree }) => {
     const o = ops(repoId)
-    const root = o.repo.path
-    const file = path ? join(root, o.safePath(path)) : root
+    // Another worktree of this repository: only one that git lists, never any folder.
+    const other = worktree ? (await o.worktrees()).find((w) => samePath(w.path, worktree))?.path : undefined
+    if (worktree && !other) throw new GcFail('invalid', `${worktree} isn’t a worktree of this repository.`)
+    const root = other ?? o.repo.path
+    const file = path && !other ? join(root, o.safePath(path)) : root
     if (target === 'folder') {
-      if (path) shell.showItemInFolder(file)
+      if (path && !other) shell.showItemInFolder(file)
       else {
         const err = await shell.openPath(root)
         if (err) throw new GcFail('invalid', err)

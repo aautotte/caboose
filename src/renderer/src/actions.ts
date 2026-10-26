@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult } from '../../shared/types'
+import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
@@ -304,6 +304,89 @@ export async function openSubmodule(repoId: string, path: string): Promise<void>
   if (root) await openRepo(`${root.replace(/[\\/]+$/, '')}/${path}`)
 }
 
+// ---------- worktrees ----------
+
+const wtSeq = new Map<string, number>()
+
+export async function loadWorktrees(repoId: string): Promise<void> {
+  const seq = next(wtSeq, repoId)
+  try {
+    const worktrees = await call('worktrees.list', { repoId })
+    if (isLatest(wtSeq, repoId, seq) && useApp.getState().repos[repoId]) patchRepo(repoId, { worktrees })
+  } catch {
+    // the list stays as it was; the next load tries again
+  }
+}
+
+const folderName = (path: string): string => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path
+
+/** Each worktree is a repository folder of its own: it opens in a tab (or goes to its tab, if open). */
+export async function openWorktree(path: string): Promise<void> {
+  await openRepo(path)
+}
+
+export async function addWorktree(repoId: string, input: { path: string; branch?: string; newBranch?: string; at?: string; track?: boolean }, openAfter: boolean): Promise<boolean> {
+  const res = await attempt(() => call('worktrees.add', { repoId, ...input, opId: newOpId() }), 'Couldn’t create the worktree')
+  await loadRepo(repoId, { keepSelection: true })
+  if (!res) return false
+  toast({ tone: 'success', title: `Created the worktree ${folderName(res.path)}`, body: input.branch ?? input.newBranch ? `${input.branch ?? input.newBranch} is checked out there.` : 'Its HEAD is detached.' })
+  if (openAfter) await openWorktree(res.path)
+  return true
+}
+
+/** Removes the folder and git's record of it. The branch stays. A worktree with uncommitted changes asks a second time. */
+export function removeWorktree(repoId: string, path: string, branch: string | null): void {
+  const name = folderName(path)
+  const run = async (force: boolean): Promise<void> => {
+    const res = await attempt(() => call('worktrees.remove', { repoId, path, force }), `Couldn’t remove ${name}`)
+    if (res?.closed) dropTab(res.closed)
+    if (res?.dirty) {
+      confirm({
+        title: `${name} has uncommitted changes`,
+        body: 'Removing it deletes them, untracked files included. Commit or stash them there first to keep them.',
+        confirmLabel: 'Remove anyway',
+        danger: true,
+        undoable: false,
+        onConfirm: () => void run(true)
+      })
+      return
+    }
+    if (res?.removed) toast({ tone: 'success', title: `Removed the worktree ${name}`, body: branch ? `${branch} is still there, free to check out anywhere.` : undefined })
+    await loadRepo(repoId, { keepSelection: true })
+  }
+  confirm({
+    title: `Remove the worktree ${name}?`,
+    body: `This deletes the folder ${path}${branch ? `. The branch ${branch} and its commits stay` : ''}. Its tab closes, if open.`,
+    confirmLabel: 'Remove worktree',
+    danger: true,
+    undoable: false,
+    onConfirm: () => void run(false)
+  })
+}
+
+export async function lockWorktree(repoId: string, path: string, locked: boolean): Promise<void> {
+  await attempt(() => call('worktrees.lock', { repoId, path, locked }), locked ? 'Couldn’t lock the worktree' : 'Couldn’t unlock the worktree')
+  await loadWorktrees(repoId)
+}
+
+export async function pruneWorktrees(repoId: string): Promise<void> {
+  const ok = await attempt(() => call('worktrees.prune', { repoId }), 'Couldn’t forget the missing worktrees')
+  if (ok !== undefined) toast({ tone: 'success', title: 'Forgot the worktrees whose folders are gone' })
+  await loadRepo(repoId, { keepSelection: true })
+}
+
+/** A tab closed by the main process (its worktree was removed). */
+function dropTab(repoId: string): void {
+  useApp.setState((s) => {
+    const idx = s.tabs.findIndex((t) => t.id === repoId)
+    if (idx < 0) return {}
+    const tabs = s.tabs.filter((t) => t.id !== repoId)
+    const repos = { ...s.repos }
+    delete repos[repoId]
+    return { tabs, repos, active: s.active === repoId ? (tabs[Math.min(idx, tabs.length - 1)]?.id ?? 'home') : s.active }
+  })
+}
+
 export async function lfsTrack(repoId: string, pattern: string, exact: boolean, label: string): Promise<void> {
   const ok = await attempt(() => call('lfs.track', { repoId, pattern, exact }), 'Couldn’t track that with Git LFS')
   if (ok !== undefined) {
@@ -331,6 +414,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   patchRepo(repoId, { loading: true })
   if (!useApp.getState().repos[repoId].lfs) void checkLfs(repoId)
   void loadSubmodules(repoId)
+  void loadWorktrees(repoId)
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
@@ -697,9 +781,22 @@ export function setDraft(repoId: string, patch: Partial<{ summary: string; body:
 
 // ---------- branches ----------
 
-/** Before switching: asks when a submodule with changes inside would be moved or taken away. Git leaves those as they are. */
+/**
+ * Before switching: a branch checked out in another worktree can't be checked out here too, so that worktree is
+ * offered instead. Then asks when a submodule with changes inside would be moved or taken away (git leaves those).
+ */
 export async function checkout(repoId: string, ref: string): Promise<void> {
-  const subs = useApp.getState().repos[repoId]?.submodules
+  const r = useApp.getState().repos[repoId]
+  // A remote branch is checked out through the local branch of the same name, if there is one.
+  const remote = r?.refs?.refs.find((x) => x.kind === 'remote' && x.short === ref)
+  const localName = remote ? ref.slice((remote.remote?.length ?? 0) + 1) : ref
+  if (r?.refs?.refs.some((x) => x.kind === 'local' && x.short === localName && x.worktree)) {
+    // Asked again: the list on screen may be from before that worktree was removed or switched branches.
+    const fresh = await call('worktrees.list', { repoId }).catch(() => null)
+    const w = fresh ? fresh.find((x) => x.branch === localName && !x.current) : r.worktrees?.find((x) => x.branch === localName && !x.current)
+    if (w) return checkedOutElsewhere(repoId, localName, w)
+  }
+  const subs = r?.submodules
   const risky = subs?.list.some((m) => m.setUp) ? await call('submodule.atRisk', { repoId, to: ref }).catch(() => []) : []
   if (!risky.length) return runCheckout(repoId, ref)
   confirm({
@@ -712,9 +809,45 @@ export async function checkout(repoId: string, ref: string): Promise<void> {
   })
 }
 
+function checkedOutElsewhere(repoId: string, branch: string, w: Pick<Worktree, 'path' | 'missing'>): void {
+  const { path } = w
+  if (w.missing) {
+    // git still counts the branch as checked out there until it forgets that worktree.
+    confirm({
+      title: `${branch} is checked out in a worktree that’s gone`,
+      body: `Git still has it checked out in ${path}, but that folder no longer exists. Forget the missing worktrees, then switch to ${branch} here.`,
+      confirmLabel: 'Forget and switch',
+      danger: false,
+      undoable: false,
+      onConfirm: async () => {
+        await pruneWorktrees(repoId)
+        await runCheckout(repoId, branch)
+      }
+    })
+    return
+  }
+  confirm({
+    title: `${branch} is checked out in another worktree`,
+    body: `It’s checked out in ${path}, and Git lets a branch be checked out in only one worktree at a time. Open that worktree to work on ${branch}.`,
+    confirmLabel: 'Open that worktree',
+    danger: false,
+    undoable: null,
+    onConfirm: () => void openWorktree(path)
+  })
+}
+
 async function runCheckout(repoId: string, ref: string): Promise<void> {
-  const ok = await attempt(() => call('branch.checkout', { repoId, ref }), `Couldn’t switch to ${ref}`)
-  if (ok !== undefined) toast({ tone: 'success', title: `Switched to ${ref}` })
+  try {
+    await call('branch.checkout', { repoId, ref })
+    toast({ tone: 'success', title: `Switched to ${ref}` })
+  } catch (err) {
+    // A worktree made a moment ago (in a terminal, say) that the list here doesn't show yet.
+    const m = err instanceof ApiError ? /'([^']+)' is already (?:used|checked out) by worktree at '([^']+)'/.exec(`${err.message}\n${err.detail ?? ''}`) : null
+    await loadRepo(repoId, { keepSelection: true })
+    if (m) return checkedOutElsewhere(repoId, m[1], { path: m[2], missing: !(await call('worktrees.list', { repoId }).catch(() => [])).some((w) => w.branch === m[1] && !w.missing) })
+    fail(err, `Couldn’t switch to ${ref}`)
+    return
+  }
   await loadRepo(repoId, { keepSelection: true })
 }
 
@@ -1290,8 +1423,8 @@ export async function setFocusHead(repoId: string, on: boolean): Promise<void> {
 
 const openTitles = { folder: 'Couldn’t open the folder', terminal: 'Couldn’t open a terminal', editor: 'Couldn’t open the editor' }
 
-export async function openIn(repoId: string, target: 'folder' | 'terminal' | 'editor', path?: string): Promise<void> {
-  await attempt(() => call('shell.open', { repoId, target, path }), openTitles[target])
+export async function openIn(repoId: string, target: 'folder' | 'terminal' | 'editor', path?: string, worktree?: string): Promise<void> {
+  await attempt(() => call('shell.open', { repoId, target, path, worktree }), openTitles[target])
 }
 
 /** The diff / merge tool can stay open for a long time, so this doesn't block anything; the file watcher picks up the result. */

@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Focus, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Tag, Trash2, Undo, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Focus, FolderPlus, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Tag, Trash2, Undo, Upload } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
 import { Avatar, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -633,6 +633,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   const isHead = row.sha === headSha
   entries.push(
     { type: 'item', label: 'Create branch here…', icon: <Plus size={14} />, shortcut: 'Ctrl+B', onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: row.sha, atLabel: short }) },
+    { type: 'item', label: 'New worktree here…', icon: <FolderPlus size={14} />, onSelect: () => act.openDialog({ kind: 'addWorktree', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'Create tag here…', icon: <Tag size={14} />, onSelect: () => act.openDialog({ kind: 'createTag', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'Check out this commit (detached)', onSelect: () => void act.checkout(repoId, row.sha) },
     { type: 'separator' }

@@ -1,5 +1,5 @@
 // Pure parsers for git's machine-readable output. No I/O here, so they can be unit tested.
-import type { Blame, BlameCommit, BlameLine, Change, CommitRow, DiffLine, FileChange, FileDiff, FileHistoryEntry, Hunk, LfsPointer, Person, Ref, StatusCode, Stash } from '../../shared/types'
+import type { Blame, BlameCommit, BlameLine, Change, CommitRow, DiffLine, FileChange, FileDiff, FileHistoryEntry, Hunk, LfsPointer, Person, Ref, StatusCode, Stash, Worktree } from '../../shared/types'
 
 export const US = '\x1f' // unit separator between fields
 export const RS = '\x1e' // record separator between commits
@@ -32,6 +32,7 @@ export const REF_FORMAT = [
   '%(upstream)',
   '%(upstream:track,nobracket)',
   '%(HEAD)',
+  '%(worktreepath)',
   '%(contents:subject)'
 ].join('%1f')
 
@@ -39,9 +40,11 @@ export function parseRefs(out: string, remotes: string[]): Ref[] {
   const refs: Ref[] = []
   for (const line of out.split('\n')) {
     if (!line) continue
-    const [name, sha, peeled, upstream, track, head, subject] = line.split(US)
+    const [name, sha, peeled, upstream, track, head, worktree, subject] = line.split(US)
     if (name.startsWith('refs/heads/')) {
       const ref: Ref = { name, short: name.slice(11), kind: 'local', sha, isHead: head === '*' }
+      // %(worktreepath) names every worktree the branch is checked out in, this one included (that's HEAD).
+      if (worktree && head !== '*') ref.worktree = worktree
       if (upstream) {
         ref.upstream = upstream
         ref.upstreamGone = track === 'gone'
@@ -67,6 +70,30 @@ export function parseRefs(out: string, remotes: string[]): Ref[] {
     }
   }
   return refs
+}
+
+/** `git worktree list --porcelain -z`: one record per worktree, attributes ended by NUL, records by an empty one. The first is the main worktree. */
+export function parseWorktrees(out: string): Array<Omit<Worktree, 'current'> & { bare: boolean }> {
+  const list: Array<Omit<Worktree, 'current'> & { bare: boolean }> = []
+  for (const rec of out.split('\0\0')) {
+    const attrs = rec.split('\0').filter(Boolean)
+    const path = attrs.find((a) => a.startsWith('worktree '))?.slice(9)
+    if (!path) continue
+    const val = (key: string): string | undefined => {
+      const a = attrs.find((x) => x === key || x.startsWith(`${key} `))
+      return a === undefined ? undefined : a.slice(key.length + 1)
+    }
+    list.push({
+      path,
+      main: list.length === 0,
+      branch: val('branch')?.replace(/^refs\/heads\//, '') ?? null,
+      head: val('HEAD') ?? null,
+      locked: val('locked') ?? null,
+      missing: val('prunable') !== undefined,
+      bare: val('bare') !== undefined
+    })
+  }
+  return list
 }
 
 export const STASH_FORMAT = ['%H', '%P', '%gs'].join('%x1f')

@@ -1,4 +1,4 @@
-import { Archive, Boxes, Cloud, GitBranch, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Tag } from 'lucide-react'
+import { Archive, Boxes, Cloud, FolderGit2, GitBranch, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Tag } from 'lucide-react'
 import { IconButton, Tooltip } from '@/ui'
 import { setPrefs, useRepo } from '@/store'
 
@@ -39,13 +39,15 @@ export function CollapseDetailsButton(): React.JSX.Element {
 export function LeftRail({ repoId }: { repoId: string }): React.JSX.Element {
   const refs = useRepo(repoId, (r) => r.refs)
   const subs = useRepo(repoId, (r) => r.submodules)
+  const worktrees = useRepo(repoId, (r) => r.worktrees)
   const all = refs?.refs ?? []
   const sections = [
     { title: 'Local branches', icon: GitBranch, count: all.filter((r) => r.kind === 'local').length },
     { title: 'Remotes', icon: Cloud, count: refs?.remotes.length ?? 0 },
     { title: 'Tags', icon: Tag, count: all.filter((r) => r.kind === 'tag').length },
     { title: 'Stashes', icon: Archive, count: refs?.stashes.length ?? 0 },
-    // Like the section: only when there are submodules and their handling is on.
+    // Like the sections: worktrees once there's more than the main one; submodules when there are some and their handling is on.
+    ...(worktrees && worktrees.length > 1 ? [{ title: 'Worktrees', icon: FolderGit2, count: worktrees.length }] : []),
     ...(subs?.settings.on && subs.list.length ? [{ title: 'Submodules', icon: Boxes, count: subs.list.length }] : [])
   ]
   const open = (title?: string): void => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
@@ -25,7 +25,8 @@ import type {
   OpResult,
   PullMode,
   Refs,
-  Status
+  Status,
+  Worktree
 } from '../../shared/types'
 import { GcFail, invalid } from '../errors'
 import type { GitRunner, RunOptions } from './runner'
@@ -46,8 +47,15 @@ import {
   parseRefs,
   parseStashes,
   parseStatus,
+  parseWorktrees,
   submodulePointers
 } from './parse'
+
+/** Same folder? Windows paths ignore case and slash direction. */
+export function samePath(a: string, b: string): boolean {
+  const norm = (p: string): string => resolve(p).replace(/[\\/]+$/, '')
+  return process.platform === 'win32' ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b)
+}
 
 export interface RepoCtx {
   id: string
@@ -445,6 +453,71 @@ export class RepoOps {
     return (await this.tryGit(['rev-parse', '--show-superproject-working-tree']))?.trim() || null
   }
 
+  // ---------- worktrees ----------
+
+  /** Every working tree of this repository, the main one first. Bare entries can't be opened, so they're left out. */
+  async worktrees(): Promise<Worktree[]> {
+    const out = (await this.tryGit(['worktree', 'list', '--porcelain', '-z'])) ?? ''
+    return parseWorktrees(out)
+      .filter((w) => !w.bare)
+      // git writes C:/x on Windows; paths read as the system writes them.
+      .map(({ bare: _bare, ...w }) => ({ ...w, path: resolve(w.path), current: samePath(w.path, this.repo.path) }))
+  }
+
+  /** A path from the renderer must be one of this repository's worktrees (never the one this tab shows, nor the main one, for removal). */
+  private async knownWorktree(path: string): Promise<Worktree> {
+    const w = (await this.worktrees()).find((x) => samePath(x.path, path))
+    if (!w) throw invalid(`${path} isn’t a worktree of this repository.`)
+    return w
+  }
+
+  /** git worktree add: an existing branch, a new branch from `at`, or `at` detached. Not queued: it can take a while, and it only writes the new folder and its own corner of .git. */
+  async worktreeAdd(input: { path: string; branch?: string; newBranch?: string; at?: string; track?: boolean }, opId: string): Promise<string> {
+    const path = resolve(input.path)
+    if (!isAbsolute(input.path)) throw invalid('Choose a full folder path for the worktree.')
+    if (existsSync(path) && readdirSync(path).length) throw invalid(`${path} already exists and isn’t empty. Choose another folder.`)
+    const args = ['worktree', 'add']
+    if (input.newBranch) {
+      await this.safeBranchName(input.newBranch)
+      args.push(...(input.track ? ['--track'] : []), '-b', input.newBranch, path, this.safeRev(input.at ?? 'HEAD'))
+    } else if (input.branch) args.push(path, this.safeRev(input.branch))
+    else args.push('--detach', path, this.safeRev(input.at ?? 'HEAD'))
+    await this.git(args, { opId, timeoutMs: 1_800_000 })
+    return path
+  }
+
+  /** Without force, a worktree with uncommitted changes (untracked files included) stays, and the answer says so. */
+  async worktreeRemove(path: string, force: boolean, beforeRemove: (path: string) => void): Promise<{ removed: boolean; dirty: boolean }> {
+    const w = await this.knownWorktree(path)
+    if (w.main) throw invalid('The main worktree holds the repository itself, so it can’t be removed.')
+    if (w.current) throw invalid('That’s the worktree this tab shows. Remove it from another tab.')
+    if (!w.missing && !force && ((await this.tryGit(['-C', w.path, 'status', '--porcelain'])) ?? '').trim()) return { removed: false, dirty: true }
+    beforeRemove(w.path)
+    // A locked worktree needs two --force; asking to remove it is taken as meaning it.
+    await this.mut(['worktree', 'remove', ...(force || w.locked !== null ? ['--force'] : []), ...(w.locked !== null ? ['--force'] : []), w.path])
+    return { removed: true, dirty: false }
+  }
+
+  async worktreeLock(path: string, locked: boolean): Promise<void> {
+    const w = await this.knownWorktree(path)
+    if (w.main) throw invalid('The main worktree can’t be locked.')
+    await this.mut(['worktree', locked ? 'lock' : 'unlock', w.path])
+  }
+
+  /** Forgets worktrees whose folders are gone (locked ones stay). */
+  async worktreePrune(): Promise<void> {
+    await this.mut(['worktree', 'prune'])
+  }
+
+  /** "<repo>-<branch>" next to the main worktree, with a number added if that's taken. */
+  async worktreeSuggestPath(branch: string): Promise<string> {
+    const main = (await this.worktrees()).find((w) => w.main)?.path ?? this.repo.path
+    const base = `${resolve(main)}-${branch.replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '') || 'worktree'}`
+    let p = base
+    for (let i = 2; existsSync(p); i++) p = `${base}-${i}`
+    return p
+  }
+
   /** A submodule's mode in this repository's .git/config; null goes back to the repository's default. */
   async submoduleSetMode(names: string[], mode: SubmoduleMode | null): Promise<void> {
     for (const n of names) {
@@ -530,7 +603,7 @@ export class RepoOps {
     const branch = symbolic?.trim().replace(/^refs\/heads\//, '') || null
     return {
       head: { branch, sha: head, detached: !branch && !!head, unborn: !!branch && !head },
-      refs: parseRefs(refsOut, remotes),
+      refs: parseRefs(refsOut, remotes).map((r) => (r.worktree ? { ...r, worktree: resolve(r.worktree) } : r)),
       stashes: stashOut ? parseStashes(stashOut) : [],
       remotes
     }
