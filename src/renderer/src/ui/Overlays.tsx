@@ -1,6 +1,6 @@
 import { ContextMenu as RContext, Dialog as RDialog, DropdownMenu as RMenu, Toast as RToast } from 'radix-ui'
 import { X } from 'lucide-react'
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from './Button'
 import { setToastHandler } from './toastBus'
 import { Shortcut } from './Display'
@@ -71,6 +71,47 @@ export function ContextMenu({ children, items }: { children: ReactNode; items: M
       </RContext.Portal>
     </RContext.Root>
   )
+}
+
+const MenuOffer = createContext<((items: () => MenuEntry[]) => void) | null>(null)
+
+/**
+ * One context menu for a long list. A row hands over its items as it's right-clicked (`useMenuOffer`), and they're
+ * built then, so a list of thousands of rows doesn't carry a menu per row through every render. A right-click that
+ * no row claims shows nothing.
+ */
+export function SharedContextMenu({ children }: { children: ReactNode }): React.JSX.Element {
+  const pending = useRef<(() => MenuEntry[]) | null>(null)
+  const [items, setItems] = useState<MenuEntry[]>([])
+  const offer = useCallback((f: () => MenuEntry[]) => {
+    pending.current = f
+  }, [])
+  return (
+    <MenuOffer.Provider value={offer}>
+      <RContext.Root>
+        <RContext.Trigger
+          asChild
+          onContextMenu={(e) => {
+            const f = pending.current
+            pending.current = null
+            if (f) setItems(f())
+            else e.preventDefault()
+          }}
+        >
+          {children}
+        </RContext.Trigger>
+        <RContext.Portal>
+          <RContext.Content className={menuPanel}>{renderEntries(RContext, items)}</RContext.Content>
+        </RContext.Portal>
+      </RContext.Root>
+    </MenuOffer.Provider>
+  )
+}
+
+/** For a row inside a SharedContextMenu: put the result on the row's onContextMenu. */
+export function useMenuOffer(items: () => MenuEntry[]): () => void {
+  const offer = useContext(MenuOffer)
+  return () => offer?.(items)
 }
 
 /* ---------- Dialogs ---------- */
