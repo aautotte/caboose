@@ -26,6 +26,8 @@ export interface Snapshot {
   branch: string | null
   sha: string | null
   name?: string // branch_delete: the branch
+  branches?: { name: string; sha: string }[] // branch_delete of several at once
+  tags?: { name: string; sha: string }[] // tag_delete of several at once
   stash?: string // discard: snapshot commit
   paths?: string[] | 'all' // discard: what was discarded (for redo)
   patch?: string // discard_lines: the patch that was reversed out of the working files
@@ -167,6 +169,17 @@ export class UndoStack {
         return after
       }
       case 'branch_delete': {
+        if (before.branches) {
+          const now = await Promise.all(before.branches.map(async (b) => (await ops.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${b.name}`]))?.trim() || null))
+          if (dir === 'back') {
+            if (now.some((sha) => sha !== null)) throw moved()
+            for (const b of before.branches) await ops.mut(['branch', b.name, b.sha])
+          } else {
+            if (before.branches.some((b, i) => now[i] !== b.sha)) throw moved()
+            await ops.mut(['branch', '-D', ...before.branches.map((b) => b.name)])
+          }
+          return after
+        }
         const name = before.name!
         if (dir === 'back') await ops.mut(['branch', name, before.sha!])
         else {
@@ -200,6 +213,17 @@ export class UndoStack {
         return after
       }
       case 'tag_delete': {
+        if (before.tags) {
+          const now = await Promise.all(before.tags.map(async (t) => (await ops.tryGit(['rev-parse', '-q', '--verify', `refs/tags/${t.name}`]))?.trim() || null))
+          if (dir === 'back') {
+            if (now.some((sha) => sha !== null)) throw moved()
+            for (const t of before.tags) await ops.mut(['update-ref', `refs/tags/${t.name}`, t.sha])
+          } else {
+            if (before.tags.some((t, i) => now[i] !== t.sha)) throw moved()
+            await ops.mut(['tag', '-d', ...before.tags.map((t) => t.name)])
+          }
+          return after
+        }
         const name = before.name!
         if (dir === 'back') {
           if (await ops.tryGit(['rev-parse', '-q', '--verify', `refs/tags/${name}`])) throw moved()

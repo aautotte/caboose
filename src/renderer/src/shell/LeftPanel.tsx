@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X } from 'lucide-react'
 import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, IconButton, Spinner, TextInput, Tooltip, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
@@ -18,7 +18,8 @@ function Section({
   action,
   eye,
   menu,
-  note
+  note,
+  multiselectable
 }: {
   title: string
   count: number
@@ -30,6 +31,8 @@ function Section({
   menu?: MenuEntry[]
   /** A line under the header, e.g. what's running. */
   note?: ReactNode
+  /** Rows can be picked several at a time (Ctrl / Shift-click). */
+  multiselectable?: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(true)
   const header = (
@@ -67,7 +70,7 @@ function Section({
         count === 0 ? (
           <p className="px-7 py-1 pb-3 text-sm text-muted">{empty}</p>
         ) : (
-          <div role="tree" aria-label={title} className="flex flex-col pb-2">
+          <div role="tree" aria-label={title} aria-multiselectable={multiselectable || undefined} className="flex flex-col pb-2">
             {children}
           </div>
         )
@@ -104,7 +107,7 @@ function EyeButton({ eye, name }: { eye: Eye; name: string }): React.JSX.Element
   )
 }
 
-function Row({ icon, label, name, indent = 0, level, current, selected, badges, onActivate, onSelect, menu, title, dim, faded, pinned, eye }: { icon: ReactNode; label: string; name?: string; indent?: number; current?: boolean; selected?: boolean; badges?: ReactNode; onActivate?: () => void; onSelect?: () => void; menu: MenuEntry[]; title?: string; dim?: boolean; /** Greyed, without dim's "not in the graph" mark. */ faded?: boolean; pinned?: boolean; level?: number; eye?: Eye }): React.JSX.Element {
+function Row({ icon, label, name, indent = 0, level, current, selected, badges, onActivate, onSelect, onDelete, menu, title, dim, faded, pinned, eye }: { icon: ReactNode; label: string; name?: string; indent?: number; current?: boolean; selected?: boolean; badges?: ReactNode; onActivate?: () => void; /** Gets the click or key, so Ctrl and Shift can pick several. */ onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void; /** The Delete key. */ onDelete?: () => void; menu: MenuEntry[]; title?: string; dim?: boolean; /** Greyed, without dim's "not in the graph" mark. */ faded?: boolean; pinned?: boolean; level?: number; eye?: Eye }): React.JSX.Element {
   return (
     <ContextMenu items={menu}>
       <div
@@ -115,11 +118,18 @@ function Row({ icon, label, name, indent = 0, level, current, selected, badges, 
         aria-label={name}
         tabIndex={0}
         title={title ?? label}
-        onClick={onSelect}
-        onDoubleClick={onActivate}
+        onClick={(e) => onSelect?.(e)}
+        onDoubleClick={(e) => !e.ctrlKey && !e.metaKey && !e.shiftKey && onActivate?.()}
         onKeyDown={(e) => {
           if (e.key === 'Enter') onActivate?.()
-          if (e.key === ' ') onSelect?.()
+          if (e.key === ' ') {
+            e.preventDefault()
+            onSelect?.(e)
+          }
+          if (e.key === 'Delete' && onDelete) {
+            e.preventDefault()
+            onDelete()
+          }
           if ((e.key === 'h' || e.key === 'H') && eye && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault()
             eye.onToggle()
@@ -303,6 +313,84 @@ function FolderRow({ icon, label, name, level, indent, open, onToggle, eye, menu
   )
 }
 
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
+
+/**
+ * Rows picked with Ctrl / Shift-click, to act on several at once. `order` is the rows on screen, top to bottom; only
+ * those count, so changing the filter or folding a folder can't leave a hidden row in the pick.
+ */
+function usePick(repoId: string, order: string[]): { pick: string[]; onPick: (name: string, e: React.MouseEvent | React.KeyboardEvent, plain: () => void) => void; clear: () => void; many: (name: string) => boolean } {
+  const [picked, setPicked] = useState<string[]>([])
+  const [anchor, setAnchor] = useState<string | null>(null)
+  useEffect(() => {
+    setPicked([])
+    setAnchor(null)
+  }, [repoId])
+  const pick = picked.filter((n) => order.includes(n))
+  const onPick = (name: string, e: React.MouseEvent | React.KeyboardEvent, plain: () => void): void => {
+    if (e.shiftKey && anchor) {
+      const a = order.indexOf(anchor)
+      const b = order.indexOf(name)
+      if (a >= 0 && b >= 0) return setPicked(order.slice(Math.min(a, b), Math.max(a, b) + 1))
+    }
+    if (e.ctrlKey || e.metaKey) {
+      const base = pick.length ? pick : anchor && order.includes(anchor) ? [anchor] : []
+      setPicked(base.includes(name) ? base.filter((n) => n !== name) : [...base, name])
+      setAnchor(name)
+      return
+    }
+    setPicked([])
+    setAnchor(name)
+    plain()
+  }
+  return { pick, onPick, clear: () => setPicked([]), many: (name) => pick.length > 1 && pick.includes(name) }
+}
+
+interface PickAction {
+  label: string
+  icon: ReactNode
+  onSelect: () => void
+  danger?: boolean
+  disabled?: boolean
+  /** With several remotes, the menu offers each one (and all of them). */
+  remotes?: string[]
+  onRemote?: (remote: string) => void
+}
+
+function actionEntry(a: PickAction): MenuEntry {
+  if (a.remotes && a.onRemote) {
+    const on = a.onRemote
+    return {
+      type: 'sub',
+      label: `${a.label} to`,
+      icon: a.icon,
+      items: [...a.remotes.map((r) => ({ type: 'item' as const, label: r, onSelect: () => on(r) })), { type: 'separator' as const }, { type: 'item' as const, label: 'All remotes', onSelect: () => on(act.ALL_REMOTES) }]
+    }
+  }
+  return { type: 'item', label: a.label, icon: a.icon, danger: a.danger, disabled: a.disabled, onSelect: a.onSelect }
+}
+
+/** Under a section's header while several rows are picked: how many, and what to do with them. */
+function PickBar({ count, actions, onClear }: { count: number; actions: PickAction[]; onClear: () => void }): React.JSX.Element {
+  return (
+    <div role="status" className="mx-2 mb-1 flex items-center gap-0.5 rounded-md border border-border bg-surface-raised py-0.5 pr-0.5 pl-2 text-sm text-muted">
+      <span className="min-w-0 flex-1 truncate">{count} picked</span>
+      {actions.map((a) => (
+        <Tooltip key={a.label} content={a.label}>
+          <IconButton label={a.label} size="sm" disabled={a.disabled} onClick={a.onSelect}>
+            {a.icon}
+          </IconButton>
+        </Tooltip>
+      ))}
+      <Tooltip content="Clear the pick">
+        <IconButton label="Clear the pick" size="sm" onClick={onClear}>
+          <X size={14} />
+        </IconButton>
+      </Tooltip>
+    </div>
+  )
+}
+
 export function LeftPanel({ repoId, width }: { repoId: string; width: number }): React.JSX.Element {
   const refs = useRepo(repoId, (r) => r.refs)
   const selected = useRepo(repoId, (r) => r.selected)
@@ -378,8 +466,48 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   const shownTags = tags.filter((r) => match(r.short))
   const shownStashes = (refs?.stashes ?? []).filter((s) => match(s.message))
 
+  // Local branches and tags picked with Ctrl / Shift-click, to push, delete or hide several at once.
+  const localTree = buildTree(shownLocals, (r) => r.short, 'local')
+  const visibleLeaves = (nodes: TreeNode[]): Ref[] => nodes.flatMap((n) => (n.kind === 'leaf' ? [n.ref] : isOpen(n.key) ? visibleLeaves(n.children) : []))
+  const branchPick = usePick(repoId, visibleLeaves(localTree).map((r) => r.short))
+  const tagPick = usePick(repoId, shownTags.map((r) => r.short))
+  const pickedRefs = locals.filter((r) => branchPick.pick.includes(r.short))
+  const deletable = pickedRefs.filter((r) => !r.isHead && !r.worktree).length
+  const remoteNames = refs?.remotes ?? []
+  const branchActions = (): PickAction[] => [
+    { label: `Push ${plural(pickedRefs.length, 'branch', 'branches')}`, icon: <Upload size={14} />, disabled: !remoteNames.length, onSelect: () => void act.pushBranches(repoId, branchPick.pick) },
+    { label: deletable ? `Delete ${plural(deletable, 'branch', 'branches')}…` : 'Delete… (checked out)', icon: <Trash2 size={14} />, danger: true, disabled: !deletable, onSelect: () => act.deleteBranches(repoId, branchPick.pick) }
+  ]
+  const tagActions = (): PickAction[] => [
+    { label: `Push ${plural(tagPick.pick.length, 'tag')}`, icon: <Upload size={14} />, disabled: !remoteNames.length, onSelect: () => void act.pushTags(repoId, tagPick.pick), remotes: remoteNames.length > 1 ? remoteNames : undefined, onRemote: (r) => void act.pushTags(repoId, tagPick.pick, r) },
+    { label: `Delete ${plural(tagPick.pick.length, 'tag')}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.deleteTags(repoId, tagPick.pick) }
+  ]
+  const pickMenu = (list: Ref[], names: string[], actions: PickAction[], clear: () => void): MenuEntry[] => {
+    const eye = eyeFor(list)
+    return [
+      ...actions.slice(0, -1).map(actionEntry),
+      { type: 'separator' },
+      ...(eye ? [{ type: 'item' as const, label: eye.hidden ? `Show ${names.length} in the graph` : `Hide ${names.length} from the graph`, icon: eye.hidden ? <Eye size={14} /> : <EyeOff size={14} />, onSelect: eye.onToggle }] : []),
+      { type: 'item', label: 'Copy names', onSelect: () => void navigator.clipboard.writeText(names.join('\n')) },
+      { type: 'item', label: 'Clear the pick', onSelect: clear },
+      { type: 'separator' },
+      actionEntry(actions[actions.length - 1])
+    ]
+  }
+
   return (
-    <nav aria-label="Branches and tags" className="flex shrink-0 flex-col overflow-hidden bg-surface" style={{ width }}>
+    <nav
+      aria-label="Branches and tags"
+      className="flex shrink-0 flex-col overflow-hidden bg-surface"
+      style={{ width }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && (branchPick.pick.length || tagPick.pick.length)) {
+          e.stopPropagation()
+          branchPick.clear()
+          tagPick.clear()
+        }
+      }}
+    >
       <div className="flex items-center gap-1 p-2">
         <TextInput
           id="left-filter"
@@ -416,8 +544,15 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
         </div>
       ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Section title="Local branches" count={shownLocals.length} empty={f ? 'No matches' : 'No branches yet'} eye={eyeFor(locals) ?? undefined}>
-          {renderTree(buildTree(shownLocals, (r) => r.short, 'local'), 1, 0, (r, name, level, indent) => (
+        <Section
+          title="Local branches"
+          count={shownLocals.length}
+          empty={f ? 'No matches' : 'No branches yet'}
+          eye={eyeFor(locals) ?? undefined}
+          multiselectable
+          note={branchPick.pick.length > 1 ? <PickBar count={branchPick.pick.length} actions={branchActions()} onClear={branchPick.clear} /> : null}
+        >
+          {renderTree(localTree, 1, 0, (r, name, level, indent) => (
             <Row
               key={r.name}
               icon={<GitBranch size={14} />}
@@ -428,10 +563,11 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               indent={indent}
               eye={eyeOne(r)}
               current={r.isHead}
-              selected={selected === r.sha}
-              onSelect={() => act.select(repoId, r.sha)}
+              selected={branchPick.pick.length ? branchPick.pick.includes(r.short) : selected === r.sha}
+              onSelect={(e) => branchPick.onPick(r.short, e, () => act.select(repoId, r.sha))}
+              onDelete={() => (branchPick.many(r.short) ? act.deleteBranches(repoId, branchPick.pick) : !r.isHead && !r.worktree && act.deleteBranch(repoId, r.short))}
               onActivate={() => !r.isHead && void act.checkout(repoId, r.short)}
-              menu={branchMenu(repoId, r, head, view, refs?.remotes ?? [])}
+              menu={branchPick.many(r.short) ? pickMenu(pickedRefs, branchPick.pick, branchActions(), branchPick.clear) : branchMenu(repoId, r, head, view, refs?.remotes ?? [])}
               dim={outOfGraph(view, r)}
               pinned={view.pinned === r.name}
               title={`${r.upstream ? `${r.short} → ${r.upstream.replace('refs/remotes/', '')}${r.upstreamGone ? ' (gone)' : ''}` : `${r.short} (not pushed)`}${r.worktree ? `\nChecked out in the worktree ${r.worktree}` : ''}`}
@@ -494,19 +630,27 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
             </Fragment>
           ))}
         </Section>
-        <Section title="Tags" count={shownTags.length} empty={f ? 'No matches' : 'No tags'} eye={eyeFor(tags) ?? undefined}>
+        <Section
+          title="Tags"
+          count={shownTags.length}
+          empty={f ? 'No matches' : 'No tags'}
+          eye={eyeFor(tags) ?? undefined}
+          multiselectable
+          note={tagPick.pick.length > 1 ? <PickBar count={tagPick.pick.length} actions={tagActions()} onClear={tagPick.clear} /> : null}
+        >
           {shownTags.map((r) => (
             <Row
               key={r.name}
               icon={<Tag size={14} />}
               label={r.short}
-              selected={selected === r.sha}
-              onSelect={() => act.select(repoId, r.sha)}
+              selected={tagPick.pick.length ? tagPick.pick.includes(r.short) : selected === r.sha}
+              onSelect={(e) => tagPick.onPick(r.short, e, () => act.select(repoId, r.sha))}
+              onDelete={() => (tagPick.many(r.short) ? act.deleteTags(repoId, tagPick.pick) : act.deleteTag(repoId, r.short))}
               onActivate={() => act.select(repoId, r.sha)}
               title={r.annotation ? `${r.short}: ${r.annotation}` : r.short}
               eye={eyeOne(r)}
               dim={view.hidden.includes(r.name)}
-              menu={tagMenu(repoId, r.short, refs?.remotes ?? [], eyeOne(r))}
+              menu={tagPick.many(r.short) ? pickMenu(tags.filter((t) => tagPick.pick.includes(t.short)), tagPick.pick, tagActions(), tagPick.clear) : tagMenu(repoId, r.short, refs?.remotes ?? [], eyeOne(r))}
             />
           ))}
         </Section>

@@ -303,8 +303,29 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     undo.record(repoId, 'branch_delete', `Delete branch ${name}`, { ...head, name, sha }, head)
     return null
   }))
+  handle('branch.deleteMany', z.object({ ...R, names: z.array(ref).min(1).max(1000), force: z.boolean() }), ({ repoId, names, force }) => exclusive(repoId, async () => {
+    const o = ops(repoId)
+    const head = await undo.snapshot(o)
+    const branches: { name: string; sha: string }[] = []
+    const unmerged: string[] = []
+    const failed: { name: string; message: string }[] = []
+    for (const name of [...new Set(names)]) {
+      try {
+        branches.push({ name, sha: await o.deleteBranch(name, force) })
+      } catch (e) {
+        if (!force && e instanceof GcFail && /aren’t merged/.test(e.message)) unmerged.push(name)
+        else failed.push({ name, message: e instanceof Error ? e.message : String(e) })
+      }
+    }
+    if (branches.length === 1) undo.record(repoId, 'branch_delete', `Delete branch ${branches[0].name}`, { ...head, ...branches[0] }, head)
+    else if (branches.length) undo.record(repoId, 'branch_delete', `Delete ${branches.length} branches`, { ...head, branches }, head)
+    return { deleted: branches.map((b) => b.name), unmerged, failed }
+  }))
   handle('branch.deleteRemote', z.object({ ...R, remote: ref, name: ref, opId }), ({ repoId, remote, name, opId }) =>
     exclusive(repoId, () => ops(repoId).deleteRemoteBranch(remote, name, opId))
+  )
+  handle('branch.deleteRemoteMany', z.object({ ...R, remote: ref, names: z.array(ref).min(1).max(1000), opId }), ({ repoId, remote, names, opId }) =>
+    exclusive(repoId, async () => (await ops(repoId).deleteRemoteBranches(remote, names, opId), null))
   )
   handle('branch.merge', z.object({ ...R, source: ref }), ({ repoId, source }) =>
     undoable(repoId, 'merge', `Merge ${source}`, () => ops(repoId).merge(source), (r) => r.result !== 'conflicts')
@@ -449,6 +470,28 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   )
   handle('tag.push', z.object({ ...R, name: ref, remote: ref, opId }), async ({ repoId, name, remote, opId }) => (await ops(repoId).pushTag(name, remote, opId, false), null))
   handle('tag.deleteRemote', z.object({ ...R, name: ref, remote: ref, opId }), async ({ repoId, name, remote, opId }) => (await ops(repoId).pushTag(name, remote, opId, true), null))
+  handle('tag.deleteMany', z.object({ ...R, names: z.array(ref).min(1).max(1000) }), ({ repoId, names }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const tags: { name: string; sha: string }[] = []
+      const failed: { name: string; message: string }[] = []
+      for (const name of [...new Set(names)]) {
+        try {
+          const obj = (await o.git(['rev-parse', '--verify', `refs/tags/${o.safeRev(name)}`])).trim()
+          await o.mut(['update-ref', `${UNDO_REFS}${uuid()}`, obj])
+          await o.deleteTag(name)
+          tags.push({ name, sha: obj })
+        } catch (e) {
+          failed.push({ name, message: e instanceof Error ? e.message : String(e) })
+        }
+      }
+      if (tags.length === 1) undo.record(repoId, 'tag_delete', `Delete tag ${tags[0].name}`, { ...head, ...tags[0] }, head)
+      else if (tags.length) undo.record(repoId, 'tag_delete', `Delete ${tags.length} tags`, { ...head, tags }, head)
+      return { deleted: tags.map((t) => t.name), failed }
+    })
+  )
+  handle('tag.pushMany', z.object({ ...R, names: z.array(ref).min(1).max(1000), remote: ref, opId, del: z.boolean() }), async ({ repoId, names, remote, opId, del }) => (await ops(repoId).pushTags(names, remote, opId, del), null))
 
   // ---------- history edits ----------
   handle('history.reset', z.object({ ...R, target: ref, mode: z.enum(['soft', 'mixed', 'hard']) }), ({ repoId, target, mode }) =>

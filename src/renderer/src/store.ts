@@ -94,8 +94,9 @@ export type Dialog =
       confirmLabel: string
       danger: boolean
       undoable: boolean | null
-      onConfirm: () => void
+      onConfirm: (checked: boolean) => void
       alt?: { label: string; onSelect: () => void }
+      check?: { label: string; hint?: string }
     }
 
 export type DiffMode = 'hunk' | 'inline' | 'split'

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { Button } from './Button'
 import { setToastHandler } from './toastBus'
 import { Shortcut } from './Display'
+import { Checkbox } from './Controls'
 import { cn } from './cn'
 
 /* ---------- Menus ---------- */
@@ -125,7 +126,8 @@ export function ConfirmDialog({
   danger = false,
   undoable,
   onConfirm,
-  alt
+  alt,
+  check
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -135,10 +137,14 @@ export function ConfirmDialog({
   danger?: boolean
   /** null: nothing to undo (it only opens or shows something), so neither line is shown. */
   undoable: boolean | null
-  onConfirm: () => void
+  /** Gets the checkbox's state, when there is one. */
+  onConfirm: (checked: boolean) => void
+  /** A checkbox, off by default, e.g. "Also delete them on origin". `hint` shows while it's on. */
+  check?: { label: string; hint?: string }
   /** Another way out, e.g. "Create a branch…": the dialog closes first, so it can open another one. */
   alt?: { label: string; onSelect: () => void }
 }): React.JSX.Element {
+  const [checked, setChecked] = useState(false)
   return (
     <Dialog
       open={open}
@@ -164,7 +170,7 @@ export function ConfirmDialog({
             autoFocus={undoable !== false}
             variant={danger ? 'danger' : 'primary'}
             onClick={() => {
-              onConfirm()
+              onConfirm(checked)
               onOpenChange(false)
             }}
           >
@@ -174,7 +180,8 @@ export function ConfirmDialog({
       }
     >
       <p className="text-base text-text">{body}</p>
-      {undoable === null ? null : <p className="text-sm text-muted">{undoable ? 'You can undo this with Ctrl+Z.' : 'This can’t be undone.'}</p>}
+      {check ? <Checkbox label={check.label} checked={checked} onCheckedChange={setChecked} /> : null}
+      {undoable === null ? null : <p className="text-sm text-muted">{undoable ? 'You can undo this with Ctrl+Z.' : 'This can’t be undone.'}{checked && check?.hint ? ` ${check.hint}` : ''}</p>}
     </Dialog>
   )
 }
