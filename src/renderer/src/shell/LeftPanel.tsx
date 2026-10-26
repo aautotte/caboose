@@ -516,24 +516,29 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
     ]
   }
 
-  // What branch and tag rows do, read at the moment they do it (LeafRow can skip re-rendering a row).
+  // What branch and tag rows do, read at the moment they do it (LeafRow can skip re-rendering a row, so a row may
+  // also hold an older copy of its ref: each handler gets the latest one with that name).
+  const fresh = (l: Leaf): Leaf => {
+    const latest = (r: Ref): Ref => refs?.refs.find((x) => x.name === r.name) ?? r
+    return { select: (r, e) => l.select(latest(r), e), remove: (r) => l.remove(latest(r)), menu: (r) => l.menu(latest(r)) }
+  }
   const live = useRef<{ local: Leaf; remote: Leaf; tag: Leaf }>(null!)
   live.current = {
-    local: {
+    local: fresh({
       select: (r, e) => branchPick.onPick(r.short, e, () => act.select(repoId, r.sha)),
       remove: (r) => (branchPick.many(r.short) ? act.deleteBranches(repoId, branchPick.pick) : !r.isHead && !r.worktree && act.deleteBranch(repoId, r.short)),
       menu: (r) => (branchPick.many(r.short) ? pickMenu(pickedRefs, branchPick.pick, branchActions(), branchPick.clear) : branchMenu(repoId, r, head, view, refs?.remotes ?? []))
-    },
-    remote: {
+    }),
+    remote: fresh({
       select: (r) => act.select(repoId, r.sha),
       remove: () => {},
       menu: (r) => branchMenu(repoId, r, head, view, refs?.remotes ?? [])
-    },
-    tag: {
+    }),
+    tag: fresh({
       select: (r, e) => tagPick.onPick(r.short, e, () => act.select(repoId, r.sha)),
       remove: (r) => (tagPick.many(r.short) ? act.deleteTags(repoId, tagPick.pick) : act.deleteTag(repoId, r.short)),
       menu: (r) => (tagPick.many(r.short) ? pickMenu(tags.filter((t) => tagPick.pick.includes(t.short)), tagPick.pick, tagActions(), tagPick.clear) : tagMenu(repoId, r.short, refs?.remotes ?? [], eyeOne(r)))
-    }
+    })
   }
 
   return (

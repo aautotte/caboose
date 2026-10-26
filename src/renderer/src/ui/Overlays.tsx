@@ -77,31 +77,32 @@ const MenuOffer = createContext<((items: () => MenuEntry[]) => void) | null>(nul
 
 /**
  * One context menu for a long list. A row hands over its items as it's right-clicked (`useMenuOffer`), and they're
- * built then, so a list of thousands of rows doesn't carry a menu per row through every render. A right-click that
- * no row claims shows nothing.
+ * only built while the menu is open (again on each render, so they follow changes that land while it's open), so a
+ * list of thousands of rows doesn't carry a menu per row through every render. A right-click that no row claims
+ * shows nothing.
  */
 export function SharedContextMenu({ children }: { children: ReactNode }): React.JSX.Element {
   const pending = useRef<(() => MenuEntry[]) | null>(null)
-  const [items, setItems] = useState<MenuEntry[]>([])
+  const [items, setItems] = useState<(() => MenuEntry[]) | null>(null)
   const offer = useCallback((f: () => MenuEntry[]) => {
     pending.current = f
   }, [])
   return (
     <MenuOffer.Provider value={offer}>
-      <RContext.Root>
+      <RContext.Root onOpenChange={(open) => !open && setItems(null)}>
         <RContext.Trigger
           asChild
           onContextMenu={(e) => {
             const f = pending.current
             pending.current = null
-            if (f) setItems(f())
+            if (f) setItems(() => f)
             else e.preventDefault()
           }}
         >
           {children}
         </RContext.Trigger>
         <RContext.Portal>
-          <RContext.Content className={menuPanel}>{renderEntries(RContext, items)}</RContext.Content>
+          <RContext.Content className={menuPanel}>{items ? renderEntries(RContext, items()) : null}</RContext.Content>
         </RContext.Portal>
       </RContext.Root>
     </MenuOffer.Provider>
