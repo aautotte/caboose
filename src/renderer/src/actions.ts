@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
@@ -1154,6 +1154,22 @@ export async function pullBranch(repoId: string, name: string): Promise<void> {
   await loadRepo(repoId, { keepSelection: true })
 }
 
+/** Points a local branch that isn't checked out at `to`. Undo puts it back. */
+export async function moveBranch(repoId: string, name: string, to: string): Promise<boolean> {
+  const ok = await attempt(() => call('branch.move', { repoId, name, to }), `Couldn’t reset ${name}`)
+  if (ok !== undefined) toast({ tone: 'success', title: `Reset ${name} to ${to}`, body: 'Undo puts it back.' })
+  await loadRepo(repoId, { keepSelection: true })
+  return ok !== undefined
+}
+
+/** The local branch for a remote one such as origin/x: the one that tracks it, or else the one named x. */
+export function localFor(repoId: string, remoteBranch: string): Ref | undefined {
+  const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
+  const r = refs.find((x) => x.kind === 'remote' && x.short === remoteBranch)
+  const name = r?.remote ? remoteBranch.slice(r.remote.length + 1) : remoteBranch.split('/').slice(1).join('/')
+  return refs.find((x) => x.kind === 'local' && x.upstream === `refs/remotes/${remoteBranch}`) ?? refs.find((x) => x.kind === 'local' && x.short === name)
+}
+
 /**
  * For a remote branch such as origin/x: fast-forwards the local branch that tracks it (or the one with its name) to
  * it, without switching. With no such local branch, makes one that tracks it.
@@ -1163,7 +1179,7 @@ export async function fastForwardTo(repoId: string, remoteBranch: string): Promi
   const r = refs.find((x) => x.kind === 'remote' && x.short === remoteBranch)
   const name = r?.remote ? remoteBranch.slice(r.remote.length + 1) : remoteBranch.split('/').slice(1).join('/')
   if (!name || name === 'HEAD') return
-  const local = refs.find((x) => x.kind === 'local' && x.upstream === `refs/remotes/${remoteBranch}`) ?? refs.find((x) => x.kind === 'local' && x.short === name)
+  const local = localFor(repoId, remoteBranch)
   const res = await attempt(() => call('branch.fastForward', { repoId, name: local?.short ?? name, to: remoteBranch, fetch: false, create: !local, opId: newOpId() }), `Couldn’t fast-forward ${local?.short ?? name}`)
   fastForwardResult(res)
   await loadRepo(repoId, { keepSelection: true })

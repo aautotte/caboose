@@ -20,6 +20,7 @@ export type UndoType =
   | 'tag_delete'
   | 'remote_remove'
   | 'ignore'
+  | 'branch_move'
 
 /** What each undo entry needs to move the repo back (before) and forward again (after). */
 export interface Snapshot {
@@ -28,6 +29,7 @@ export interface Snapshot {
   name?: string // branch_delete: the branch
   branches?: { name: string; sha: string }[] // branch_delete of several at once
   tags?: { name: string; sha: string }[] // tag_delete of several at once
+  tip?: string // branch_move: where branch `name` points on this side
   stash?: string // discard: snapshot commit
   paths?: string[] | 'all' // discard: what was discarded (for redo)
   patch?: string // discard_lines: the patch that was reversed out of the working files
@@ -210,6 +212,12 @@ export class UndoStack {
       case 'stash_drop': {
         if (dir === 'back') await ops.stashStore(before.stash!, before.message ?? 'restored stash')
         else await ops.stashDrop(before.stash!)
+        return after
+      }
+      case 'branch_move': {
+        const now = (await ops.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${before.name}`]))?.trim()
+        if (now !== from.tip) throw moved()
+        await ops.mut(['update-ref', `refs/heads/${before.name}`, to.tip!, from.tip!])
         return after
       }
       case 'tag_delete': {

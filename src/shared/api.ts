@@ -104,6 +104,8 @@ export interface Api {
    * `fetch`. Only a fast-forward; anything else is `rejected`. With `create`, a missing branch is made, tracking `to`.
    */
   'branch.fastForward': { in: R & { name: string; to?: string; fetch: boolean; create?: boolean; opId: string }; out: OpResult }
+  /** Points a local branch that isn't checked out at `to` (a reset with no files involved). Undoable. */
+  'branch.move': { in: R & { name: string; to: string }; out: null }
   'branch.deleteMany': { in: R & { names: string[]; force: boolean }; out: { deleted: string[]; unmerged: string[]; failed: { name: string; message: string }[] } }
   /** Deletes the branch `name` on `remote`; returns the commit it pointed at, if known. */
   'branch.deleteRemote': { in: R & { remote: string; name: string; opId: string }; out: string | null }

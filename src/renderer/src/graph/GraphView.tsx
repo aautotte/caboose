@@ -9,7 +9,7 @@ import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
-import { pullEntry, pushEntry, rebaseOntoEntry, tagMenu } from '@/shell/refMenus'
+import { pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
 
 const ROW = 28 // matches --gc-graph-row-h
 const HEADER = 26 // --gc-list-row-h, the sticky column header
@@ -616,7 +616,11 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       items.push({ type: 'item', label: `Rebase ${headBranch} onto ${r.name}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, headBranch, r.name) })
       items.push(rebaseOntoEntry(repoId, headBranch, r.name))
     }
-    if (r.kind === 'remote') items.push({ type: 'item', label: 'Fast-forward my local branch', onSelect: () => void act.fastForwardTo(repoId, r.name) })
+    if (r.kind === 'remote') {
+      items.push({ type: 'item', label: 'Fast-forward my local branch', onSelect: () => void act.fastForwardTo(repoId, r.name) })
+      const reset = resetToRemoteEntry(repoId, r.name)
+      if (reset) items.push(reset)
+    }
     if (r.local) {
       items.push(pullEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream, upstreamGone: r.local.upstreamGone, worktree: r.local.worktree }))
       items.push(pushEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream }, remotes))
