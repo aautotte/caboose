@@ -612,15 +612,15 @@ async function rewriteOp(repoId: string, fn: () => Promise<{ result: string; mes
 }
 
 /** New message for any commit on the current branch (the newest one is amended, older ones reworded). */
-export function reword(repoId: string, sha: string, message: string, done?: (ok: boolean) => void): void {
+export function reword(repoId: string, sha: string, message: string, done?: (ok: boolean) => void, noVerify = false): void {
   guardPushed(repoId, [sha], 'Edit the message', () =>
-    void rewriteOp(repoId, () => call('history.reword', { repoId, sha, message }), 'Couldn’t change the message', 'Message changed', headLine(repoId).indexOf(sha)).then((ok) => done?.(ok))
+    void rewriteOp(repoId, () => call('history.reword', { repoId, sha, message, noVerify }), 'Couldn’t change the message', 'Message changed', headLine(repoId).indexOf(sha)).then((ok) => done?.(ok))
   )
 }
 
-export function squash(repoId: string, shas: string[], message: string, done?: (ok: boolean) => void): void {
+export function squash(repoId: string, shas: string[], message: string, done?: (ok: boolean) => void, noVerify = false): void {
   guardPushed(repoId, shas, `Squash ${shas.length} commits`, () =>
-    void rewriteOp(repoId, () => call('history.squash', { repoId, shas, message }), 'Couldn’t squash', `Squashed ${shas.length} commits into one`, Math.min(...shas.map((s) => headLine(repoId).indexOf(s)))).then((ok) => done?.(ok))
+    void rewriteOp(repoId, () => call('history.squash', { repoId, shas, message, noVerify }), 'Couldn’t squash', `Squashed ${shas.length} commits into one`, Math.min(...shas.map((s) => headLine(repoId).indexOf(s)))).then((ok) => done?.(ok))
   )
 }
 
@@ -1552,9 +1552,9 @@ export async function cherryPick(repoId: string, shas: string[]): Promise<boolea
   return !!res && res.result !== 'conflicts'
 }
 
-export async function rebaseInteractive(repoId: string, onto: string, plan: RebaseStep[]): Promise<boolean> {
+export async function rebaseInteractive(repoId: string, onto: string, plan: RebaseStep[], noVerify = false): Promise<boolean> {
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: 'Rebasing' } }))
-  const res = await attempt(() => call('rebase.interactive', { repoId, onto, plan }), 'Interactive rebase failed')
+  const res = await attempt(() => call('rebase.interactive', { repoId, onto, plan, noVerify }), 'Interactive rebase failed')
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined } }))
   afterOp(repoId, res, 'Rebase finished')
   if (res) setCenter(repoId, { kind: 'graph' })

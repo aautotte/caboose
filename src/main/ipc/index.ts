@@ -544,14 +544,15 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       plan: z
         .array(z.object({ sha, action: z.enum(['pick', 'reword', 'squash', 'fixup', 'drop']), message: z.string().max(100_000).optional() }))
         .min(1)
-        .max(5000)
+        .max(5000),
+      noVerify: z.boolean().optional()
     }),
-    ({ repoId, onto, plan }) =>
+    ({ repoId, onto, plan, noVerify }) =>
       undoable(
         repoId,
         'rebase',
         `Interactive rebase onto ${onto.slice(0, 12)}`,
-        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`)),
+        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`), noVerify),
         (r) => r.result !== 'conflicts'
       )
   )
@@ -747,11 +748,11 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     ({ repoId, refs, state }) => refView.setMany(repoId, refs, state)
   )
   const rewriteDir = (id: string): string => join(tmpDir, `rewrite-${id}`)
-  handle('history.reword', z.object({ ...R, sha, message: z.string().min(1).max(100_000) }), ({ repoId, sha, message }) =>
-    undoable(repoId, 'rebase', `Edit message of ${sha.slice(0, 7)}`, () => ops(repoId).reword(sha, message, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  handle('history.reword', z.object({ ...R, sha, message: z.string().min(1).max(100_000), noVerify: z.boolean().optional() }), ({ repoId, sha, message, noVerify }) =>
+    undoable(repoId, 'rebase', `Edit message of ${sha.slice(0, 7)}`, () => ops(repoId).reword(sha, message, rewriteDir(repoId), noVerify), (r) => r.result !== 'conflicts')
   )
-  handle('history.squash', z.object({ ...R, shas: z.array(sha).min(2).max(1000), message: z.string().min(1).max(100_000) }), ({ repoId, shas, message }) =>
-    undoable(repoId, 'rebase', `Squash ${shas.length} commits`, () => ops(repoId).squash(shas, message, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  handle('history.squash', z.object({ ...R, shas: z.array(sha).min(2).max(1000), message: z.string().min(1).max(100_000), noVerify: z.boolean().optional() }), ({ repoId, shas, message, noVerify }) =>
+    undoable(repoId, 'rebase', `Squash ${shas.length} commits`, () => ops(repoId).squash(shas, message, rewriteDir(repoId), noVerify), (r) => r.result !== 'conflicts')
   )
   handle('history.move', z.object({ ...R, sha, direction: z.enum(['up', 'down']) }), ({ repoId, sha, direction }) =>
     undoable(repoId, 'rebase', `Move ${sha.slice(0, 7)} ${direction}`, () => ops(repoId).move(sha, direction, rewriteDir(repoId)), (r) => r.result !== 'conflicts')

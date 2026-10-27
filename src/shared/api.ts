@@ -162,7 +162,8 @@ export interface Api {
   'history.cherryPick': { in: R & { shas: string[] }; out: OpResult }
   'cherry.preview': { in: R & { tip: string }; out: RebaseRow[] }
   'rebase.preview': { in: R & { onto: string }; out: RebasePreview }
-  'rebase.interactive': { in: R & { onto: string; plan: RebaseStep[] }; out: OpResult }
+  /** `noVerify`: skip git hooks, as for a commit (they run by default). Also for reword and squash. */
+  'rebase.interactive': { in: R & { onto: string; plan: RebaseStep[]; noVerify?: boolean }; out: OpResult }
 
   'remote.list': { in: R; out: Remote[] }
   'remote.add': { in: R & { name: string; url: string }; out: null }
@@ -175,8 +176,8 @@ export interface Api {
   'refView.set': { in: R & { ref: string; state: 'normal' | 'hidden' | 'soloed' }; out: RefViewState }
   'refView.pin': { in: R & { ref: string | null }; out: RefViewState }
   'refView.setMany': { in: R & { refs: string[]; state: 'normal' | 'hidden' }; out: RefViewState }
-  'history.reword': { in: R & { sha: string; message: string }; out: OpResult }
-  'history.squash': { in: R & { shas: string[]; message: string }; out: OpResult }
+  'history.reword': { in: R & { sha: string; message: string; noVerify?: boolean }; out: OpResult }
+  'history.squash': { in: R & { shas: string[]; message: string; noVerify?: boolean }; out: OpResult }
   'history.move': { in: R & { sha: string; direction: 'up' | 'down' }; out: OpResult }
 
   'prefs.getAll': { in: Record<string, never>; out: Record<string, unknown> }
