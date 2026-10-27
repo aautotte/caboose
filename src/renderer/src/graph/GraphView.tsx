@@ -299,9 +299,15 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const [extent, setExtent] = useState<string | null>(null)
   const extentIndex = multi.length && extent ? rows.findIndex((r) => r.sha === extent) : -1
   const viewIndex = extentIndex >= 0 ? extentIndex : selIndex
+  // Only when the selection itself moves: rows shifting under it (after a rebase, a pull, a refresh) mustn't pull the
+  // view back to it from wherever you've scrolled.
+  const viewKey = extentIndex >= 0 ? extent : selected
+  const scrolledTo = useRef<string | null>(null)
   useEffect(() => {
-    if (viewIndex >= 0) v.scrollToIndex(viewIndex, { align: 'auto' })
-  }, [viewIndex, v])
+    if (viewIndex < 0 || viewKey === scrolledTo.current) return
+    scrolledTo.current = viewKey
+    v.scrollToIndex(viewIndex, { align: 'auto' })
+  }, [viewIndex, viewKey, v])
 
   const clickRow = (e: React.MouseEvent, sha: string): void => {
     if (sha !== 'wip' && bySha.get(sha)?.kind === 'commit' && (e.ctrlKey || e.metaKey)) {

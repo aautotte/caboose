@@ -198,7 +198,8 @@ test('F29-H1 branch names are grouped into folders on "/", local and remote', as
   await expect(local('feature/two')).toBeVisible()
   const origin = h.page.getByRole('group', { name: 'origin' })
   await expect(origin.getByRole('treeitem', { name: 'fix folder' })).toBeVisible()
-  await expect(origin.getByRole('treeitem', { name: 'fix/bug' })).toHaveAttribute('aria-level', '3')
+  // The only remote has no row of its own, so its folders start at the top level.
+  await expect(origin.getByRole('treeitem', { name: 'fix/bug' })).toHaveAttribute('aria-level', '2')
   expect(await axe(h.page)).toEqual([])
 })
 
@@ -216,10 +217,10 @@ test('F30-H1 eye icons hide a branch, a folder, a remote or a whole section', as
   await expect.poll(hidden).toEqual(['refs/heads/feature/one', 'refs/heads/feature/two', 'refs/heads/fix/bug', 'refs/heads/left', 'refs/heads/right'])
   await h.page.getByRole('button', { name: 'Show all local branches' }).click()
   await expect.poll(hidden).toEqual([])
-  await h.page.getByRole('treeitem', { name: 'origin', exact: true }).getByRole('button', { name: 'Hide origin' }).click()
+  await h.page.getByRole('button', { name: 'Hide all remotes' }).click()
   await expect.poll(async () => (await hidden()).length).toBe(4)
   expect((await hidden()).every((r) => r.startsWith('refs/remotes/origin/'))).toBe(true)
-  await h.page.getByRole('treeitem', { name: 'origin', exact: true }).getByRole('button', { name: 'Show origin' }).click()
+  await h.page.getByRole('button', { name: 'Show all remotes' }).click()
   await expect.poll(hidden).toEqual([])
   // H on a focused row does the same.
   await local('fix/bug').focus()

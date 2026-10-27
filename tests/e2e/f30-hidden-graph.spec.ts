@@ -46,7 +46,7 @@ const tree = (name: string) => h.page.getByRole('tree', { name })
 
 test('F30-E2: a hidden branch’s commits leave the graph, even with origin/HEAD and a tag pointing at them', async () => {
   await tree('Local branches').getByRole('treeitem', { name: 'feat' }).getByRole('button', { name: 'Hide feat' }).click()
-  await tree('Remotes').getByRole('treeitem', { name: 'origin', exact: true }).getByRole('button', { name: 'Hide origin' }).click()
+  await h.page.getByRole('button', { name: 'Hide all remotes' }).click()
   await expect(row('Only on feat')).toHaveCount(0)
   await expect(row('Only on other')).toHaveCount(1)
   await expect(row('Start')).toHaveCount(1)
@@ -93,8 +93,8 @@ test('F30-E5: with hundreds of long branch names hidden, the shown branches stil
   const many = Array.from({ length: 800 }, (_, i) => `refs/remotes/origin/PLATFORM_HYD-${1000 + i}/review-the-driver-and-address-comments`)
   execFileSync('git', ['update-ref', '--stdin'], { cwd: repo, env: h.env, input: many.map((r) => `create ${r} ${feat}`).join('\n') + '\n' })
   await expect(tree('Remotes').getByRole('treeitem', { name: 'PLATFORM_HYD-1799 folder' })).toHaveCount(1)
-  // The remote's eye hides all of its branches at once, as on the real repository; then feat, which must leave.
-  await tree('Remotes').getByRole('treeitem', { name: 'origin', exact: true }).getByRole('button', { name: 'Hide origin' }).click()
+  // The remotes' eye (one remote: the section's) hides all of its branches at once, as on the real repository; then feat, which must leave.
+  await h.page.getByRole('button', { name: 'Hide all remotes' }).click()
   await tree('Local branches').getByRole('treeitem', { name: 'feat' }).getByRole('button', { name: 'Hide feat' }).click()
   await expect(row('Only on feat')).toHaveCount(0)
   await expect(row('Only on other')).toHaveCount(1)
