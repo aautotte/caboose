@@ -303,6 +303,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     undo.record(repoId, 'branch_delete', `Delete branch ${name}`, { ...head, name, sha }, head)
     return null
   }))
+  handle('branch.fastForward', z.object({ ...R, name: ref, to: ref.optional(), fetch: z.boolean(), create: z.boolean().optional(), opId }), ({ repoId, name, opId: id, ...rest }) =>
+    exclusive(repoId, () => ops(repoId).fastForward(name, { ...rest, opId: id }, progress(id)))
+  )
   handle('branch.deleteMany', z.object({ ...R, names: z.array(ref).min(1).max(1000), force: z.boolean() }), ({ repoId, names, force }) => exclusive(repoId, async () => {
     const o = ops(repoId)
     const head = await undo.snapshot(o)
@@ -337,10 +340,10 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
 
   // ---------- sync ----------
   handle('remote.fetch', z.object({ ...R, opId, background: z.boolean().optional() }), async ({ repoId, opId, background }) => (await ops(repoId).fetch(opId, progress(opId), !background), null))
-  handle('remote.pull', z.object({ ...R, mode: z.enum(['ff', 'ff-only', 'rebase']), opId }), ({ repoId, mode, opId }) => exclusive(repoId, async () => {
+  handle('remote.pull', z.object({ ...R, mode: z.enum(['ff', 'ff-only', 'rebase']), opId, autostash: z.boolean().optional() }), ({ repoId, mode, opId, autostash }) => exclusive(repoId, async () => {
     const o = ops(repoId)
     const before = await undo.snapshot(o)
-    const r = await o.pull(mode, opId, progress(opId))
+    const r = await o.pull(mode, opId, progress(opId), autostash)
     if (r.result === 'conflicts') undo.setPending(repoId, mode === 'rebase' ? 'rebase' : 'merge', 'Pull', before)
     return r
   }))

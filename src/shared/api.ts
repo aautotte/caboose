@@ -99,6 +99,11 @@ export interface Api {
   'branch.rename': { in: R & { name: string; newName: string }; out: null }
   'branch.delete': { in: R & { name: string; force: boolean }; out: null }
   /** Deletes what it can; the ones with unmerged commits (when not forced) come back in `unmerged`, untouched. One undo for all. */
+  /**
+   * Moves a local branch forward to `to` (default: its upstream) without checking it out, fetching that first when
+   * `fetch`. Only a fast-forward; anything else is `rejected`. With `create`, a missing branch is made, tracking `to`.
+   */
+  'branch.fastForward': { in: R & { name: string; to?: string; fetch: boolean; create?: boolean; opId: string }; out: OpResult }
   'branch.deleteMany': { in: R & { names: string[]; force: boolean }; out: { deleted: string[]; unmerged: string[]; failed: { name: string; message: string }[] } }
   /** Deletes the branch `name` on `remote`; returns the commit it pointed at, if known. */
   'branch.deleteRemote': { in: R & { remote: string; name: string; opId: string }; out: string | null }
@@ -109,7 +114,8 @@ export interface Api {
   'branch.setUpstream': { in: R & { name: string; upstream: string }; out: null }
 
   'remote.fetch': { in: R & { opId: string; background?: boolean }; out: null }
-  'remote.pull': { in: R & { mode: PullMode; opId: string }; out: OpResult }
+  /** `autostash`: stash uncommitted changes first and put them back after. */
+  'remote.pull': { in: R & { mode: PullMode; opId: string; autostash?: boolean }; out: OpResult }
   'remote.push': { in: R & { opId: string; remote?: string; branch?: string; setUpstream?: boolean; force?: boolean }; out: OpResult }
 
   'conflict.get': { in: R & { path: string }; out: ConflictFile }

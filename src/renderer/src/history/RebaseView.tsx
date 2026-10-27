@@ -28,7 +28,7 @@ const actions: Array<{ value: RebaseAction; key: string; label: string; help: st
  *   cherry: copy commits from `tip` onto the current branch (keep or skip, reorder).
  * The list runs oldest first, top to bottom, which is the order git replays them.
  */
-export function RebaseView({ repoId, mode, base, baseLabel, range }: { repoId: string; mode: 'rebase' | 'cherry'; base: string; baseLabel: string; range?: string[] }): React.JSX.Element {
+export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }: { repoId: string; mode: 'rebase' | 'cherry'; base: string; baseLabel: string; range?: string[]; /** Onto another branch: worth running even with every commit kept as it is. */ ontoBranch?: boolean }): React.JSX.Element {
   const [allRows, setRows] = useState<RebaseRow[] | null>(null)
   // With a range (commits picked in the graph), only those are offered; the newer ones are replayed as they are.
   const rangeKey = range?.join(',')
@@ -137,7 +137,7 @@ export function RebaseView({ repoId, mode, base, baseLabel, range }: { repoId: s
     if (e.key === 'Enter' && steps[i].action === 'reword') setReword(i)
   }
 
-  const title = mode === 'rebase' ? (range ? `Rebase ${plural(steps.length || range.length, 'selected commit')} on ${branch ?? 'HEAD'}` : `Rewrite ${branch ?? 'HEAD'} after ${baseLabel}`) : `Copy commits from ${baseLabel} onto ${head?.branch ?? 'HEAD'}`
+  const title = mode === 'rebase' ? (range ? `Rebase ${plural(steps.length || range.length, 'selected commit')} on ${branch ?? 'HEAD'}` : ontoBranch ? `Rebase ${branch ?? 'HEAD'} onto ${baseLabel}` : `Rewrite ${branch ?? 'HEAD'} after ${baseLabel}`) : `Copy commits from ${baseLabel} onto ${head?.branch ?? 'HEAD'}`
 
   return (
     <section aria-label={title} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
@@ -264,7 +264,7 @@ export function RebaseView({ repoId, mode, base, baseLabel, range }: { repoId: s
               </IconButton>
             </Tooltip>
             <Button onClick={close}>Cancel</Button>
-            <Button variant="primary" disabled={!!problem || dirty || !!busyOp || (mode === 'rebase' && unchanged)} loading={running} onClick={() => void start()}>
+            <Button variant="primary" disabled={!!problem || dirty || !!busyOp || (mode === 'rebase' && unchanged && !ontoBranch)} loading={running} onClick={() => void start()}>
               {mode === 'rebase' ? 'Start rebase' : `Copy ${plural(kept.length, 'commit')}`}
             </Button>
           </footer>

@@ -1,4 +1,4 @@
-import { Eye, EyeOff, GitBranchPlus, Tag, Trash2, Upload } from 'lucide-react'
+import { Download, Eye, EyeOff, GitBranchPlus, ListOrdered, Tag, Trash2, Upload } from 'lucide-react'
 import type { MenuEntry } from '@/ui'
 import * as act from '@/actions'
 
@@ -26,6 +26,20 @@ export function pushEntry(repoId: string, branch: { name: string; isHead: boolea
     // The current branch keeps the toolbar's behaviour (asks where to publish it the first time).
     onSelect: branch.isHead ? () => void act.push(repoId) : to(remotes[0])
   }
+}
+
+/**
+ * "Pull" for a local branch: the checked-out one pulls as the toolbar does; any other is fetched and fast-forwarded
+ * without switching to it.
+ */
+export function pullEntry(repoId: string, branch: { name: string; isHead: boolean; upstream?: string; upstreamGone?: boolean; worktree?: string }): MenuEntry {
+  const why = !branch.upstream ? ' (tracks nothing)' : branch.upstreamGone ? ' (gone from the remote)' : branch.worktree ? ' (checked out in a worktree)' : ''
+  return { type: 'item', label: `Pull${why}`, icon: <Download size={14} />, disabled: !!why, onSelect: () => void act.pullBranch(repoId, branch.name) }
+}
+
+/** Interactive rebase of the checked-out branch onto `onto` (a branch): pick, reorder, squash or drop its commits. */
+export function rebaseOntoEntry(repoId: string, head: string, onto: string): MenuEntry {
+  return { type: 'item', label: `Interactive rebase ${head} onto ${onto}…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'rebase', onto, ontoLabel: onto, ontoBranch: true }) }
 }
 
 /**

@@ -82,7 +82,7 @@ export function RepoView({ repoId }: { repoId: string }): React.JSX.Element {
           ) : center.kind === 'history' ? (
             <FileHistoryView key={center.path} repoId={repoId} path={center.path} />
           ) : center.kind === 'rebase' ? (
-            <RebaseView key={`${center.onto}:${center.range?.join(',') ?? ''}`} repoId={repoId} mode="rebase" base={center.onto} baseLabel={center.ontoLabel} range={center.range} />
+            <RebaseView key={`${center.onto}:${center.range?.join(',') ?? ''}`} repoId={repoId} mode="rebase" base={center.onto} baseLabel={center.ontoLabel} range={center.range} ontoBranch={center.ontoBranch} />
           ) : center.kind === 'cherry' ? (
             <RebaseView key={center.tip} repoId={repoId} mode="cherry" base={center.tip} baseLabel={center.tipLabel} />
           ) : (

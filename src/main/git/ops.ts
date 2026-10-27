@@ -908,13 +908,22 @@ export class RepoOps {
     await this.mut(['fetch', '--all', '--prune', '--progress'], { opId, onProgress, timeoutMs: 300_000, extraEnv: quiet })
   }
 
-  async pull(mode: PullMode, opId: string, onProgress: RunOptions['onProgress']): Promise<OpResult> {
+  async pull(mode: PullMode, opId: string, onProgress: RunOptions['onProgress'], autostash = false): Promise<OpResult> {
     const flag = mode === 'ff' ? ['--ff', '--no-rebase', '--no-edit'] : mode === 'ff-only' ? ['--ff-only'] : ['--rebase']
     try {
-      const out = await this.mut(['pull', '--progress', ...flag], { opId, onProgress, timeoutMs: 300_000 })
+      const out = await this.mut(['pull', '--progress', ...flag, ...(autostash ? ['--autostash'] : [])], { opId, onProgress, timeoutMs: 300_000 })
+      if (/autostash resulted in conflicts/i.test(out)) {
+        return { result: 'ok', message: 'Your changes came back with conflicts. Sort them out in the files; they’re also kept in a stash.' }
+      }
       if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
       return { result: 'ok' }
     } catch (e) {
+      if (e instanceof GcFail && /would be overwritten by (merge|checkout)|cannot pull with rebase|commit your changes or stash them|You have unstaged changes/i.test(e.detail ?? '')) {
+        // git lists the files it would overwrite, one per line, indented with a tab.
+        const files = [...(e.detail ?? '').matchAll(/^\t(.+)$/gm)].map((m) => m[1].trim())
+        const what = files.length ? (files.length > 5 ? `${files.slice(0, 5).join(', ')} and ${files.length - 5} more` : files.join(', ')) : 'Some files'
+        return { result: 'dirty', message: `${what} ${files.length === 1 ? 'has' : 'have'} uncommitted changes the pull would overwrite.` }
+      }
       const op = await this.opState()
       if (op.kind === 'merge' || op.kind === 'rebase') return { result: 'conflicts' }
       if (e instanceof GcFail && /no tracking information/i.test(e.detail ?? '')) {
@@ -925,6 +934,46 @@ export class RepoOps {
       }
       throw e
     }
+  }
+
+  /**
+   * Moves local branch `name` forward to `to` (default: its upstream), without checking it out; with `fetch`, gets
+   * that remote branch first. Refuses anything but a fast-forward. The checked-out branch moves with merge --ff-only
+   * (so its files follow); one checked out in another worktree is left for that worktree.
+   */
+  async fastForward(name: string, opts: { to?: string; fetch: boolean; create?: boolean; opId: string }, onProgress: RunOptions['onProgress']): Promise<OpResult> {
+    this.safeRev(name)
+    const target = opts.to ? this.safeRev(opts.to) : (await this.tryGit(['rev-parse', '--abbrev-ref', `${name}@{upstream}`]))?.trim()
+    if (!target) throw invalid(`${name} doesn’t track a remote branch. Set its upstream first.`)
+    if (opts.fetch) {
+      const { remotes } = await this.refs()
+      const remote = remotes.find((r) => target.startsWith(`${r}/`))
+      if (remote) {
+        const branch = target.slice(remote.length + 1)
+        await this.mut(['fetch', '--progress', remote, `+refs/heads/${branch}:refs/remotes/${remote}/${branch}`], { opId: opts.opId, onProgress, timeoutMs: 300_000 })
+      }
+    }
+    const next = (await this.git(['rev-parse', '--verify', `${target}^{commit}`])).trim()
+    const cur = (await this.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${name}`]))?.trim()
+    if (!cur) {
+      if (!opts.create) throw invalid(`There’s no local branch ${name}.`)
+      await this.safeBranchName(name)
+      await this.mut(['branch', '--track', name, target])
+      return { result: 'ok', message: `Created ${name}, tracking ${target}` }
+    }
+    if (cur === next) return { result: 'nothing', message: `${name} is already up to date with ${target}.` }
+    if ((await this.tryGit(['merge-base', '--is-ancestor', cur, next])) === null) {
+      return { result: 'rejected', message: `Can’t fast-forward ${name}: it has commits that ${target} doesn’t. Check it out to merge or rebase.` }
+    }
+    const here = await this.status()
+    if (here.branch === name) {
+      await this.mut(['merge', '--ff-only', '-q', next])
+    } else {
+      const elsewhere = (await this.worktrees()).find((w) => w.branch === name)
+      if (elsewhere) return { result: 'rejected', message: `${name} is checked out in the worktree ${elsewhere.path}. Pull it there.` }
+      await this.mut(['update-ref', '-m', `fast-forward to ${target}`, `refs/heads/${name}`, next, cur])
+    }
+    return { result: 'ok', message: `Fast-forwarded ${name} to ${target}` }
   }
 
   async push(opts: { opId: string; remote?: string; branch?: string; setUpstream?: boolean; force?: boolean }, onProgress: RunOptions['onProgress']): Promise<OpResult> {

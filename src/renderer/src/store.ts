@@ -12,7 +12,8 @@ export type Center =
   | { kind: 'blame'; path: string; rev: string | null }
   | { kind: 'history'; path: string }
   /** `range`: only these commits are offered for editing; the ones after them are replayed as they are. */
-  | { kind: 'rebase'; onto: string; ontoLabel: string; range?: string[] }
+  /** `ontoBranch`: onto another branch (moving the commits there), rather than rewriting after one of its own commits. */
+  | { kind: 'rebase'; onto: string; ontoLabel: string; range?: string[]; ontoBranch?: boolean }
   | { kind: 'cherry'; tip: string; tipLabel: string }
 
 export interface RepoState {
