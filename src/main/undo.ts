@@ -30,6 +30,7 @@ export interface Snapshot {
   branches?: { name: string; sha: string }[] // branch_delete of several at once
   tags?: { name: string; sha: string }[] // tag_delete of several at once
   tip?: string // branch_move: where branch `name` points on this side
+  stashes?: { stash: string; message: string; index: number }[] // stash_drop of several at once (index: where each was)
   stash?: string // discard: snapshot commit
   paths?: string[] | 'all' // discard: what was discarded (for redo)
   patch?: string // discard_lines: the patch that was reversed out of the working files
@@ -210,6 +211,12 @@ export class UndoStack {
         return after
       }
       case 'stash_drop': {
+        if (before.stashes) {
+          // Storing puts a stash on top: the deepest first, so they come back in their old order.
+          if (dir === 'back') for (const s of [...before.stashes].sort((a, b) => b.index - a.index)) await ops.stashStore(s.stash, s.message)
+          else for (const s of before.stashes) await ops.stashDrop(s.stash)
+          return after
+        }
         if (dir === 'back') await ops.stashStore(before.stash!, before.message ?? 'restored stash')
         else await ops.stashDrop(before.stash!)
         return after
