@@ -489,6 +489,13 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
       )
     )
 
+  // Just one remote (the usual case): no row for it, only its branches.
+  const single = byRemote.size === 1 ? [...byRemote.keys()][0] : null
+  const remoteMenu = (remote: string): MenuEntry[] => [
+    { type: 'item', label: 'Fetch all remotes', icon: <RefreshCw size={14} />, onSelect: () => void act.fetchAll(repoId) },
+    { type: 'separator' },
+    { type: 'item', label: `Remove ${remote}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.removeRemote(repoId, remote) }
+  ]
   const shownLocals = locals.filter((r) => match(r.short))
   const shownRemotes = remotes.filter((r) => match(r.short))
   const shownTags = tags.filter((r) => match(r.short))
@@ -636,32 +643,36 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               />
             ))}
           </Section>
-          <Section title="Remotes" count={byRemote.size} empty="No remotes. Add one to push and pull." action={{ label: 'Add a remote', onClick: () => act.openDialog({ kind: 'addRemote', repoId }) }} eye={eyeFor(remotes) ?? undefined}>
+          <Section
+            title="Remotes"
+            // With one remote, its row is left out: the section stands for it, and counts its branches.
+            count={single ? (byRemote.get(single) ?? []).filter((r) => shownRemotes.includes(r)).length : byRemote.size}
+            empty={single ? (f ? 'No matches' : `No branches on ${single}`) : 'No remotes. Add one to push and pull.'}
+            action={{ label: 'Add a remote', onClick: () => act.openDialog({ kind: 'addRemote', repoId }) }}
+            eye={eyeFor(remotes) ?? undefined}
+            menu={single ? remoteMenu(single) : undefined}
+          >
             {[...byRemote.entries()].map(([remote, list]) => (
               // A flat tree with levels: the remote (level 1) followed by a group of its branches (level 2+).
               // Nesting the branches inside the remote's item would make all their names part of the remote's name.
               <Fragment key={remote}>
-                <FolderRow
-                  icon={<Cloud size={14} aria-hidden />}
-                  label={remote}
-                  name={remote}
-                  level={1}
-                  indent={0}
-                  open={isOpen(`remote:${remote}`)}
-                  onToggle={(o) => toggleFolder(`remote:${remote}`, o)}
-                  eye={eyeFor(list)}
-                  count={list.length}
-                  menu={() => [
-                    ...folderMenu(remote, list, `remote:${remote}`),
-                    { type: 'separator' },
-                    { type: 'item', label: 'Fetch all remotes', icon: <RefreshCw size={14} />, onSelect: () => void act.fetchAll(repoId) },
-                    { type: 'separator' },
-                    { type: 'item', label: `Remove ${remote}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.removeRemote(repoId, remote) }
-                  ]}
-                />
-                {isOpen(`remote:${remote}`) ? (
+                {single ? null : (
+                  <FolderRow
+                    icon={<Cloud size={14} aria-hidden />}
+                    label={remote}
+                    name={remote}
+                    level={1}
+                    indent={0}
+                    open={isOpen(`remote:${remote}`)}
+                    onToggle={(o) => toggleFolder(`remote:${remote}`, o)}
+                    eye={eyeFor(list)}
+                    count={list.length}
+                    menu={() => [...folderMenu(remote, list, `remote:${remote}`), { type: 'separator' }, ...remoteMenu(remote)]}
+                  />
+                )}
+                {single || isOpen(`remote:${remote}`) ? (
                   <div role="group" aria-label={remote}>
-                    {renderTree(buildTree(list.filter((r) => shownRemotes.includes(r)), (r) => r.short.slice(remote.length + 1), `remote:${remote}`), 2, 1, (r, name, level, indent) => (
+                    {renderTree(buildTree(list.filter((r) => shownRemotes.includes(r)), (r) => r.short.slice(remote.length + 1), `remote:${remote}`), single ? 1 : 2, single ? 0 : 1, (r, name, level, indent) => (
                         <LeafRow
                           key={r.name}
                           indent={indent}

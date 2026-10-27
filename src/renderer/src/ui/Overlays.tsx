@@ -21,6 +21,7 @@ const menuItem =
 
 type MenuParts = typeof RMenu | typeof RContext
 
+
 function renderEntries(P: MenuParts, entries: MenuEntry[]): ReactNode {
   return entries.map((e, i) => {
     if (e.type === 'separator') return <P.Separator key={i} className="my-1 h-px bg-border" />
@@ -143,6 +144,17 @@ export function Dialog({
         <RDialog.Overlay className="fixed inset-0 z-(--gc-z-modal) bg-scrim/55 [:root[data-theme=light]_&]:bg-scrim/30" />
         <RDialog.Content
           aria-describedby={undefined}
+          onOpenAutoFocus={(e) => {
+            // A field that asked for focus (autoFocus) has it already, unless the dialog was opened from a menu, which
+            // still held the focus then. Rather than the Close button, start on the first text field.
+            const box = e.currentTarget as HTMLElement
+            if (box.contains(document.activeElement)) return e.preventDefault()
+            const field = box.querySelector<HTMLElement>('input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([disabled]):not([aria-hidden=true]), textarea:not([disabled])')
+            if (field) {
+              e.preventDefault()
+              field.focus()
+            }
+          }}
           className="fixed top-1/2 left-1/2 z-(--gc-z-modal) w-(--gc-modal-w) max-w-[calc(100vw-(--spacing(8)))] -translate-x-1/2 -translate-y-1/2 rounded-lg bg-surface-raised p-5 shadow-modal"
         >
           <div className="mb-4 flex items-start justify-between gap-4">
