@@ -594,7 +594,7 @@ function multiMenu(repoId: string, shas: string[], line: string[], headBranch: s
   const onLine = shas.every((s) => line.includes(s))
   const offLine = shas.every((s) => !line.includes(s))
   return [
-    { type: 'item', label: `Squash ${shas.length} commits into one…`, icon: <Combine size={14} />, disabled: !!squashProblem(shas, line, parentsOf), onSelect: () => act.askSquash(repoId, shas) },
+    { type: 'item', label: `Squash ${shas.length} commits into one…`, icon: <Combine size={14} />, disabled: !!squashProblem(shas, line, parentsOf), onSelect: () => void act.askSquash(repoId, shas) },
     { type: 'item', label: `Rebase these ${shas.length} commits…`, icon: <ListOrdered size={14} />, disabled: !onLine, onSelect: () => act.rebaseRange(repoId, shas) },
     { type: 'item', label: `Cherry-pick ${shas.length} commits onto ${here}`, icon: <GitPullRequestArrow size={14} />, disabled: !offLine, onSelect: () => void act.cherryPick(repoId, [...shas].reverse()) },
     { type: 'separator' },

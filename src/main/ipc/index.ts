@@ -244,6 +244,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('worktrees.suggestPath', z.object({ ...R, branch: z.string().max(255) }), ({ repoId, branch }) => ops(repoId).worktreeSuggestPath(branch))
 
   handle('commit.details', z.object({ ...R, sha: ref }), ({ repoId, sha }) => ops(repoId).details(sha))
+  handle('commit.messages', z.object({ ...R, shas: z.array(ref).min(1).max(1000) }), ({ repoId, shas }) => ops(repoId).messages(shas))
   handle(
     'diff.get',
     z.object({

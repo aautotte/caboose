@@ -641,6 +641,24 @@ export class RepoOps {
     return { ...s, changes: lfs.size ? s.changes.map((c) => (lfs.has(c.path) ? { ...c, lfs: true } : c)) : s.changes, op }
   }
 
+  /** Full messages of several commits, in the order given, with one git call. */
+  async messages(shas: string[]): Promise<{ sha: string; message: string }[]> {
+    for (const s of shas) this.safeRev(s)
+    // Records end with \x1e; the sha and the message are split by \x1f (neither appears in a message).
+    const out = await this.git(['log', '--no-walk=unsorted', '--format=%H%x1f%B%x1e', ...shas])
+    const bySha = new Map(
+      out
+        .split('\x1e')
+        .map((rec) => rec.replace(/^\n/, ''))
+        .filter((rec) => rec.includes('\x1f'))
+        .map((rec) => {
+          const [sha, message] = rec.split('\x1f')
+          return [sha, message.trim()] as const
+        })
+    )
+    return shas.map((sha) => ({ sha, message: bySha.get(sha) ?? '' }))
+  }
+
   async details(sha: string): Promise<CommitDetails> {
     this.safeRev(sha)
     const fmt = ['%H', '%P', '%an', '%ae', '%at', '%ai', '%cn', '%ce', '%ct', '%G?', '%GS', '%GK', '%B'].join('%x1f')

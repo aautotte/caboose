@@ -398,6 +398,8 @@ export function SquashDialog({ d }: { d: Extract<D, { kind: 'squash' }> }): Reac
   const [first, ...rest] = d.message.split('\n')
   const [summary, setSummary] = useState(first)
   const [body, setBody] = useState(rest.join('\n').trim())
+  // Tall enough to read every commit's message, within reason.
+  const rows = Math.min(18, Math.max(6, body.split('\n').length + 1))
   const [busy, setBusy] = useState(false)
   const submit = (): void => {
     if (!summary.trim() || busy) return
@@ -420,9 +422,9 @@ export function SquashDialog({ d }: { d: Extract<D, { kind: 'squash' }> }): Reac
       }
     >
       <DialogForm onSubmit={submit}>
-        <p className="text-base text-muted">They become one commit with this message. The oldest one’s author and date are kept. Undo puts them back.</p>
+        <p className="text-base text-muted">They become one commit with this message, which starts with all of theirs, oldest first. The oldest one’s author and date are kept. Undo puts them back.</p>
         <Field label="Summary">{(p) => <TextInput {...p} autoFocus value={summary} onChange={(e) => setSummary(e.target.value)} />}</Field>
-        <Field label="Description">{(p) => <TextArea {...p} rows={6} value={body} onChange={(e) => setBody(e.target.value)} />}</Field>
+        <Field label="Description">{(p) => <TextArea {...p} rows={rows} value={body} onChange={(e) => setBody(e.target.value)} />}</Field>
       </DialogForm>
     </Dialog>
   )

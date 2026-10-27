@@ -624,13 +624,28 @@ export function squash(repoId: string, shas: string[], message: string, done?: (
   )
 }
 
-/** Opens the squash dialog, its message made from the commits' summaries (oldest first). */
-export function askSquash(repoId: string, shas: string[]): void {
+/**
+ * The message a squash starts from, oldest commit first: its summary, then its description, then each later commit's
+ * summary and description, so nothing is lost and you can edit it all down.
+ */
+export function combinedMessage(messages: string[]): string {
+  const parts = messages.map((m) => m.trim()).filter(Boolean)
+  if (!parts.length) return ''
+  const [first, ...rest] = parts
+  const [summary, ...body] = first.split('\n')
+  const description = [body.join('\n').trim(), ...rest].filter(Boolean).join('\n\n')
+  return description ? `${summary}\n\n${description}` : summary
+}
+
+/** Opens the squash dialog, its message made from the commits' full messages (oldest first). */
+export async function askSquash(repoId: string, shas: string[]): Promise<void> {
   if (blocked(repoId, 'Squashing')) return
   const r = useApp.getState().repos[repoId]
   const rows = shas.map((s) => r?.commits.find((c) => c.sha === s)).filter((c): c is NonNullable<typeof c> => !!c).reverse()
-  const [first, ...rest] = rows
-  const message = first ? [first.summary, rest.length ? '' : null, ...rest.map((c) => `- ${c.summary}`)].filter((x) => x !== null).join('\n') : ''
+  const oldestFirst = rows.map((c) => c.sha)
+  // If the full messages can't be read, the summaries are still better than nothing.
+  const full = await call('commit.messages', { repoId, shas: oldestFirst }).catch(() => null)
+  const message = combinedMessage(full ? full.map((m) => m.message) : rows.map((c) => c.summary))
   openDialog({ kind: 'squash', repoId, shas, message })
 }
 

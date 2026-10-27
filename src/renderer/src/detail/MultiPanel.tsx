@@ -36,7 +36,7 @@ export function MultiPanel({ repoId, shas }: { repoId: string; shas: string[] })
           {rows.length ? ` · ${relativeTime(rows[rows.length - 1].authorTime)} to ${relativeTime(rows[0].authorTime)}` : ''}
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="primary" disabled={!!squashWhy} onClick={() => act.askSquash(repoId, shas)}>
+          <Button size="sm" variant="primary" disabled={!!squashWhy} onClick={() => void act.askSquash(repoId, shas)}>
             <Combine size={14} aria-hidden />
             Squash into one…
           </Button>
