@@ -1172,16 +1172,21 @@ export function localFor(repoId: string, remoteBranch: string): Ref | undefined 
 
 /**
  * For a remote branch such as origin/x: fast-forwards the local branch that tracks it (or the one with its name) to
- * it, without switching. With no such local branch, makes one that tracks it.
+ * it. With no such local branch, makes one that tracks it. With `checkout` (a double-click), it then checks that
+ * branch out too, even when it couldn't be fast-forwarded (the toast says why); otherwise you stay where you are.
  */
-export async function fastForwardTo(repoId: string, remoteBranch: string): Promise<void> {
+export async function fastForwardTo(repoId: string, remoteBranch: string, opts: { checkout?: boolean } = {}): Promise<void> {
   const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
   const r = refs.find((x) => x.kind === 'remote' && x.short === remoteBranch)
   const name = r?.remote ? remoteBranch.slice(r.remote.length + 1) : remoteBranch.split('/').slice(1).join('/')
   if (!name || name === 'HEAD') return
   const local = localFor(repoId, remoteBranch)
+  // No local branch yet: checking out the remote branch makes one that tracks it.
+  if (!local && opts.checkout) return checkout(repoId, remoteBranch)
   const res = await attempt(() => call('branch.fastForward', { repoId, name: local?.short ?? name, to: remoteBranch, fetch: false, create: !local, opId: newOpId() }), `Couldn’t fast-forward ${local?.short ?? name}`)
-  fastForwardResult(res)
+  // Up to date is the usual case for a double-click: no need to say so before switching.
+  if (!(opts.checkout && res?.result === 'nothing')) fastForwardResult(res)
+  if (opts.checkout && local && !local.isHead) return checkout(repoId, local.short)
   await loadRepo(repoId, { keepSelection: true })
 }
 

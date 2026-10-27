@@ -109,10 +109,15 @@ export function SharedContextMenu({ children }: { children: ReactNode }): React.
   )
 }
 
-/** For a row inside a SharedContextMenu: put the result on the row's onContextMenu. */
+/**
+ * For a row inside a SharedContextMenu: put the result on the row's onContextMenu. The menu calls the row's latest
+ * `items`, so it follows the row's data while it's open, as a menu of the row's own would.
+ */
 export function useMenuOffer(items: () => MenuEntry[]): () => void {
   const offer = useContext(MenuOffer)
-  return () => offer?.(items)
+  const latest = useRef(items)
+  latest.current = items
+  return () => offer?.(() => latest.current())
 }
 
 /* ---------- Dialogs ---------- */
