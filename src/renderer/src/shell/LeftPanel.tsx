@@ -1,4 +1,4 @@
-import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
 import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
@@ -320,6 +320,9 @@ function folderKeys(nodes: TreeNode[]): string[] {
   return nodes.flatMap((n) => (n.kind === 'folder' ? [n.key, ...folderKeys(n.children)] : []))
 }
 
+/** How far the panel was scrolled, per repository, for coming back to a tab (only while the app runs). */
+const panelScroll = new Map<string, number>()
+
 const SECTIONS = ['Local branches', 'Remotes', 'Tags', 'Stashes', 'Worktrees', 'Submodules']
 const sectionKey = (title: string): string => `section:${title}`
 
@@ -476,6 +479,11 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   }, [remotes, refs?.remotes])
 
   const [collapsed, toggleFolder, setFolders] = useCollapsed(repoId)
+  // Back on this tab: where you'd scrolled to. Its rows are there already (the data stays loaded between tabs).
+  const scroller = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (scroller.current) scroller.current.scrollTop = panelScroll.get(repoId) ?? 0
+  }, [repoId])
   const isOpen = (key: string): boolean => !!f || !collapsed.has(key)
   // HEAD can't be hidden, so the eye of a group looks at the others only.
   const eyeFor = (list: Ref[]): Eye | null => {
@@ -679,7 +687,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
       ) : null}
       <SectionFold.Provider value={sectionFold}>
         <SharedContextMenu>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={scroller} onScroll={(e) => panelScroll.set(repoId, e.currentTarget.scrollTop)} className="min-h-0 flex-1 overflow-y-auto">
             <Section
               title="Local branches"
               count={shownLocals.length}
