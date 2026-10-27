@@ -98,7 +98,7 @@ test('F25-H1 squash two commits with a new message; Undo brings them back', asyn
   await row('Add c').click({ modifiers: ['Shift'] })
   await details().getByRole('button', { name: 'Squash into one…' }).click()
   await expect(dialog(h.page).getByLabel('Summary')).toHaveValue('Add c')
-  await expect(dialog(h.page).getByLabel('Description')).toHaveValue('- Add d')
+  await expect(dialog(h.page).getByLabel('Description')).toHaveValue('Add d')
   await dialog(h.page).getByLabel('Summary').fill('Add c and d')
   await dialog(h.page).getByRole('button', { name: 'Squash', exact: true }).click()
   await expect.poll(subjects).toBe('Add e\nAdd c and d\nAdd b\nStart')

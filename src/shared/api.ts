@@ -61,6 +61,8 @@ export interface Api {
   'refs.list': { in: R; out: Refs }
   'status.get': { in: R; out: Status }
   'commit.details': { in: R & { sha: string }; out: CommitDetails }
+  /** The full messages (summary and description) of these commits, in the order asked. */
+  'commit.messages': { in: R & { shas: string[] }; out: { sha: string; message: string }[] }
   'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean }; out: FileDiff }
   'search.commits': { in: R & { query: string }; out: string[] }
   'lfs.state': { in: R; out: LfsState }
