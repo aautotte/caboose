@@ -2,7 +2,7 @@
 // undo. Unmerged branches ask again; the checked-out branch and ones in another worktree are left alone. Deleting can
 // also delete them on the remote.
 import { test, expect } from '@playwright/test'
-import { rmSync } from 'node:fs'
+import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dialog, gitIn, launch, makeRepo, seed, type Harness } from './harness'
 
@@ -171,4 +171,48 @@ test('F48-H5: tags too: Shift-click picks them, Push 3 tags pushes them, Delete 
   await h.page.getByRole('button', { name: /^Undo: Delete 3 tags/ }).click()
   await expect(tagRow('v3')).toBeVisible()
   expect(tagNames.map((t) => h.git(repo, 'rev-parse', `refs/tags/${t}`))).toEqual(objs)
+})
+
+test('F48-H6: remote branches too: Ctrl-click two, the Delete key asks once, both go from origin', async () => {
+  for (const b of ['r1', 'r2', 'r3']) h.git(repo, 'push', '-q', 'origin', `main:refs/heads/${b}`)
+  h.git(repo, 'fetch', '-q', 'origin')
+  const remote = (n: string) => h.page.getByRole('group', { name: 'origin' }).getByRole('treeitem', { name: n, exact: true })
+  await expect(remote('r3')).toBeVisible()
+  await remote('r1').click()
+  await remote('r2').click({ modifiers: ['Control'] })
+  await expect(status()).toHaveText(/2 picked/)
+  await remote('r2').press('Delete')
+  await expect(dialog(h.page)).toContainText('Delete 2 branches from origin?')
+  await expect(dialog(h.page)).toContainText('origin/r1, origin/r2')
+  await dialog(h.page).getByRole('button', { name: 'Delete from origin' }).click()
+  await expect(toasts().getByText('Deleted 2 branches from origin')).toBeVisible()
+  expect([onOrigin('refs/heads/r1'), onOrigin('refs/heads/r2')]).toEqual([null, null])
+  expect(onOrigin('refs/heads/r3')).not.toBeNull()
+  await expect(remote('r1')).toHaveCount(0)
+  await expect(remote('r3')).toBeVisible()
+})
+
+test('F48-H7: stashes too: Shift-click picks three, Delete 3 stashes removes them, and one undo brings them back in order', async () => {
+  for (const n of ['one', 'two', 'three']) {
+    writeFileSync(join(repo, `stash-${n}.txt`), `${n}\n`)
+    h.git(repo, 'stash', 'push', '-q', '-u', '-m', `stash ${n}`)
+  }
+  const before = h.git(repo, 'stash', 'list', '--format=%H %gs')
+  const stashes = () => h.page.getByRole('tree', { name: 'Stashes' })
+  const stash = (n: string) => stashes().getByRole('treeitem', { name: new RegExp(`stash ${n}$`) })
+  await expect(stash('one')).toBeVisible()
+  await stash('three').click()
+  await stash('one').click({ modifiers: ['Shift'] })
+  await expect(status()).toHaveText(/3 picked/)
+  await stash('two').click({ button: 'right' })
+  await h.page.getByRole('menuitem', { name: 'Delete 3 stashes…' }).click()
+  await expect(dialog(h.page)).toContainText('Delete 3 stashes?')
+  await dialog(h.page).getByRole('button', { name: 'Delete 3 stashes' }).click()
+  await expect(toasts().getByText('Deleted 3 stashes')).toBeVisible()
+  expect(h.git(repo, 'stash', 'list')).toBe('')
+  await expect(stashes()).toHaveCount(0)
+
+  await h.page.getByRole('button', { name: /^Undo: Delete 3 stashes/ }).click()
+  await expect(stash('two')).toBeVisible()
+  expect(h.git(repo, 'stash', 'list', '--format=%H %gs')).toBe(before)
 })

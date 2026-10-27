@@ -1415,6 +1415,51 @@ export function popLatest(repoId: string): void {
   if (s) void stashApply(repoId, s.sha, true)
 }
 
+/** Several stashes at once: one question, one undo. */
+export function deleteStashes(repoId: string, shas: string[]): void {
+  const stashes = useApp.getState().repos[repoId]?.refs?.stashes.filter((s) => shas.includes(s.sha)) ?? []
+  if (!stashes.length) return
+  if (stashes.length === 1) return stashDrop(repoId, stashes[0].sha, stashes[0].message)
+  confirm({
+    title: `Delete ${stashes.length} stashes?`,
+    body: `${nameList(stashes.map((s) => `“${s.message}”`))} and the changes in them will be removed from your stash list.`,
+    confirmLabel: `Delete ${stashes.length} stashes`,
+    danger: true,
+    undoable: true,
+    onConfirm: async () => {
+      const res = await attempt(() => call('stash.dropMany', { repoId, shas: stashes.map((s) => s.sha) }), 'Couldn’t delete the stashes')
+      if (res?.dropped) toast({ tone: 'success', title: res.dropped === 1 ? 'Deleted 1 stash' : `Deleted ${res.dropped} stashes` })
+      for (const f of res?.failed ?? []) toast({ tone: 'error', title: 'Couldn’t delete a stash', body: f.message })
+      if (shas.includes(useApp.getState().repos[repoId]?.selected ?? '')) patchRepo(repoId, { selected: null })
+      await loadRepo(repoId, { keepSelection: true })
+    }
+  })
+}
+
+/** Several branches on their remotes (short names such as origin/x): one question, one push per remote. Not undoable. */
+export function deleteRemoteBranches(repoId: string, shorts: string[]): void {
+  const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
+  const on = refs
+    .filter((r) => r.kind === 'remote' && r.remote && shorts.includes(r.short))
+    .map((r) => ({ remote: r.remote!, name: r.short.slice(r.remote!.length + 1) }))
+    .filter((b) => b.name && b.name !== 'HEAD')
+  if (!on.length) return
+  if (on.length === 1) return deleteRemoteBranch(repoId, on[0].remote, on[0].name)
+  const remotes = [...new Set(on.map((b) => b.remote))]
+  const where = remotes.length === 1 ? remotes[0] : 'their remotes'
+  confirm({
+    title: `Delete ${on.length} branches from ${where}?`,
+    body: `This removes ${nameList(on.map((b) => `${b.remote}/${b.name}`))} for everyone who uses ${remotes.length === 1 ? 'it' : 'them'}. Your local branches stay. Anyone who already fetched them keeps their copy, and you can push them again while you still have their commits.`,
+    confirmLabel: `Delete from ${where}`,
+    danger: true,
+    undoable: false,
+    onConfirm: async () => {
+      await deleteOnRemotes(repoId, on)
+      await loadRepo(repoId, { keepSelection: true })
+    }
+  })
+}
+
 export function stashDrop(repoId: string, sha: string, label: string): void {
   confirm({
     title: 'Delete this stash?',

@@ -349,6 +349,12 @@ function usePick(repoId: string, order: string[]): { pick: string[]; onPick: (na
     setAnchor(null)
   }, [repoId])
   const pick = picked.filter((n) => order.includes(n))
+  // A row that leaves the screen (deleted, filtered out, folded away) leaves the pick for good: an undo or clearing
+  // the filter doesn't bring an old pick back.
+  const key = order.join('\n')
+  useEffect(() => {
+    setPicked((cur) => (cur.every((n) => order.includes(n)) ? cur : cur.filter((n) => order.includes(n))))
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
   const onPick = (name: string, e: React.MouseEvent | React.KeyboardEvent, plain: () => void): void => {
     if (e.shiftKey && anchor) {
       const a = order.indexOf(anchor)
@@ -506,6 +512,24 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   const visibleLeaves = (nodes: TreeNode[]): Ref[] => nodes.flatMap((n) => (n.kind === 'leaf' ? [n.ref] : isOpen(n.key) ? visibleLeaves(n.children) : []))
   const branchPick = usePick(repoId, visibleLeaves(localTree).map((r) => r.short))
   const tagPick = usePick(repoId, shownTags.map((r) => r.short))
+  // Remote branches, in the order they show: each open remote's tree (or the only remote's).
+  const remoteTree = (remote: string, list: Ref[]): TreeNode[] => buildTree(list.filter((r) => shownRemotes.includes(r)), (r) => r.short.slice(remote.length + 1), `remote:${remote}`)
+  const remotePick = usePick(
+    repoId,
+    [...byRemote.entries()].flatMap(([remote, list]) => (single || isOpen(`remote:${remote}`) ? visibleLeaves(remoteTree(remote, list)).map((r) => r.short) : []))
+  )
+  const stashPick = usePick(repoId, shownStashes.map((x) => x.sha))
+  // One pick at a time across the panel: picking (or selecting) in one section clears the others.
+  const picks = [branchPick, remotePick, tagPick, stashPick]
+  const pickIn = (p: (typeof picks)[number], name: string, e: React.MouseEvent | React.KeyboardEvent, plain: () => void): void => {
+    for (const q of picks) if (q !== p && q.pick.length) q.clear()
+    p.onPick(name, e, plain)
+  }
+  const pickedRemotes = remotes.filter((r) => remotePick.pick.includes(r.short))
+  const remoteActions = (): PickAction[] => [
+    { label: `Delete ${plural(pickedRemotes.length, 'branch', 'branches')} from ${single ?? 'their remotes'}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.deleteRemoteBranches(repoId, remotePick.pick) }
+  ]
+  const stashActions = (): PickAction[] => [{ label: `Delete ${plural(stashPick.pick.length, 'stash', 'stashes')}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.deleteStashes(repoId, stashPick.pick) }]
   const pickedRefs = locals.filter((r) => branchPick.pick.includes(r.short))
   const deletable = pickedRefs.filter((r) => !r.isHead && !r.worktree).length
   const remoteNames = refs?.remotes ?? []
@@ -517,13 +541,14 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
     { label: `Push ${plural(tagPick.pick.length, 'tag')}`, icon: <Upload size={14} />, disabled: !remoteNames.length, onSelect: () => void act.pushTags(repoId, tagPick.pick), remotes: remoteNames.length > 1 ? remoteNames : undefined, onRemote: (r) => void act.pushTags(repoId, tagPick.pick, r) },
     { label: `Delete ${plural(tagPick.pick.length, 'tag')}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.deleteTags(repoId, tagPick.pick) }
   ]
-  const pickMenu = (list: Ref[], names: string[], actions: PickAction[], clear: () => void): MenuEntry[] => {
-    const eye = eyeFor(list)
+  /** The menu on a picked row. `list` is null for stashes: no eye, no names to copy. */
+  const pickMenu = (list: Ref[] | null, names: string[], actions: PickAction[], clear: () => void): MenuEntry[] => {
+    const eye = list ? eyeFor(list) : null
+    const others = actions.slice(0, -1).map(actionEntry)
     return [
-      ...actions.slice(0, -1).map(actionEntry),
-      { type: 'separator' },
+      ...(others.length ? [...others, { type: 'separator' as const }] : []),
       ...(eye ? [{ type: 'item' as const, label: eye.hidden ? `Show ${names.length} in the graph` : `Hide ${names.length} from the graph`, icon: eye.hidden ? <Eye size={14} /> : <EyeOff size={14} />, onSelect: eye.onToggle }] : []),
-      { type: 'item', label: 'Copy names', onSelect: () => void navigator.clipboard.writeText(names.join('\n')) },
+      ...(list ? [{ type: 'item' as const, label: 'Copy names', onSelect: () => void navigator.clipboard.writeText(names.join('\n')) }] : []),
       { type: 'item', label: 'Clear the pick', onSelect: clear },
       { type: 'separator' },
       actionEntry(actions[actions.length - 1])
@@ -539,17 +564,21 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   const live = useRef<{ local: Leaf; remote: Leaf; tag: Leaf }>(null!)
   live.current = {
     local: fresh({
-      select: (r, e) => branchPick.onPick(r.short, e, () => act.select(repoId, r.sha)),
+      select: (r, e) => pickIn(branchPick, r.short, e, () => act.select(repoId, r.sha)),
       remove: (r) => (branchPick.many(r.short) ? act.deleteBranches(repoId, branchPick.pick) : !r.isHead && !r.worktree && act.deleteBranch(repoId, r.short)),
       menu: (r) => (branchPick.many(r.short) ? pickMenu(pickedRefs, branchPick.pick, branchActions(), branchPick.clear) : branchMenu(repoId, r, head, view, refs?.remotes ?? []))
     }),
     remote: fresh({
-      select: (r) => act.select(repoId, r.sha),
-      remove: () => {},
-      menu: (r) => branchMenu(repoId, r, head, view, refs?.remotes ?? [])
+      select: (r, e) => pickIn(remotePick, r.short, e, () => act.select(repoId, r.sha)),
+      remove: (r) => {
+        if (remotePick.many(r.short)) return act.deleteRemoteBranches(repoId, remotePick.pick)
+        const on = act.remoteBranchOf(repoId, r.name)
+        if (on) act.deleteRemoteBranch(repoId, on.remote, on.name)
+      },
+      menu: (r) => (remotePick.many(r.short) ? pickMenu(pickedRemotes, remotePick.pick, remoteActions(), remotePick.clear) : branchMenu(repoId, r, head, view, refs?.remotes ?? []))
     }),
     tag: fresh({
-      select: (r, e) => tagPick.onPick(r.short, e, () => act.select(repoId, r.sha)),
+      select: (r, e) => pickIn(tagPick, r.short, e, () => act.select(repoId, r.sha)),
       remove: (r) => (tagPick.many(r.short) ? act.deleteTags(repoId, tagPick.pick) : act.deleteTag(repoId, r.short)),
       menu: (r) => (tagPick.many(r.short) ? pickMenu(tags.filter((t) => tagPick.pick.includes(t.short)), tagPick.pick, tagActions(), tagPick.clear) : tagMenu(repoId, r.short, refs?.remotes ?? [], eyeOne(r)))
     })
@@ -561,10 +590,9 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
       className="flex shrink-0 flex-col overflow-hidden bg-surface"
       style={{ width }}
       onKeyDown={(e) => {
-        if (e.key === 'Escape' && (branchPick.pick.length || tagPick.pick.length)) {
+        if (e.key === 'Escape' && picks.some((p) => p.pick.length)) {
           e.stopPropagation()
-          branchPick.clear()
-          tagPick.clear()
+          for (const p of picks) p.clear()
         }
       }}
     >
@@ -651,6 +679,8 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
             action={{ label: 'Add a remote', onClick: () => act.openDialog({ kind: 'addRemote', repoId }) }}
             eye={eyeFor(remotes) ?? undefined}
             menu={single ? remoteMenu(single) : undefined}
+            multiselectable
+            note={remotePick.pick.length > 1 ? <PickBar count={remotePick.pick.length} actions={remoteActions()} onClear={remotePick.clear} /> : null}
           >
             {[...byRemote.entries()].map(([remote, list]) => (
               // A flat tree with levels: the remote (level 1) followed by a group of its branches (level 2+).
@@ -672,7 +702,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
                 )}
                 {single || isOpen(`remote:${remote}`) ? (
                   <div role="group" aria-label={remote}>
-                    {renderTree(buildTree(list.filter((r) => shownRemotes.includes(r)), (r) => r.short.slice(remote.length + 1), `remote:${remote}`), single ? 1 : 2, single ? 0 : 1, (r, name, level, indent) => (
+                    {renderTree(remoteTree(remote, list), single ? 1 : 2, single ? 0 : 1, (r, name, level, indent) => (
                         <LeafRow
                           key={r.name}
                           indent={indent}
@@ -681,8 +711,9 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
                           label={name}
                           name={r.short.slice(remote.length + 1)}
                           eye={eyeOne(r)}
-                          selected={selected === r.sha}
+                          selected={remotePick.pick.length ? remotePick.pick.includes(r.short) : selected === r.sha}
                           onSelect={(e) => live.current.remote.select(r, e)}
+                          onDelete={() => live.current.remote.remove(r)}
                           onActivate={() => void act.fastForwardTo(repoId, r.short, { checkout: true })}
                           menu={() => live.current.remote.menu(r)}
                           dim={outOfGraph(view, r)}
@@ -719,16 +750,23 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               />
             ))}
           </Section>
-          <Section title="Stashes" count={shownStashes.length} empty={f ? 'No matches' : 'No stashes'}>
+          <Section
+            title="Stashes"
+            count={shownStashes.length}
+            empty={f ? 'No matches' : 'No stashes'}
+            multiselectable
+            note={stashPick.pick.length > 1 ? <PickBar count={stashPick.pick.length} actions={stashActions()} onClear={stashPick.clear} /> : null}
+          >
             {shownStashes.map((s) => (
               <Row
                 key={s.sha}
                 icon={<Archive size={14} />}
                 label={s.message}
-                selected={selected === s.sha}
-                onSelect={() => act.select(repoId, s.sha)}
+                selected={stashPick.pick.length ? stashPick.pick.includes(s.sha) : selected === s.sha}
+                onSelect={(e) => pickIn(stashPick, s.sha, e, () => act.select(repoId, s.sha))}
+                onDelete={() => (stashPick.many(s.sha) ? act.deleteStashes(repoId, stashPick.pick) : act.stashDrop(repoId, s.sha, s.message))}
                 onActivate={() => void act.stashApply(repoId, s.sha, false)}
-                menu={() => stashMenu(repoId, s.sha, s.message)}
+                menu={() => (stashPick.many(s.sha) ? pickMenu(null, stashPick.pick, stashActions(), stashPick.clear) : stashMenu(repoId, s.sha, s.message))}
               />
             ))}
           </Section>

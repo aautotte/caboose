@@ -1245,7 +1245,7 @@ export class RepoOps {
 
   // ---------- stash ----------
 
-  private async stashIndex(sha: string): Promise<number> {
+  async stashIndex(sha: string): Promise<number> {
     this.safeRev(sha)
     const out = (await this.tryGit(['stash', 'list', '--format=%H'])) ?? ''
     const i = out.split('\n').indexOf(sha)

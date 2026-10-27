@@ -146,6 +146,8 @@ export interface Api {
   'stash.apply': { in: R & { sha: string }; out: OpResult }
   'stash.pop': { in: R & { sha: string }; out: OpResult }
   'stash.drop': { in: R & { sha: string }; out: null }
+  /** Deletes several stashes, with one undo that brings them all back. */
+  'stash.dropMany': { in: R & { shas: string[] }; out: { dropped: number; failed: { sha: string; message: string }[] } }
 
   'tag.create': { in: R & { name: string; at: string; message: string | null }; out: null }
   'tag.delete': { in: R & { name: string }; out: null }

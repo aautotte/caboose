@@ -456,6 +456,28 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   )
   handle('stash.apply', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, false)))
   handle('stash.pop', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, true)))
+  handle('stash.dropMany', z.object({ ...R, shas: z.array(sha).min(1).max(1000) }), ({ repoId, shas }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const stashes: { stash: string; message: string; index: number }[] = []
+      const failed: { sha: string; message: string }[] = []
+      // Where each one is before any goes, for putting them back in order.
+      const where = new Map<string, number>()
+      for (const s of shas) where.set(s, await o.stashIndex(s).catch(() => -1))
+      for (const s of [...new Set(shas)]) {
+        try {
+          await o.mut(['update-ref', `${UNDO_REFS}${uuid()}`, s])
+          stashes.push({ stash: s, message: await o.stashDrop(s), index: where.get(s) ?? 0 })
+        } catch (e) {
+          failed.push({ sha: s, message: e instanceof Error ? e.message : String(e) })
+        }
+      }
+      if (stashes.length === 1) undo.record(repoId, 'stash_drop', `Delete stash “${stashes[0].message.replace(/^On [^:]+: /, '')}”`, { ...head, stash: stashes[0].stash, message: stashes[0].message }, head)
+      else if (stashes.length) undo.record(repoId, 'stash_drop', `Delete ${stashes.length} stashes`, { ...head, stashes }, head)
+      return { dropped: stashes.length, failed }
+    })
+  )
   handle('stash.drop', z.object({ ...R, sha }), ({ repoId, sha }) =>
     exclusive(repoId, async () => {
       const o = ops(repoId)
