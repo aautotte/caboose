@@ -189,7 +189,7 @@ export function ConfirmDialog({
   /** A checkbox, off by default, e.g. "Also delete them on origin". `hint` shows while it's on. */
   check?: { label: string; hint?: string }
   /** Another way out, e.g. "Create a branch…": the dialog closes first, so it can open another one. */
-  alt?: { label: string; onSelect: () => void }
+  alt?: { label: string; onSelect: () => void; danger?: boolean }
 }): React.JSX.Element {
   const [checked, setChecked] = useState(false)
   return (
@@ -205,6 +205,7 @@ export function ConfirmDialog({
           </Button>
           {alt ? (
             <Button
+              variant={alt.danger ? 'danger' : undefined}
               onClick={() => {
                 onOpenChange(false)
                 alt.onSelect()

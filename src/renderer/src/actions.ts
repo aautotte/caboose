@@ -1184,10 +1184,43 @@ export async function fastForwardTo(repoId: string, remoteBranch: string, opts: 
   // No local branch yet: checking out the remote branch makes one that tracks it.
   if (!local && opts.checkout) return checkout(repoId, remoteBranch)
   const res = await attempt(() => call('branch.fastForward', { repoId, name: local?.short ?? name, to: remoteBranch, fetch: false, create: !local, opId: newOpId() }), `Couldn’t fast-forward ${local?.short ?? name}`)
+  // It has commits of its own: offer to check it out as it is, or to reset it to the remote branch.
+  if (opts.checkout && local && !local.worktree && res?.result === 'rejected') return offerReset(repoId, local, remoteBranch, res.ahead)
   // Up to date is the usual case for a double-click: no need to say so before switching.
   if (!(opts.checkout && res?.result === 'nothing')) fastForwardResult(res)
   if (opts.checkout && local && !local.isHead) return checkout(repoId, local.short)
   await loadRepo(repoId, { keepSelection: true })
+}
+
+/**
+ * After a double-click on a remote branch whose local branch can't be fast-forwarded. Checking it out as it is comes
+ * first; resetting moves a branch that isn't checked out (then checks it out), or hard-resets the checked-out one.
+ * Both can be undone.
+ */
+function offerReset(repoId: string, local: Ref, remoteBranch: string, ahead?: number): void {
+  const own = ahead ? plural(ahead, 'commit') : 'commits'
+  confirm({
+    title: `${local.short} can’t be fast-forwarded`,
+    body:
+      `${local.short} has ${own} that ${remoteBranch} doesn’t, so it can’t just move forward. ` +
+      (local.isHead
+        ? `Keep it as it is, or reset it to ${remoteBranch}: a hard reset, so your uncommitted changes are discarded too.`
+        : `Check it out as it is, or reset it to ${remoteBranch} and check it out: its own commits are left out of it.`),
+    confirmLabel: local.isHead ? 'Keep it as it is' : 'Check out as it is',
+    danger: false,
+    undoable: true,
+    onConfirm: () => {
+      if (!local.isHead) void checkout(repoId, local.short)
+    },
+    alt: {
+      label: `Reset to ${remoteBranch}`,
+      danger: true,
+      onSelect: async () => {
+        if (local.isHead) await reset(repoId, remoteBranch, 'hard', local.short)
+        else if (await moveBranch(repoId, local.short, remoteBranch)) await checkout(repoId, local.short)
+      }
+    }
+  })
 }
 
 type PushOpts = { setUpstream?: boolean; force?: boolean; remote?: string; branch?: string }
@@ -1471,9 +1504,10 @@ export function deleteRemoteTag(repoId: string, name: string, which?: string): v
 
 // ---------- reset, revert, cherry-pick, interactive rebase ----------
 
-export async function reset(repoId: string, target: string, mode: ResetMode): Promise<boolean> {
-  const ok = await attempt(() => call('history.reset', { repoId, target, mode }), 'Couldn’t reset')
-  if (ok !== undefined) toast({ tone: 'success', title: `Reset to ${target.slice(0, 7)}`, body: 'Undo puts everything back.' })
+/** Resets the checked-out branch. With `branch`, only if that's still the one checked out. */
+export async function reset(repoId: string, target: string, mode: ResetMode, branch?: string): Promise<boolean> {
+  const ok = await attempt(() => call('history.reset', { repoId, target, mode, branch }), 'Couldn’t reset')
+  if (ok !== undefined) toast({ tone: 'success', title: `Reset to ${/^[0-9a-f]{40}$/.test(target) ? target.slice(0, 7) : target}`, body: 'Undo puts everything back.' })
   await loadRepo(repoId, { keepSelection: true })
   return ok !== undefined
 }

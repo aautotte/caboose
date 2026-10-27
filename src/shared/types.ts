@@ -297,6 +297,8 @@ export interface OpResult {
   /** dirty: uncommitted changes are in the way (a pull that would overwrite them). */
   result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale' | 'dirty'
   message?: string
+  /** A fast-forward refused: how many commits the branch has that the target doesn't. */
+  ahead?: number
 }
 
 export interface UndoPeek {
