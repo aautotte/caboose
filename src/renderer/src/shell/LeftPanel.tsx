@@ -1,7 +1,7 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X } from 'lucide-react'
+import { createContext, Fragment, memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
 import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
-import { Badge, Button, ContextMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
+import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
 import { pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
@@ -9,6 +9,9 @@ import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
 import { CollapseLeftButton, leftSectionId } from './PanelRails'
+
+/** Which sections are folded, held by the panel: one place to fold them all, and remembered with the folders. */
+const SectionFold = createContext<{ isOpen: (title: string) => boolean; toggle: (title: string) => void; menu: MenuEntry[] } | null>(null)
 
 function Section({
   title,
@@ -34,7 +37,11 @@ function Section({
   /** Rows can be picked several at a time (Ctrl / Shift-click). */
   multiselectable?: boolean
 }): React.JSX.Element {
-  const [open, setOpen] = useState(true)
+  const fold = useContext(SectionFold)
+  const [ownOpen, setOwnOpen] = useState(true)
+  const open = fold ? fold.isOpen(title) : ownOpen
+  const setOpen = (v: boolean): void => (fold ? fold.toggle(title) : setOwnOpen(v))
+  const headerMenu = [...(menu ?? []), ...(fold ? [...(menu?.length ? [{ type: 'separator' as const }] : []), ...fold.menu] : [])]
   const header = (
     <div className="flex items-center pr-1">
         <button
@@ -64,7 +71,7 @@ function Section({
   )
   return (
     <section id={leftSectionId(title)} className="flex flex-col">
-      {menu ? <ContextMenu items={menu}>{header}</ContextMenu> : header}
+      {headerMenu.length ? <ContextMenu items={headerMenu}>{header}</ContextMenu> : header}
       {note}
       {open ? (
         count === 0 ? (
@@ -274,7 +281,7 @@ const COLLAPSED_KEY = (repoId: string): string => `caboose.collapsed.${repoId}`
 const LEGACY_COLLAPSED_KEYS = (repoId: string): string[] => [`mergatroid.collapsed.${repoId}`, `gitclone.collapsed.${repoId}`]
 
 /** Which folders and remotes are folded, per repository; a convenience, so it lives in this browser's storage. */
-function useCollapsed(repoId: string): [Set<string>, (key: string, open?: boolean) => void] {
+function useCollapsed(repoId: string): [Set<string>, (key: string, open?: boolean) => void, (keys: string[], open: boolean) => void] {
   const [set, setSet] = useState<Set<string>>(() => {
     try {
       return new Set(JSON.parse([COLLAPSED_KEY(repoId), ...LEGACY_COLLAPSED_KEYS(repoId)].map((k) => localStorage.getItem(k)).find((v) => v !== null) ?? '[]') as string[])
@@ -296,8 +303,25 @@ function useCollapsed(repoId: string): [Set<string>, (key: string, open?: boolea
       else next.add(key)
       return next
     })
-  return [set, toggle]
+  const setMany = (keys: string[], open: boolean): void =>
+    setSet((cur) => {
+      const next = new Set(cur)
+      for (const k of keys) {
+        if (open) next.delete(k)
+        else next.add(k)
+      }
+      return next
+    })
+  return [set, toggle, setMany]
 }
+
+/** Every folder in a tree, folded or not. */
+function folderKeys(nodes: TreeNode[]): string[] {
+  return nodes.flatMap((n) => (n.kind === 'folder' ? [n.key, ...folderKeys(n.children)] : []))
+}
+
+const SECTIONS = ['Local branches', 'Remotes', 'Tags', 'Stashes', 'Worktrees', 'Submodules']
+const sectionKey = (title: string): string => `section:${title}`
 
 /** A folder or remote row: folds its branches away (click, Enter, arrows) and hides them all (eye, H). */
 function FolderRow({ icon, label, name, level, indent, open, onToggle, eye, menu, count }: { icon: ReactNode; label: string; name: string; level: number; indent: number; open: boolean; onToggle: (open?: boolean) => void; eye: Eye | null; menu: () => MenuEntry[]; count: number }): React.JSX.Element {
@@ -451,7 +475,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
     return m
   }, [remotes, refs?.remotes])
 
-  const [collapsed, toggleFolder] = useCollapsed(repoId)
+  const [collapsed, toggleFolder, setFolders] = useCollapsed(repoId)
   const isOpen = (key: string): boolean => !!f || !collapsed.has(key)
   // HEAD can't be hidden, so the eye of a group looks at the others only.
   const eyeFor = (list: Ref[]): Eye | null => {
@@ -506,6 +530,20 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   const shownRemotes = remotes.filter((r) => match(r.short))
   const shownTags = tags.filter((r) => match(r.short))
   const shownStashes = (refs?.stashes ?? []).filter((s) => match(s.message))
+
+  // Fold everything at once: every folder (local and remote, and each remote's row), or every section.
+  const allFolders = (): string[] => [
+    ...folderKeys(buildTree(locals, (r) => r.short, 'local')),
+    ...[...byRemote.entries()].flatMap(([remote, list]) => [...(single ? [] : [`remote:${remote}`]), ...folderKeys(buildTree(list, (r) => r.short.slice(remote.length + 1), `remote:${remote}`))])
+  ]
+  const foldMenu: MenuEntry[] = [
+    { type: 'item', label: 'Collapse all folders', onSelect: () => setFolders(allFolders(), false) },
+    { type: 'item', label: 'Expand all folders', onSelect: () => setFolders(allFolders(), true) },
+    { type: 'separator' },
+    { type: 'item', label: 'Collapse all sections', onSelect: () => setFolders(SECTIONS.map(sectionKey), false) },
+    { type: 'item', label: 'Expand all sections', onSelect: () => setFolders(SECTIONS.map(sectionKey), true) }
+  ]
+  const sectionFold = { isOpen: (title: string) => !collapsed.has(sectionKey(title)), toggle: (title: string) => toggleFolder(sectionKey(title)), menu: foldMenu }
 
   // Local branches and tags picked with Ctrl / Shift-click, to push, delete or hide several at once.
   const localTree = buildTree(shownLocals, (r) => r.short, 'local')
@@ -607,6 +645,14 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
           onChange={(e) => setFilter(e.target.value)}
           onClear={() => setFilter('')}
         />
+        <DropdownMenu
+          trigger={
+            <IconButton label="Collapse or expand" size="sm">
+              <ChevronsDownUp size={14} />
+            </IconButton>
+          }
+          items={foldMenu}
+        />
         <CollapseLeftButton />
       </div>
       {focusHead ? (
@@ -631,149 +677,151 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
           </Button>
         </div>
       ) : null}
-      <SharedContextMenu>
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <Section
-            title="Local branches"
-            count={shownLocals.length}
-            empty={f ? 'No matches' : 'No branches yet'}
-            eye={eyeFor(locals) ?? undefined}
-            multiselectable
-            note={branchPick.pick.length > 1 ? <PickBar count={branchPick.pick.length} actions={branchActions()} onClear={branchPick.clear} /> : null}
-          >
-            {renderTree(localTree, 1, 0, (r, name, level, indent) => (
-              <LeafRow
-                key={r.name}
-                icon={<GitBranch size={14} />}
-                label={name}
-                // The full name (the row shows only the part after its folder), plus what the badges say.
-                name={`${r.short}${r.ahead ? `, ${r.ahead} ahead` : ''}${r.behind ? `, ${r.behind} behind` : ''}${r.upstreamGone ? ', gone' : ''}${r.worktree ? `, in worktree ${folderName(r.worktree)}` : ''}`}
-                level={level}
-                indent={indent}
-                eye={eyeOne(r)}
-                current={r.isHead}
-                selected={branchPick.pick.length ? branchPick.pick.includes(r.short) : selected === r.sha}
-                onSelect={(e) => live.current.local.select(r, e)}
-                onDelete={() => live.current.local.remove(r)}
-                onActivate={() => !r.isHead && void act.checkout(repoId, r.short)}
-                menu={() => live.current.local.menu(r)}
-                dim={outOfGraph(view, r)}
-                pinned={view.pinned === r.name}
-                title={`${r.upstream ? `${r.short} → ${r.upstream.replace('refs/remotes/', '')}${r.upstreamGone ? ' (gone)' : ''}` : `${r.short} (not pushed)`}${r.worktree ? `\nChecked out in the worktree ${r.worktree}` : ''}`}
-                badges={
-                  <>
-                    {r.worktree ? <FolderGit2 size={12} aria-hidden className="shrink-0 text-muted" /> : null}
-                    {r.ahead ? <Badge label={`${r.ahead} ahead`}>↑{r.ahead}</Badge> : null}
-                    {r.behind ? <Badge label={`${r.behind} behind`}>↓{r.behind}</Badge> : null}
-                    {r.upstreamGone ? <Badge tone="warning">gone</Badge> : null}
-                  </>
-                }
-              />
-            ))}
-          </Section>
-          <Section
-            title="Remotes"
-            // With one remote, its row is left out: the section stands for it, and counts its branches.
-            count={single ? (byRemote.get(single) ?? []).filter((r) => shownRemotes.includes(r)).length : byRemote.size}
-            empty={single ? (f ? 'No matches' : `No branches on ${single}`) : 'No remotes. Add one to push and pull.'}
-            action={{ label: 'Add a remote', onClick: () => act.openDialog({ kind: 'addRemote', repoId }) }}
-            eye={eyeFor(remotes) ?? undefined}
-            menu={single ? remoteMenu(single) : undefined}
-            multiselectable
-            note={remotePick.pick.length > 1 ? <PickBar count={remotePick.pick.length} actions={remoteActions()} onClear={remotePick.clear} /> : null}
-          >
-            {[...byRemote.entries()].map(([remote, list]) => (
-              // A flat tree with levels: the remote (level 1) followed by a group of its branches (level 2+).
-              // Nesting the branches inside the remote's item would make all their names part of the remote's name.
-              <Fragment key={remote}>
-                {single ? null : (
-                  <FolderRow
-                    icon={<Cloud size={14} aria-hidden />}
-                    label={remote}
-                    name={remote}
-                    level={1}
-                    indent={0}
-                    open={isOpen(`remote:${remote}`)}
-                    onToggle={(o) => toggleFolder(`remote:${remote}`, o)}
-                    eye={eyeFor(list)}
-                    count={list.length}
-                    menu={() => [...folderMenu(remote, list, `remote:${remote}`), { type: 'separator' }, ...remoteMenu(remote)]}
-                  />
-                )}
-                {single || isOpen(`remote:${remote}`) ? (
-                  <div role="group" aria-label={remote}>
-                    {renderTree(remoteTree(remote, list), single ? 1 : 2, single ? 0 : 1, (r, name, level, indent) => (
-                        <LeafRow
-                          key={r.name}
-                          indent={indent}
-                          level={level}
-                          icon={<GitBranch size={14} />}
-                          label={name}
-                          name={r.short.slice(remote.length + 1)}
-                          eye={eyeOne(r)}
-                          selected={remotePick.pick.length ? remotePick.pick.includes(r.short) : selected === r.sha}
-                          onSelect={(e) => live.current.remote.select(r, e)}
-                          onDelete={() => live.current.remote.remove(r)}
-                          onActivate={() => void act.fastForwardTo(repoId, r.short, { checkout: true })}
-                          menu={() => live.current.remote.menu(r)}
-                          dim={outOfGraph(view, r)}
-                          pinned={view.pinned === r.name}
-                          title={r.short}
-                        />
-                      ))}
-                  </div>
-                ) : null}
-              </Fragment>
-            ))}
-          </Section>
-          <Section
-            title="Tags"
-            count={shownTags.length}
-            empty={f ? 'No matches' : 'No tags'}
-            eye={eyeFor(tags) ?? undefined}
-            multiselectable
-            note={tagPick.pick.length > 1 ? <PickBar count={tagPick.pick.length} actions={tagActions()} onClear={tagPick.clear} /> : null}
-          >
-            {shownTags.map((r) => (
-              <LeafRow
-                key={r.name}
-                icon={<Tag size={14} />}
-                label={r.short}
-                selected={tagPick.pick.length ? tagPick.pick.includes(r.short) : selected === r.sha}
-                onSelect={(e) => live.current.tag.select(r, e)}
-                onDelete={() => live.current.tag.remove(r)}
-                onActivate={() => act.select(repoId, r.sha)}
-                title={r.annotation ? `${r.short}: ${r.annotation}` : r.short}
-                eye={eyeOne(r)}
-                dim={view.hidden.includes(r.name)}
-                menu={() => live.current.tag.menu(r)}
-              />
-            ))}
-          </Section>
-          <Section
-            title="Stashes"
-            count={shownStashes.length}
-            empty={f ? 'No matches' : 'No stashes'}
-            multiselectable
-            note={stashPick.pick.length > 1 ? <PickBar count={stashPick.pick.length} actions={stashActions()} onClear={stashPick.clear} /> : null}
-          >
-            {shownStashes.map((s) => (
-              <Row
-                key={s.sha}
-                icon={<Archive size={14} />}
-                label={s.message}
-                selected={stashPick.pick.length ? stashPick.pick.includes(s.sha) : selected === s.sha}
-                onSelect={(e) => pickIn(stashPick, s.sha, e, () => act.select(repoId, s.sha))}
-                onDelete={() => (stashPick.many(s.sha) ? act.deleteStashes(repoId, stashPick.pick) : act.stashDrop(repoId, s.sha, s.message))}
-                onActivate={() => void act.stashApply(repoId, s.sha, false)}
-                menu={() => (stashPick.many(s.sha) ? pickMenu(null, stashPick.pick, stashActions(), stashPick.clear) : stashMenu(repoId, s.sha, s.message))}
-              />
-            ))}
-          </Section>
-          <WorktreeSection repoId={repoId} match={match} />
-          <SubmoduleSection repoId={repoId} match={match} />
-        </div>
-      </SharedContextMenu>
+      <SectionFold.Provider value={sectionFold}>
+        <SharedContextMenu>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <Section
+              title="Local branches"
+              count={shownLocals.length}
+              empty={f ? 'No matches' : 'No branches yet'}
+              eye={eyeFor(locals) ?? undefined}
+              multiselectable
+              note={branchPick.pick.length > 1 ? <PickBar count={branchPick.pick.length} actions={branchActions()} onClear={branchPick.clear} /> : null}
+            >
+              {renderTree(localTree, 1, 0, (r, name, level, indent) => (
+                <LeafRow
+                  key={r.name}
+                  icon={<GitBranch size={14} />}
+                  label={name}
+                  // The full name (the row shows only the part after its folder), plus what the badges say.
+                  name={`${r.short}${r.ahead ? `, ${r.ahead} ahead` : ''}${r.behind ? `, ${r.behind} behind` : ''}${r.upstreamGone ? ', gone' : ''}${r.worktree ? `, in worktree ${folderName(r.worktree)}` : ''}`}
+                  level={level}
+                  indent={indent}
+                  eye={eyeOne(r)}
+                  current={r.isHead}
+                  selected={branchPick.pick.length ? branchPick.pick.includes(r.short) : selected === r.sha}
+                  onSelect={(e) => live.current.local.select(r, e)}
+                  onDelete={() => live.current.local.remove(r)}
+                  onActivate={() => !r.isHead && void act.checkout(repoId, r.short)}
+                  menu={() => live.current.local.menu(r)}
+                  dim={outOfGraph(view, r)}
+                  pinned={view.pinned === r.name}
+                  title={`${r.upstream ? `${r.short} → ${r.upstream.replace('refs/remotes/', '')}${r.upstreamGone ? ' (gone)' : ''}` : `${r.short} (not pushed)`}${r.worktree ? `\nChecked out in the worktree ${r.worktree}` : ''}`}
+                  badges={
+                    <>
+                      {r.worktree ? <FolderGit2 size={12} aria-hidden className="shrink-0 text-muted" /> : null}
+                      {r.ahead ? <Badge label={`${r.ahead} ahead`}>↑{r.ahead}</Badge> : null}
+                      {r.behind ? <Badge label={`${r.behind} behind`}>↓{r.behind}</Badge> : null}
+                      {r.upstreamGone ? <Badge tone="warning">gone</Badge> : null}
+                    </>
+                  }
+                />
+              ))}
+            </Section>
+            <Section
+              title="Remotes"
+              // With one remote, its row is left out: the section stands for it, and counts its branches.
+              count={single ? (byRemote.get(single) ?? []).filter((r) => shownRemotes.includes(r)).length : byRemote.size}
+              empty={single ? (f ? 'No matches' : `No branches on ${single}`) : 'No remotes. Add one to push and pull.'}
+              action={{ label: 'Add a remote', onClick: () => act.openDialog({ kind: 'addRemote', repoId }) }}
+              eye={eyeFor(remotes) ?? undefined}
+              menu={single ? remoteMenu(single) : undefined}
+              multiselectable
+              note={remotePick.pick.length > 1 ? <PickBar count={remotePick.pick.length} actions={remoteActions()} onClear={remotePick.clear} /> : null}
+            >
+              {[...byRemote.entries()].map(([remote, list]) => (
+                // A flat tree with levels: the remote (level 1) followed by a group of its branches (level 2+).
+                // Nesting the branches inside the remote's item would make all their names part of the remote's name.
+                <Fragment key={remote}>
+                  {single ? null : (
+                    <FolderRow
+                      icon={<Cloud size={14} aria-hidden />}
+                      label={remote}
+                      name={remote}
+                      level={1}
+                      indent={0}
+                      open={isOpen(`remote:${remote}`)}
+                      onToggle={(o) => toggleFolder(`remote:${remote}`, o)}
+                      eye={eyeFor(list)}
+                      count={list.length}
+                      menu={() => [...folderMenu(remote, list, `remote:${remote}`), { type: 'separator' }, ...remoteMenu(remote)]}
+                    />
+                  )}
+                  {single || isOpen(`remote:${remote}`) ? (
+                    <div role="group" aria-label={remote}>
+                      {renderTree(remoteTree(remote, list), single ? 1 : 2, single ? 0 : 1, (r, name, level, indent) => (
+                          <LeafRow
+                            key={r.name}
+                            indent={indent}
+                            level={level}
+                            icon={<GitBranch size={14} />}
+                            label={name}
+                            name={r.short.slice(remote.length + 1)}
+                            eye={eyeOne(r)}
+                            selected={remotePick.pick.length ? remotePick.pick.includes(r.short) : selected === r.sha}
+                            onSelect={(e) => live.current.remote.select(r, e)}
+                            onDelete={() => live.current.remote.remove(r)}
+                            onActivate={() => void act.fastForwardTo(repoId, r.short, { checkout: true })}
+                            menu={() => live.current.remote.menu(r)}
+                            dim={outOfGraph(view, r)}
+                            pinned={view.pinned === r.name}
+                            title={r.short}
+                          />
+                        ))}
+                    </div>
+                  ) : null}
+                </Fragment>
+              ))}
+            </Section>
+            <Section
+              title="Tags"
+              count={shownTags.length}
+              empty={f ? 'No matches' : 'No tags'}
+              eye={eyeFor(tags) ?? undefined}
+              multiselectable
+              note={tagPick.pick.length > 1 ? <PickBar count={tagPick.pick.length} actions={tagActions()} onClear={tagPick.clear} /> : null}
+            >
+              {shownTags.map((r) => (
+                <LeafRow
+                  key={r.name}
+                  icon={<Tag size={14} />}
+                  label={r.short}
+                  selected={tagPick.pick.length ? tagPick.pick.includes(r.short) : selected === r.sha}
+                  onSelect={(e) => live.current.tag.select(r, e)}
+                  onDelete={() => live.current.tag.remove(r)}
+                  onActivate={() => act.select(repoId, r.sha)}
+                  title={r.annotation ? `${r.short}: ${r.annotation}` : r.short}
+                  eye={eyeOne(r)}
+                  dim={view.hidden.includes(r.name)}
+                  menu={() => live.current.tag.menu(r)}
+                />
+              ))}
+            </Section>
+            <Section
+              title="Stashes"
+              count={shownStashes.length}
+              empty={f ? 'No matches' : 'No stashes'}
+              multiselectable
+              note={stashPick.pick.length > 1 ? <PickBar count={stashPick.pick.length} actions={stashActions()} onClear={stashPick.clear} /> : null}
+            >
+              {shownStashes.map((s) => (
+                <Row
+                  key={s.sha}
+                  icon={<Archive size={14} />}
+                  label={s.message}
+                  selected={stashPick.pick.length ? stashPick.pick.includes(s.sha) : selected === s.sha}
+                  onSelect={(e) => pickIn(stashPick, s.sha, e, () => act.select(repoId, s.sha))}
+                  onDelete={() => (stashPick.many(s.sha) ? act.deleteStashes(repoId, stashPick.pick) : act.stashDrop(repoId, s.sha, s.message))}
+                  onActivate={() => void act.stashApply(repoId, s.sha, false)}
+                  menu={() => (stashPick.many(s.sha) ? pickMenu(null, stashPick.pick, stashActions(), stashPick.clear) : stashMenu(repoId, s.sha, s.message))}
+                />
+              ))}
+            </Section>
+            <WorktreeSection repoId={repoId} match={match} />
+            <SubmoduleSection repoId={repoId} match={match} />
+          </div>
+        </SharedContextMenu>
+      </SectionFold.Provider>
     </nav>
   )
 }
