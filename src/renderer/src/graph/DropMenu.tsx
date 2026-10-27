@@ -43,7 +43,7 @@ export function DropMenu({ repoId, target, headBranch, onClose }: { repoId: stri
             onSelect={async () => {
               // The interactive view rewrites the checked-out branch, so switch to it first.
               if (source !== headBranch) await act.checkout(repoId, source)
-              act.setCenter(repoId, { kind: 'rebase', onto: dest, ontoLabel: dest })
+              act.setCenter(repoId, { kind: 'rebase', onto: dest, ontoLabel: dest, ontoBranch: true })
             }}
           >
             <ListOrdered size={14} className="text-muted" /> Rebase {source} onto {dest} step by step…

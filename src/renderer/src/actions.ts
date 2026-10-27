@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
@@ -1101,12 +1101,71 @@ export async function fetchAll(repoId: string, quiet = false): Promise<void> {
   await loadRepo(repoId, { keepSelection: true })
 }
 
-export async function pull(repoId: string, mode?: PullMode): Promise<void> {
+/**
+ * Pulls the checked-out branch. When uncommitted changes are in the way, asks: stash them and pull (they're put back
+ * after), discard them and pull, or cancel. `autostash` is that first answer.
+ */
+export async function pull(repoId: string, mode?: PullMode, autostash = false): Promise<void> {
   const m = mode ?? useApp.getState().prefs.pullMode
-  const res = await remoteOp(repoId, 'pull', 'Pulling', (opId) => call('remote.pull', { repoId, mode: m, opId }), 'Pull failed')
+  const res = await remoteOp(repoId, 'pull', 'Pulling', (opId) => call('remote.pull', { repoId, mode: m, opId, autostash }), 'Pull failed')
   if (res?.result === 'rejected') toast({ tone: 'error', title: 'Pull stopped', body: res.message })
+  else if (res?.result === 'dirty') {
+    confirm({
+      title: 'Your changes are in the way',
+      body: `${res.message} Stash them and pull (they’re put back after), or discard them and pull.`,
+      confirmLabel: 'Stash and pull',
+      danger: false,
+      undoable: null,
+      onConfirm: () => void pull(repoId, m, true),
+      alt: {
+        label: 'Discard and pull…',
+        onSelect: () =>
+          confirm({
+            title: 'Discard your changes and pull?',
+            body: 'This throws away all your uncommitted changes, including new files that were never committed, then pulls.',
+            confirmLabel: 'Discard and pull',
+            danger: true,
+            undoable: true,
+            onConfirm: async () => {
+              if ((await attempt(() => call('worktree.discard', { repoId, paths: 'all' }), 'Couldn’t discard')) !== undefined) await pull(repoId, m)
+            }
+          })
+      }
+    })
+  } else if (res?.result === 'ok' && res.message) toast({ tone: 'info', title: 'Pulled', body: res.message })
   else afterOp(repoId, res, 'Pulled')
   if (res) patchRepo(repoId, { lastFetch: Date.now(), fetchFailed: false })
+  await loadRepo(repoId, { keepSelection: true })
+}
+
+function fastForwardResult(res: OpResult | undefined): void {
+  if (!res) return
+  if (res.result === 'ok') toast({ tone: 'success', title: res.message ?? 'Fast-forwarded' })
+  else if (res.result === 'nothing') toast({ tone: 'info', title: res.message ?? 'Already up to date' })
+  else if (res.result === 'rejected') toast({ tone: 'error', title: 'Can’t fast-forward', body: res.message })
+}
+
+/** Pulls a branch without switching to it: fetches what it tracks, then fast-forwards it (only a fast-forward). */
+export async function pullBranch(repoId: string, name: string): Promise<void> {
+  if (name === useApp.getState().repos[repoId]?.refs?.head.branch) return pull(repoId)
+  const res = await remoteOp(repoId, 'pull', `Pulling ${name}`, (opId) => call('branch.fastForward', { repoId, name, fetch: true, opId }), `Couldn’t pull ${name}`)
+  fastForwardResult(res)
+  if (res) patchRepo(repoId, { lastFetch: Date.now(), fetchFailed: false })
+  await loadRepo(repoId, { keepSelection: true })
+}
+
+/**
+ * For a remote branch such as origin/x: fast-forwards the local branch that tracks it (or the one with its name) to
+ * it, without switching. With no such local branch, makes one that tracks it.
+ */
+export async function fastForwardTo(repoId: string, remoteBranch: string): Promise<void> {
+  const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
+  const r = refs.find((x) => x.kind === 'remote' && x.short === remoteBranch)
+  const name = r?.remote ? remoteBranch.slice(r.remote.length + 1) : remoteBranch.split('/').slice(1).join('/')
+  if (!name || name === 'HEAD') return
+  const local = refs.find((x) => x.kind === 'local' && x.upstream === `refs/remotes/${remoteBranch}`) ?? refs.find((x) => x.kind === 'local' && x.short === name)
+  const res = await attempt(() => call('branch.fastForward', { repoId, name: local?.short ?? name, to: remoteBranch, fetch: false, create: !local, opId: newOpId() }), `Couldn’t fast-forward ${local?.short ?? name}`)
+  fastForwardResult(res)
   await loadRepo(repoId, { keepSelection: true })
 }
 

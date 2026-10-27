@@ -294,7 +294,8 @@ export interface LfsState {
 }
 
 export interface OpResult {
-  result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale'
+  /** dirty: uncommitted changes are in the way (a pull that would overwrite them). */
+  result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale' | 'dirty'
   message?: string
 }
 

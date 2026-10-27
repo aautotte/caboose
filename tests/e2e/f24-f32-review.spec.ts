@@ -231,7 +231,7 @@ test('F30-H1 eye icons hide a branch, a folder, a remote or a whole section', as
 
 test('F31-H1 the rebase menu names both branches', async () => {
   await local('feature/one').click({ button: 'right' })
-  await expect(h.page.getByRole('menuitem', { name: 'Rebase main onto feature/one' })).toBeVisible()
+  await expect(h.page.getByRole('menuitem', { name: 'Rebase main onto feature/one', exact: true })).toBeVisible()
   await h.page.keyboard.press('Escape')
 })
 

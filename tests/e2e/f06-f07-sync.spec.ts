@@ -92,14 +92,14 @@ test('F07-E3 pull with rebase replays my commit on top', async () => {
   await expect.poll(h.gitOr(demo, 'rev-parse', 'origin/main')).toBe(h.git(demo, 'rev-parse', 'HEAD'))
 })
 
-test('F07-E2 local changes that a pull would overwrite are kept, with a clear message', async () => {
+test('F07-E2 local changes that a pull would overwrite are kept, with a clear message; Cancel leaves them', async () => {
   teammatePushes('Teammate edits the README', { 'README.md': '# skycast\n\nEdited by a teammate.\n' })
   writeFileSync(join(demo, 'README.md'), '# skycast\n\nMy unsaved idea.\n')
   await toolbar(/^Pull \(/).click()
-  await expect(toasts().getByText('Pull failed')).toBeVisible()
-  await expect(toasts()).toContainText(/overwritten/i)
+  await expect(dialog(h.page)).toContainText('Your changes are in the way')
+  await expect(dialog(h.page)).toContainText('README.md has uncommitted changes the pull would overwrite.')
+  await dialog(h.page).getByRole('button', { name: 'Cancel' }).click()
   expect(readFileSync(join(demo, 'README.md'), 'utf8')).toContain('My unsaved idea.')
-  await toasts().getByRole('button', { name: 'Dismiss' }).first().click()
   h.git(demo, 'checkout', '--', 'README.md')
   await toolbar(/^Pull \(/).click()
   await expect.poll(h.gitOr(demo, 'log', '-1', '--format=%s')).toBe('Teammate edits the README')

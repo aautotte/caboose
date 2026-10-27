@@ -101,11 +101,10 @@ test('F08-E3 switching branches with local changes in the way keeps them and exp
   await dismissToasts()
 })
 
-test('F08-E5 double-clicking a branch that only exists on the remote creates a local branch that tracks it', async () => {
+test('F08-E5 double-clicking a branch that only exists on the remote creates a local branch that tracks it, without switching', async () => {
   await h.page.getByRole('group', { name: 'origin' }).getByRole('treeitem', { name: 'remote-only' }).dblclick()
-  await expect.poll(head).toBe('remote-only')
-  expect(h.git(repo, 'rev-parse', '--abbrev-ref', 'remote-only@{upstream}')).toBe('origin/remote-only')
-  h.git(repo, 'switch', '-q', 'main')
+  await expect.poll(h.gitOr(repo, 'rev-parse', '--abbrev-ref', 'remote-only@{upstream}')).toBe('origin/remote-only')
+  expect(head()).toBe('main')
 })
 
 // ---------- F09 ----------
@@ -244,7 +243,7 @@ test('F11-H1 rebase a branch onto main from the menu', async () => {
   h.git(repo, 'switch', '-q', 'behind')
   await toGraph(h.page)
   await expect(local(/^behind/)).toHaveAttribute('aria-current', 'true')
-  await menu(h.page, local(/^main/), 'Rebase behind onto main')
+  await menu(h.page, local(/^main/), /^Rebase behind onto main$/)
   // merge-base --is-ancestor answers through its exit code, so ask git for a yes / no explicitly.
   const isAncestor = (): boolean => {
     try {
@@ -265,7 +264,7 @@ test('F11-E1 a rebase that conflicts can skip the commit and finish', async () =
   await toGraph(h.page)
   // Wait until the app has noticed the switch, so its menu offers to rebase clash.
   await expect(local(/^clash/).first()).toHaveAttribute('aria-current', 'true')
-  await menu(h.page, local(/^main/), 'Rebase clash onto main')
+  await menu(h.page, local(/^main/), /^Rebase clash onto main$/)
   await expect(h.page.getByRole('region', { name: 'Paused operation' })).toContainText('Rebasing')
   await h.page.getByRole('region', { name: 'Paused operation' }).getByRole('button', { name: 'Skip this commit' }).click()
   await expect.poll(() => existsSync(join(repo, '.git', 'rebase-merge'))).toBe(false)
