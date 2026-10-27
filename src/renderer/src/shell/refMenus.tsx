@@ -1,4 +1,4 @@
-import { Download, Eye, EyeOff, GitBranchPlus, ListOrdered, Tag, Trash2, Upload } from 'lucide-react'
+import { Download, Eye, EyeOff, GitBranchPlus, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
 import type { MenuEntry } from '@/ui'
 import * as act from '@/actions'
 
@@ -35,6 +35,24 @@ export function pushEntry(repoId: string, branch: { name: string; isHead: boolea
 export function pullEntry(repoId: string, branch: { name: string; isHead: boolean; upstream?: string; upstreamGone?: boolean; worktree?: string }): MenuEntry {
   const why = !branch.upstream ? ' (tracks nothing)' : branch.upstreamGone ? ' (gone from the remote)' : branch.worktree ? ' (checked out in a worktree)' : ''
   return { type: 'item', label: `Pull${why}`, icon: <Download size={14} />, disabled: !!why, onSelect: () => void act.pullBranch(repoId, branch.name) }
+}
+
+/**
+ * For a remote branch such as origin/x: reset the local branch for it (the one that tracks it, or x) to it. The
+ * checked-out branch gets the usual reset (soft, mixed or hard); another one just moves. None when there's no local
+ * branch for it.
+ */
+export function resetToRemoteEntry(repoId: string, remoteBranch: string): MenuEntry | null {
+  const local = act.localFor(repoId, remoteBranch)
+  if (!local) return null
+  const label = `Reset ${local.short} to ${remoteBranch}…`
+  if (local.worktree) return { type: 'item', label: `${label} (checked out in a worktree)`, icon: <RotateCcw size={14} />, disabled: true }
+  return {
+    type: 'item',
+    label,
+    icon: <RotateCcw size={14} />,
+    onSelect: () => act.openDialog({ kind: 'reset', repoId, target: remoteBranch, targetLabel: remoteBranch, branch: local.isHead ? undefined : local.short })
+  }
 }
 
 /** Interactive rebase of the checked-out branch onto `onto` (a branch): pick, reorder, squash or drop its commits. */

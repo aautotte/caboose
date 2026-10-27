@@ -976,6 +976,19 @@ export class RepoOps {
     return { result: 'ok', message: `Fast-forwarded ${name} to ${target}` }
   }
 
+  /** Points local branch `name`, which isn't checked out anywhere, at `to`. Returns where it was and where it is now. */
+  async moveBranch(name: string, to: string): Promise<{ from: string; to: string }> {
+    this.safeRev(name)
+    this.safeRev(to)
+    const from = (await this.git(['rev-parse', '--verify', `refs/heads/${name}`])).trim()
+    const next = (await this.git(['rev-parse', '--verify', `${to}^{commit}`])).trim()
+    if ((await this.status()).branch === name) throw invalid(`${name} is checked out: reset it instead.`)
+    const elsewhere = (await this.worktrees()).find((w) => w.branch === name)
+    if (elsewhere) throw invalid(`${name} is checked out in the worktree ${elsewhere.path}. Reset it there.`)
+    if (from !== next) await this.mut(['update-ref', '-m', `reset: moving to ${to}`, `refs/heads/${name}`, next, from])
+    return { from, to: next }
+  }
+
   async push(opts: { opId: string; remote?: string; branch?: string; setUpstream?: boolean; force?: boolean }, onProgress: RunOptions['onProgress']): Promise<OpResult> {
     const st = await this.status()
     const branch = opts.branch ? this.safeRev(opts.branch) : st.branch

@@ -4,7 +4,7 @@ import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../.
 import { Badge, Button, ContextMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
-import { pullEntry, pushEntry, rebaseOntoEntry, tagMenu } from './refMenus'
+import { pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
@@ -211,7 +211,11 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     m.push({ type: 'item', label: `Rebase ${head} onto ${r.short}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, head, r.short) })
     m.push(rebaseOntoEntry(repoId, head, r.short))
   }
-  if (r.kind === 'remote') m.push({ type: 'item', label: 'Fast-forward my local branch', icon: <Download size={14} />, onSelect: () => void act.fastForwardTo(repoId, r.short) })
+  if (r.kind === 'remote') {
+    m.push({ type: 'item', label: 'Fast-forward my local branch', icon: <Download size={14} />, onSelect: () => void act.fastForwardTo(repoId, r.short) })
+    const reset = resetToRemoteEntry(repoId, r.short)
+    if (reset) m.push(reset)
+  }
   if (r.kind === 'local') {
     m.push(pullEntry(repoId, { name: r.short, isHead: r.isHead, upstream: r.upstream, upstreamGone: r.upstreamGone, worktree: r.worktree }))
     m.push(pushEntry(repoId, { name: r.short, isHead: r.isHead, upstream: r.upstream }, remotes))

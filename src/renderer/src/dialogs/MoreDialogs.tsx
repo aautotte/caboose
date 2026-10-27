@@ -192,10 +192,13 @@ const resetModes: Array<{ mode: ResetMode; title: string; body: string }> = [
 export function ResetDialog({ d }: { d: Extract<D, { kind: 'reset' }> }): React.JSX.Element {
   const [mode, setMode] = useState<ResetMode>('mixed')
   const [busy, setBusy] = useState(false)
-  const branch = useApp((s) => s.repos[d.repoId]?.refs?.head.branch)
+  const head = useApp((s) => s.repos[d.repoId]?.refs?.head.branch)
+  // Another branch than the checked-out one only moves: no files are involved, so there's no mode to pick.
+  const other = d.branch && d.branch !== head ? d.branch : null
+  const branch = other ?? head
   const submit = async (): Promise<void> => {
     setBusy(true)
-    const ok = await act.reset(d.repoId, d.target, mode)
+    const ok = other ? await act.moveBranch(d.repoId, other, d.target) : await act.reset(d.repoId, d.target, mode)
     setBusy(false)
     if (ok) close()
   }
@@ -207,30 +210,39 @@ export function ResetDialog({ d }: { d: Extract<D, { kind: 'reset' }> }): React.
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
-          <Button variant={mode === 'hard' ? 'danger' : 'primary'} loading={busy} onClick={() => void submit()}>
+          <Button variant={mode === 'hard' && !other ? 'danger' : 'primary'} loading={busy} onClick={() => void submit()}>
             Reset
           </Button>
         </>
       }
     >
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 text-sm text-muted">What happens to the changes after {d.targetLabel}?</legend>
-        {resetModes.map((m) => (
-          <label
-            key={m.mode}
-            className={cn(
-              'flex cursor-pointer gap-3 rounded-md border p-3 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus-ring',
-              mode === m.mode ? 'border-accent bg-row-selected' : 'border-border hover:bg-row-hover'
-            )}
-          >
-            <input type="radio" name="reset-mode" value={m.mode} checked={mode === m.mode} onChange={() => setMode(m.mode)} className="mt-1 accent-(--gc-color-accent)" />
-            <span className="flex flex-col gap-0.5">
-              <span className={cn('text-base font-medium', m.mode === 'hard' ? 'text-danger' : 'text-text')}>{m.title}</span>
-              <span className="text-sm text-muted">{m.body}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
+      {other ? (
+        <>
+          <p className="text-base text-text">
+            {other} isn’t checked out, so only the branch moves to {d.targetLabel}: your files don’t change. Commits on {other} that {d.targetLabel} doesn’t have are left out of it (another branch may still have them).
+          </p>
+          <p className="text-sm text-muted">You can undo this with Ctrl+Z.</p>
+        </>
+      ) : (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-sm text-muted">What happens to the changes after {d.targetLabel}?</legend>
+          {resetModes.map((m) => (
+            <label
+              key={m.mode}
+              className={cn(
+                'flex cursor-pointer gap-3 rounded-md border p-3 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-focus-ring',
+                mode === m.mode ? 'border-accent bg-row-selected' : 'border-border hover:bg-row-hover'
+              )}
+            >
+              <input type="radio" name="reset-mode" value={m.mode} checked={mode === m.mode} onChange={() => setMode(m.mode)} className="mt-1 accent-(--gc-color-accent)" />
+              <span className="flex flex-col gap-0.5">
+                <span className={cn('text-base font-medium', m.mode === 'hard' ? 'text-danger' : 'text-text')}>{m.title}</span>
+                <span className="text-sm text-muted">{m.body}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      )}
     </Dialog>
   )
 }

@@ -306,6 +306,15 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('branch.fastForward', z.object({ ...R, name: ref, to: ref.optional(), fetch: z.boolean(), create: z.boolean().optional(), opId }), ({ repoId, name, opId: id, ...rest }) =>
     exclusive(repoId, () => ops(repoId).fastForward(name, { ...rest, opId: id }, progress(id)))
   )
+  handle('branch.move', z.object({ ...R, name: ref, to: ref }), ({ repoId, name, to }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const moved = await o.moveBranch(name, to)
+      if (moved.from !== moved.to) undo.record(repoId, 'branch_move', `Reset ${name} to ${to}`, { ...head, name, tip: moved.from }, { ...head, name, tip: moved.to })
+      return null
+    })
+  )
   handle('branch.deleteMany', z.object({ ...R, names: z.array(ref).min(1).max(1000), force: z.boolean() }), ({ repoId, names, force }) => exclusive(repoId, async () => {
     const o = ops(repoId)
     const head = await undo.snapshot(o)
