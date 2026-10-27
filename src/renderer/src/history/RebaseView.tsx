@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, GitCommitHorizontal, GripVertical, ListRestart, X } from 'lucide-react'
 import type { RebaseAction, RebaseRow } from '../../../shared/types'
-import { Avatar, Button, Dialog, EmptyState, Field, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
+import { Avatar, Button, Checkbox, Dialog, EmptyState, Field, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { plural, relativeTime, shortSha } from '@/lib/format'
@@ -42,6 +42,8 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const [reword, setReword] = useState<number | null>(null)
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [running, setRunning] = useState(false)
+  // As for a commit, git hooks run unless this is ticked.
+  const [skipHooks, setSkipHooks] = useState(false)
   const head = useRepo(repoId, (r) => r.refs?.head)
   const status = useRepo(repoId, (r) => r.status)
   const listRef = useRef<HTMLOListElement>(null)
@@ -109,10 +111,12 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
     setRunning(true)
     if (mode === 'cherry') await act.cherryPick(repoId, kept.map((s) => s.row.sha))
     else
-      await act.rebaseInteractive(repoId, base, [
-        ...steps.map((s) => ({ sha: s.row.sha, action: s.action, message: s.action === 'reword' ? s.message : undefined })),
-        ...tail.map((r) => ({ sha: r.sha, action: 'pick' as const }))
-      ])
+      await act.rebaseInteractive(
+        repoId,
+        base,
+        [...steps.map((s) => ({ sha: s.row.sha, action: s.action, message: s.action === 'reword' ? s.message : undefined })), ...tail.map((r) => ({ sha: r.sha, action: 'pick' as const }))],
+        skipHooks
+      )
     setRunning(false)
     close()
   }
@@ -258,6 +262,7 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
                       ? `${plural(kept.length + tail.length, 'commit')} after rewriting. Undo puts the branch back.`
                       : `${plural(kept.length, 'commit')} will be copied onto ${head?.branch ?? 'HEAD'}. Undo removes them again.`)}
             </p>
+            {mode === 'rebase' ? <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} /> : null}
             <Tooltip content="Back to the original list">
               <IconButton label="Reset the list" disabled={unchanged} onClick={() => setSteps(rows.map((row) => ({ row, action: 'pick' })))}>
                 <ListRestart size={16} />

@@ -398,6 +398,7 @@ export function SquashDialog({ d }: { d: Extract<D, { kind: 'squash' }> }): Reac
   const [first, ...rest] = d.message.split('\n')
   const [summary, setSummary] = useState(first)
   const [body, setBody] = useState(rest.join('\n').trim())
+  const [skipHooks, setSkipHooks] = useState(false)
   // Tall enough to read every commit's message, within reason.
   const rows = Math.min(18, Math.max(6, body.split('\n').length + 1))
   const [busy, setBusy] = useState(false)
@@ -405,7 +406,7 @@ export function SquashDialog({ d }: { d: Extract<D, { kind: 'squash' }> }): Reac
     if (!summary.trim() || busy) return
     setBusy(true)
     close()
-    act.squash(d.repoId, d.shas, body.trim() ? `${summary.trim()}\n\n${body.trim()}` : summary.trim())
+    act.squash(d.repoId, d.shas, body.trim() ? `${summary.trim()}\n\n${body.trim()}` : summary.trim(), undefined, skipHooks)
   }
   return (
     <Dialog
@@ -425,6 +426,7 @@ export function SquashDialog({ d }: { d: Extract<D, { kind: 'squash' }> }): Reac
         <p className="text-base text-muted">They become one commit with this message, which starts with all of theirs, oldest first. The oldest one’s author and date are kept. Undo puts them back.</p>
         <Field label="Summary">{(p) => <TextInput {...p} autoFocus value={summary} onChange={(e) => setSummary(e.target.value)} />}</Field>
         <Field label="Description">{(p) => <TextArea {...p} rows={rows} value={body} onChange={(e) => setBody(e.target.value)} />}</Field>
+        <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} />
       </DialogForm>
     </Dialog>
   )

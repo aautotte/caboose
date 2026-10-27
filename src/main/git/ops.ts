@@ -1420,9 +1420,11 @@ export class RepoOps {
 
   /**
    * Runs `git rebase -i` with our own todo list. Rewording uses an `exec git commit --amend` step after the pick,
-   * so git never opens an editor. Squash keeps both messages (comment lines stripped).
+   * so git never opens an editor. Squash keeps both messages (comment lines stripped). Hooks run (pre-rebase, and
+   * pre-commit and commit-msg on a reword) unless `noVerify`, as for a commit; one that refuses stops it all, and the
+   * branch is put back as it was.
    */
-  async rebaseInteractive(onto: string, plan: RebaseStep[], tmpDir: string): Promise<OpResult> {
+  async rebaseInteractive(onto: string, plan: RebaseStep[], tmpDir: string, noVerify = false): Promise<OpResult> {
     this.safeRev(onto)
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('This range has merge commits. Interactive rebase here would flatten them, so it isn’t offered.')
@@ -1445,16 +1447,35 @@ export class RepoOps {
       if (s.action === 'reword') {
         const msgFile = join(tmpDir, `msg-${i}.txt`)
         writeFileSync(msgFile, (s.message ?? '').trim() + '\n')
-        lines.push(`pick ${s.sha}`, `exec git commit --amend --only -q --no-verify --cleanup=strip -F ${shq(msgFile)}`)
+        lines.push(`pick ${s.sha}`, `exec git commit --amend --only -q ${noVerify ? '--no-verify ' : ''}--cleanup=strip -F ${shq(msgFile)}`)
       } else lines.push(`${s.action} ${s.sha}`)
     })
     const todo = join(tmpDir, 'todo.txt')
     writeFileSync(todo, lines.join('\n') + '\n')
     try {
-      await this.mut(['rebase', '-i', onto], { extraEnv: { GIT_SEQUENCE_EDITOR: `cp ${shq(todo)}`, GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
+      await this.mut(['rebase', '-i', ...(noVerify ? ['--no-verify'] : []), onto], { extraEnv: { GIT_SEQUENCE_EDITOR: `cp ${shq(todo)}`, GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
       return { result: 'ok' }
     } catch (e) {
-      if ((await this.opState()).kind === 'rebase') return { result: 'conflicts' }
+      const detail = e instanceof GcFail ? (e.detail ?? '') : ''
+      // What the hook itself printed, without git's own lines around it.
+      const said = detail
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && !/^(Executing:|warning:|error:|hint:|fatal:|You can fix|git rebase|Stopped at|Rebasing|Execution failed|The pre-rebase hook refused)/i.test(l))
+        .slice(0, 3)
+        .join(' ')
+      const quote = said ? ` It said: “${said}”` : ''
+      if (/pre-rebase hook refused/i.test(detail)) {
+        throw new GcFail('git', `The pre-rebase hook refused, so nothing changed.${quote} Tick Skip hooks to rebase anyway.`, detail)
+      }
+      if ((await this.opState()).kind === 'rebase') {
+        // A reword's commit stopped by a hook (pre-commit, commit-msg): not a conflict to sort out. Put it all back.
+        if (/Execution failed: git commit/i.test(detail)) {
+          await this.mut(['rebase', '--abort'])
+          throw new GcFail('git', `A hook refused the new message, so nothing changed.${quote} Tick Skip hooks to go ahead anyway.`, detail)
+        }
+        return { result: 'conflicts' }
+      }
       throw e
     } finally {
       // Reword messages for steps after a conflict are still needed; keep the folder until the rebase ends.
@@ -1474,29 +1495,29 @@ export class RepoOps {
   }
 
   /** Replays everything after `onto` with a plan made from the commits (oldest first). */
-  private async rewrite(onto: string, tmpDir: string, build: (rows: RebaseRow[]) => RebaseStep[]): Promise<OpResult> {
+  private async rewrite(onto: string, tmpDir: string, build: (rows: RebaseRow[]) => RebaseStep[], noVerify = false): Promise<OpResult> {
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('There are merge commits after this one on the branch, so this can’t be rewritten without flattening them.')
-    return this.rebaseInteractive(onto, build(preview.rows), tmpDir)
+    return this.rebaseInteractive(onto, build(preview.rows), tmpDir, noVerify)
   }
 
-  async reword(sha: string, message: string, tmpDir: string): Promise<OpResult> {
+  async reword(sha: string, message: string, tmpDir: string, noVerify = false): Promise<OpResult> {
     const m = message.trim()
     if (!m) throw invalid('Add a summary first.')
     const full = (await this.git(['rev-parse', '--verify', `${this.safeRev(sha)}^{commit}`])).trim()
     if (full === (await this.headSha())) {
       const [summary, ...rest] = m.split('\n')
-      await this.commit(summary, rest.join('\n'), true, true, true)
+      await this.commit(summary, rest.join('\n'), true, noVerify, true)
       return { result: 'ok' }
     }
     if (!(await this.headLine()).includes(full)) throw invalid('That commit isn’t on the current branch’s own line of history.')
     const onto = await this.parentOf(full)
     if (!onto) throw invalid('The very first commit can’t be reworded here.')
-    return this.rewrite(onto, tmpDir, (rows) => rows.map((r) => (r.sha === full ? { sha: r.sha, action: 'reword', message: m } : { sha: r.sha, action: 'pick' })))
+    return this.rewrite(onto, tmpDir, (rows) => rows.map((r) => (r.sha === full ? { sha: r.sha, action: 'reword', message: m } : { sha: r.sha, action: 'pick' })), noVerify)
   }
 
   /** Squashes commits that sit next to each other on the current branch into one, with the given message. */
-  async squash(shas: string[], message: string, tmpDir: string): Promise<OpResult> {
+  async squash(shas: string[], message: string, tmpDir: string, noVerify = false): Promise<OpResult> {
     const m = message.trim()
     if (!m) throw invalid('Add a summary first.')
     if (shas.length < 2) throw invalid('Pick at least two commits to squash.')
@@ -1509,8 +1530,11 @@ export class RepoOps {
     const first = line[idx[0]]
     const onto = await this.parentOf(first)
     if (!onto) throw invalid('Squashing into the very first commit isn’t supported here.')
-    return this.rewrite(onto, tmpDir, (rows) =>
-      rows.map((r) => (r.sha === first ? { sha: r.sha, action: 'reword', message: m } : chosen.has(r.sha) ? { sha: r.sha, action: 'fixup' } : { sha: r.sha, action: 'pick' }))
+    return this.rewrite(
+      onto,
+      tmpDir,
+      (rows) => rows.map((r) => (r.sha === first ? { sha: r.sha, action: 'reword', message: m } : chosen.has(r.sha) ? { sha: r.sha, action: 'fixup' } : { sha: r.sha, action: 'pick' })),
+      noVerify
     )
   }
 

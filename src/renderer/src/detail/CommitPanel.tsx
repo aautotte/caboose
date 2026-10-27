@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AlertTriangle, Copy, GitCommitHorizontal, History, Pencil, ShieldAlert, ShieldCheck, ShieldQuestion, UserSearch } from 'lucide-react'
 import type { CommitDetails, CommitSignature } from '../../../shared/types'
-import { Avatar, Badge, Button, EmptyState, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
+import { Avatar, Badge, Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
 import { call } from '@/lib/api'
 import { fullDate, plural, shortSha } from '@/lib/format'
 import { patchRepo, useRepo } from '@/store'
@@ -17,6 +17,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   const [editing, setEditing] = useState(false)
   const [summary, setSummary] = useState('')
   const [body, setBody] = useState('')
+  const [skipHooks, setSkipHooks] = useState(false)
   const center = useRepo(repoId, (r) => r.center)
   const headSha = useRepo(repoId, (r) => r.refs?.head.sha)
   const stash = useRepo(repoId, (r) => r.refs?.stashes.find((s) => s.sha === sha))
@@ -44,6 +45,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
     patchRepo(repoId, { editing: null })
     setSummary(d.summary)
     setBody(d.body)
+    setSkipHooks(false)
     setEditing(true)
   }, [d, editRequest, repoId])
 
@@ -71,12 +73,12 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   const saveMessage = async (): Promise<void> => {
     if (!summary.trim()) return
     if (d.isHead) {
-      const ok = await act.commit(repoId, { summary, body, amend: true, noVerify: false, push: false, messageOnly: true })
+      const ok = await act.commit(repoId, { summary, body, amend: true, noVerify: skipHooks, push: false, messageOnly: true })
       if (ok) setEditing(false)
       return
     }
     // Busy shows while it runs; cancelling the "already pushed" question leaves the editor as it was.
-    act.reword(repoId, d.sha, body.trim() ? `${summary.trim()}\n\n${body.trim()}` : summary.trim(), (ok) => ok && setEditing(false))
+    act.reword(repoId, d.sha, body.trim() ? `${summary.trim()}\n\n${body.trim()}` : summary.trim(), (ok) => ok && setEditing(false), skipHooks)
   }
 
   return (
@@ -110,6 +112,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
           <div className="flex flex-col gap-2">
             <TextInput aria-label="Commit summary" value={summary} onChange={(e) => setSummary(e.target.value)} autoFocus />
             <TextArea aria-label="Commit description" value={body} onChange={(e) => setBody(e.target.value)} />
+            <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} />
             {!d.isHead || pushed ? (
               <p className="flex items-start gap-1.5 text-sm text-muted">
                 {pushed ? <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0 text-warning" /> : null}
@@ -147,6 +150,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
                     onClick={() => {
                       setSummary(d.summary)
                       setBody(d.body)
+                      setSkipHooks(false)
                       setEditing(true)
                     }}
                   >
