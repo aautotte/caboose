@@ -154,7 +154,8 @@ export interface Api {
   /** One push of several tags to `remote`, or of their deletion there (`del`). */
   'tag.pushMany': { in: R & { names: string[]; remote: string; opId: string; del: boolean }; out: null }
 
-  'history.reset': { in: R & { target: string; mode: ResetMode }; out: null }
+  /** `branch`: the branch the user means to reset; refused if another one is checked out by then. */
+  'history.reset': { in: R & { target: string; mode: ResetMode; branch?: string }; out: null }
   'history.revert': { in: R & { sha: string }; out: OpResult }
   'history.cherryPick': { in: R & { shas: string[] }; out: OpResult }
   'cherry.preview': { in: R & { tip: string }; out: RebaseRow[] }

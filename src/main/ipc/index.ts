@@ -4,7 +4,7 @@ import type { Api, Channel } from '../../shared/api'
 import type { ActivityEntry, ProgressEvent, Result, SubmoduleSettings } from '../../shared/types'
 import type { Db } from '../db'
 import { uuid } from '../db'
-import { GcFail } from '../errors'
+import { GcFail, invalid } from '../errors'
 import type { GitRunner } from '../git/runner'
 import { UNDO_REFS, samePath } from '../git/ops'
 import type { Repos } from '../repos'
@@ -24,6 +24,8 @@ const R = { repoId }
 const paths = z.union([z.literal('all'), z.array(z.string().min(1)).min(1).max(5000)])
 const opId = z.string().min(8).max(64)
 const ref = z.string().min(1).max(400)
+/** A commit's short sha for labels; a branch or tag name as it is. */
+const shortRef = (r: string): string => (/^[0-9a-f]{40}$/.test(r) ? r.slice(0, 7) : r)
 
 interface Deps {
   db: Db
@@ -506,14 +508,16 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('tag.pushMany', z.object({ ...R, names: z.array(ref).min(1).max(1000), remote: ref, opId, del: z.boolean() }), async ({ repoId, names, remote, opId, del }) => (await ops(repoId).pushTags(names, remote, opId, del), null))
 
   // ---------- history edits ----------
-  handle('history.reset', z.object({ ...R, target: ref, mode: z.enum(['soft', 'mixed', 'hard']) }), ({ repoId, target, mode }) =>
+  handle('history.reset', z.object({ ...R, target: ref, mode: z.enum(['soft', 'mixed', 'hard']), branch: ref.optional() }), ({ repoId, target, mode, branch }) =>
     exclusive(repoId, async () => {
       const o = ops(repoId)
       const before = await undo.snapshot(o)
+      // The window may be a moment behind a checkout made elsewhere: never reset another branch than the one asked for.
+      if (branch && before.branch !== branch) throw invalid(`${branch} isn’t checked out any more (${before.branch ?? 'a detached HEAD'} is), so nothing was reset.`)
       const stash = mode === 'hard' ? await o.pinWork(`${UNDO_REFS}${uuid()}`) : null
       await o.reset(target, mode)
       const words = { soft: 'keep changes staged', mixed: 'keep changes', hard: 'discard changes' }
-      undo.record(repoId, 'reset', `Reset to ${target.slice(0, 7)} (${words[mode]})`, { ...before, mode, stash: stash ?? undefined }, await undo.snapshot(o))
+      undo.record(repoId, 'reset', `Reset to ${shortRef(target)} (${words[mode]})`, { ...before, mode, stash: stash ?? undefined }, await undo.snapshot(o))
       return null
     })
   )

@@ -963,7 +963,8 @@ export class RepoOps {
     }
     if (cur === next) return { result: 'nothing', message: `${name} is already up to date with ${target}.` }
     if ((await this.tryGit(['merge-base', '--is-ancestor', cur, next])) === null) {
-      return { result: 'rejected', message: `Can’t fast-forward ${name}: it has commits that ${target} doesn’t. Check it out to merge or rebase.` }
+      const ahead = Number((await this.git(['rev-list', '--count', `${next}..${cur}`])).trim())
+      return { result: 'rejected', ahead, message: `Can’t fast-forward ${name}: it has commits that ${target} doesn’t. Check it out to merge or rebase.` }
     }
     const here = await this.status()
     if (here.branch === name) {

@@ -198,7 +198,7 @@ export function ResetDialog({ d }: { d: Extract<D, { kind: 'reset' }> }): React.
   const branch = other ?? head
   const submit = async (): Promise<void> => {
     setBusy(true)
-    const ok = other ? await act.moveBranch(d.repoId, other, d.target) : await act.reset(d.repoId, d.target, mode)
+    const ok = other ? await act.moveBranch(d.repoId, other, d.target) : await act.reset(d.repoId, d.target, mode, head ?? undefined)
     setBusy(false)
     if (ok) close()
   }

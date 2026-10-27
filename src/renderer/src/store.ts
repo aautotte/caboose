@@ -97,7 +97,7 @@ export type Dialog =
       danger: boolean
       undoable: boolean | null
       onConfirm: (checked: boolean) => void
-      alt?: { label: string; onSelect: () => void }
+      alt?: { label: string; onSelect: () => void; danger?: boolean }
       check?: { label: string; hint?: string }
     }
 
