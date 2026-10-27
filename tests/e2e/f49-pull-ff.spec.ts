@@ -70,25 +70,35 @@ test('F49-H2: Pull on a branch that has its own commits says it can’t fast-for
   expect(sha(repo, 'other')).toBe(mine)
 })
 
-test('F49-H3: double-clicking a remote branch fast-forwards the local one without switching; if it can’t, it says so', async () => {
+test('F49-H3: double-clicking a remote branch fast-forwards the local one and checks it out; if it can’t fast-forward, it says so and still checks it out', async () => {
+  // The app may still be refreshing (holding the index lock for a moment), so the switch back is retried.
+  const backToMain = (): Promise<void> => expect.poll(() => (h.gitOr(repo, 'switch', '-q', 'main')(), head())).toBe('main')
   const theirs = peerCommit('feat', 'b.txt', 'feat from peer\n')
   h.git(repo, 'fetch', '-q', 'origin')
   await expect(remoteRow('feat')).toBeVisible()
   await remoteRow('feat').dblclick()
   await expect(toasts().getByText('Fast-forwarded feat to origin/feat')).toBeVisible()
   expect(sha(repo, 'feat')).toBe(theirs)
-  expect(head()).toBe('main')
+  await expect.poll(head).toBe('feat')
 
+  // Already up to date: it just checks it out.
+  await backToMain()
+  await expect(local('main')).toHaveAttribute('aria-current', 'true')
   await remoteRow('feat').dblclick()
-  await expect(toasts().getByText('feat is already up to date with origin/feat.')).toBeVisible()
+  await expect.poll(head).toBe('feat')
+  expect(sha(repo, 'feat')).toBe(theirs)
 
+  await backToMain()
   h.git(repo, 'update-ref', 'refs/heads/feat', h.git(repo, 'commit-tree', '-p', 'feat', '-m', 'Mine on feat', 'feat^{tree}'))
   peerCommit('feat', 'b.txt', 'feat from peer again\n')
   h.git(repo, 'fetch', '-q', 'origin')
   const mine = sha(repo, 'feat')
+  await expect(local('main')).toHaveAttribute('aria-current', 'true')
   await remoteRow('feat').dblclick()
   await expect(toasts().getByText('Can’t fast-forward', { exact: true })).toBeVisible()
+  await expect.poll(head).toBe('feat')
   expect(sha(repo, 'feat')).toBe(mine)
+  await backToMain()
 })
 
 test('F49-H4: right-click main › Interactive rebase topic onto main… opens the rebase on main, and it runs', async () => {

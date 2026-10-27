@@ -101,10 +101,11 @@ test('F08-E3 switching branches with local changes in the way keeps them and exp
   await dismissToasts()
 })
 
-test('F08-E5 double-clicking a branch that only exists on the remote creates a local branch that tracks it, without switching', async () => {
+test('F08-E5 double-clicking a branch that only exists on the remote creates a local branch that tracks it, and checks it out', async () => {
   await h.page.getByRole('group', { name: 'origin' }).getByRole('treeitem', { name: 'remote-only' }).dblclick()
-  await expect.poll(h.gitOr(repo, 'rev-parse', '--abbrev-ref', 'remote-only@{upstream}')).toBe('origin/remote-only')
-  expect(head()).toBe('main')
+  await expect.poll(head).toBe('remote-only')
+  expect(h.git(repo, 'rev-parse', '--abbrev-ref', 'remote-only@{upstream}')).toBe('origin/remote-only')
+  await expect.poll(() => (h.gitOr(repo, 'switch', '-q', 'main')(), head())).toBe('main')
 })
 
 // ---------- F09 ----------

@@ -672,7 +672,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
                           eye={eyeOne(r)}
                           selected={selected === r.sha}
                           onSelect={(e) => live.current.remote.select(r, e)}
-                          onActivate={() => void act.fastForwardTo(repoId, r.short)}
+                          onActivate={() => void act.fastForwardTo(repoId, r.short, { checkout: true })}
                           menu={() => live.current.remote.menu(r)}
                           dim={outOfGraph(view, r)}
                           pinned={view.pinned === r.name}

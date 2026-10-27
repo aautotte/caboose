@@ -109,6 +109,8 @@ test('F46-H15: a submodule with changes inside: the checkout asks first, and the
   // c was set up before, so it comes back with the branch.
   await expect.poll(at('c')).toBe(commitOf('c', 'main~2'))
   rmSync(join(lib('a'), 'mine.txt'))
+  // Once the app has seen the file go, libs/a is only out of step, and can be updated.
+  await expect(row('a')).toHaveAccessibleName('libs/a, out of step')
   await pick(row('a'), 'Update to the expected commit')
   await expect.poll(at('a')).toBe(commitOf('a', 'main'))
 })
