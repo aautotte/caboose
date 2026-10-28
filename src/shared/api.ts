@@ -97,7 +97,7 @@ export interface Api {
   'worktree.discard': { in: R & { paths: string[] | 'all' }; out: null }
 
   'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: null }
-  'branch.checkout': { in: R & { ref: string }; out: null }
+  'branch.checkout': { in: R & { ref: string; opId?: string }; out: null }
   'branch.rename': { in: R & { name: string; newName: string }; out: null }
   'branch.delete': { in: R & { name: string; force: boolean }; out: null }
   /** Deletes what it can; the ones with unmerged commits (when not forced) come back in `unmerged`, untouched. One undo for all. */

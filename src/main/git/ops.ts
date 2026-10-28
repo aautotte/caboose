@@ -836,18 +836,23 @@ export class RepoOps {
   }
 
   /** Accepts a local branch, a remote branch (creates a tracking branch), a tag or a sha (detached). */
-  async checkout(ref: string): Promise<void> {
+  /**
+   * A switch between far-apart branches of a big repository rewrites a lot of files: it reports its progress, and isn't
+   * cut off after the usual two minutes (killing it halfway would leave the files half switched).
+   */
+  async checkout(ref: string, opId?: string, onProgress?: RunOptions['onProgress']): Promise<void> {
     this.safeRev(ref)
+    const run = (args: string[]): Promise<string> => this.mut(['switch', '--progress', ...args], { opId, onProgress, timeoutMs: 30 * 60_000 })
     const local = await this.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${ref}`])
-    if (local) return void (await this.mut(['switch', ref]))
+    if (local) return void (await run([ref]))
     const remote = await this.tryGit(['rev-parse', '-q', '--verify', `refs/remotes/${ref}`])
     if (remote) {
       const { remotes } = await this.refs()
       const r = remotes.find((x) => ref.startsWith(x + '/'))
       const name = r ? ref.slice(r.length + 1) : ref
       const exists = await this.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${name}`])
-      if (exists) return void (await this.mut(['switch', name]))
-      return void (await this.mut(['switch', '-c', name, '--track', ref]))
+      if (exists) return void (await run([name]))
+      return void (await run(['-c', name, '--track', ref]))
     }
     await this.mut(['switch', '--detach', ref])
   }

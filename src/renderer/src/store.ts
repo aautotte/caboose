@@ -33,7 +33,7 @@ export interface RepoState {
   center: Center
   undo: UndoPeek
   /** Running remote / long operations, by key. */
-  busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op', string>>
+  busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout', string>>
   progress: { phase: string; percent?: number } | null
   lastFetch: number | null
   fetchFailed: boolean

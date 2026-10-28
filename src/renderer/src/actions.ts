@@ -852,10 +852,15 @@ function checkedOutElsewhere(repoId: string, branch: string, w: Pick<Worktree, '
 }
 
 async function runCheckout(repoId: string, ref: string): Promise<void> {
+  // A far jump can take a while: say so, with git's progress, until it's done.
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: `Switching to ${ref}…` }, progress: null }))
+  const done = (): void => patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: undefined }, progress: null }))
   try {
-    await call('branch.checkout', { repoId, ref })
+    await call('branch.checkout', { repoId, ref, opId: newOpId() })
+    done()
     toast({ tone: 'success', title: `Switched to ${ref}` })
   } catch (err) {
+    done()
     // A worktree made a moment ago (in a terminal, say) that the list here doesn't show yet.
     const m = err instanceof ApiError ? /'([^']+)' is already (?:used|checked out) by worktree at '([^']+)'/.exec(`${err.message}\n${err.detail ?? ''}`) : null
     await loadRepo(repoId, { keepSelection: true })

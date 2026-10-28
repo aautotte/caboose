@@ -180,7 +180,15 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
           onClick={() => act.popLatest(repoId)}
         />
       </div>
-      {progress ? (
+      {busy.checkout ? (
+        <span role="status" aria-live="polite" className="flex w-56 items-center gap-1.5 truncate text-sm text-muted">
+          <Spinner size={14} />
+          <span className="truncate">
+            {busy.checkout}
+            {progress ? ` ${progress.phase}${progress.percent !== undefined ? ` ${progress.percent}%` : ''}` : ''}
+          </span>
+        </span>
+      ) : progress ? (
         <span role="status" aria-live="polite" className="w-44 truncate text-sm text-muted">
           {progress.phase}
           {progress.percent !== undefined ? ` ${progress.percent}%` : ''}
