@@ -268,7 +268,16 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
               ) : null
             }
             rowAction={{ label: 'Stage', onClick: (f) => (f.status === 'conflicted' ? open(f, 'worktree') : void act.stage(repoId, [f.path])) }}
+            // Conflicted files are left for the merge tool: staging one would mark it resolved.
+            dirAction={{
+              label: 'Stage',
+              onClick: (files) => {
+                const paths = files.filter((f) => f.status !== 'conflicted').map((f) => f.path)
+                if (paths.length) void act.stage(repoId, paths)
+              }
+            }}
             menu={(f, picked) => fileMenu(f, 'unstaged', picked)}
+            dirMenu={(files) => manyMenu(files, 'unstaged')}
             multi
             emptyText="Everything is staged."
             onKey={(e, _f, picked) => {
@@ -283,7 +292,9 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             onOpen={(f) => open(f, 'index')}
             bulk={{ label: 'Unstage all', onClick: () => void act.unstage(repoId, 'all') }}
             rowAction={{ label: 'Unstage', onClick: (f) => void act.unstage(repoId, [f.path]) }}
+            dirAction={{ label: 'Unstage', onClick: (files) => void act.unstage(repoId, files.map((f) => f.path)) }}
             menu={(f, picked) => fileMenu(f, 'staged', picked)}
+            dirMenu={(files) => manyMenu(files, 'staged')}
             multi
             emptyText="Stage files to include them in the next commit."
             onKey={(e, _f, picked) => e.key === 'u' && void act.unstage(repoId, picked.map((p) => p.path))}
