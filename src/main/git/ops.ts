@@ -26,6 +26,7 @@ import type {
   PullMode,
   Refs,
   Status,
+  BisectState,
   Worktree
 } from '../../shared/types'
 import { GcFail, invalid } from '../errors'
@@ -632,13 +633,92 @@ export class RepoOps {
   }
 
   async status(): Promise<Status> {
-    const [out, op] = await Promise.all([
+    const [out, op, bisect] = await Promise.all([
       this.git(['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all']),
-      this.opState()
+      this.opState(),
+      this.bisectState()
     ])
     const s = parseStatus(out)
     const lfs = await this.lfsPaths(s.changes.map((c) => c.path))
-    return { ...s, changes: lfs.size ? s.changes.map((c) => (lfs.has(c.path) ? { ...c, lfs: true } : c)) : s.changes, op }
+    return { ...s, changes: lfs.size ? s.changes.map((c) => (lfs.has(c.path) ? { ...c, lfs: true } : c)) : s.changes, op, bisect }
+  }
+
+  // ---------- bisect ----------
+
+  /** git bisect's own state (its files and refs/bisect), so one started in a terminal shows too. Null when none. */
+  async bisectState(): Promise<BisectState | null> {
+    const dir = await this.absGitDir()
+    const read = (f: string): string | null => {
+      try {
+        return readFileSync(join(dir, f), 'utf8').trim()
+      } catch {
+        return null
+      }
+    }
+    const start = read('BISECT_START')
+    if (start === null) return null
+    const [badTerm = 'bad', goodTerm = 'good'] = (read('BISECT_TERMS') ?? '').split('\n').map((l) => l.trim()).filter(Boolean)
+    const refs = ((await this.tryGit(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/bisect/'])) ?? '').split('\n').filter(Boolean)
+    let bad: string | null = null
+    const good: string[] = []
+    const skipped: string[] = []
+    for (const line of refs) {
+      const [name, sha] = line.split(' ')
+      if (name === `refs/bisect/${badTerm}`) bad = sha
+      else if (name.startsWith(`refs/bisect/${goodTerm}-`)) good.push(sha)
+      else if (name.startsWith('refs/bisect/skip-')) skipped.push(sha)
+    }
+    // git notes the answer at the end of its log.
+    const found = /^# first (?:bad|\S+) commit: \[([0-9a-f]{40})\]/m.exec((await this.tryGit(['bisect', 'log'])) ?? '')
+    let candidates: string[] | null = null
+    let steps: number | null = null
+    let left: number | null = null
+    if (bad && good.length) {
+      const range = [bad, '--not', ...good]
+      candidates = ((await this.tryGit(['rev-list', '--max-count=5000', ...range])) ?? '').split('\n').filter(Boolean)
+      const vars = (await this.tryGit(['rev-list', '--bisect-vars', ...range])) ?? ''
+      const num = (k: string): number | null => {
+        const m = new RegExp(`^${k}=(\\d+)`, 'm').exec(vars)
+        return m ? Number(m[1]) : null
+      }
+      steps = num('bisect_steps')
+      left = num('bisect_all')
+    }
+    return { start: start.replace(/^refs\/heads\//, ''), bad, good, skipped, candidates, steps, left, firstBad: found ? found[1] : null, terms: { good: goodTerm, bad: badTerm } }
+  }
+
+  /** Starts a bisect between a bad commit and a good one; git checks out the first one to test. */
+  async bisectStart(bad: string, good: string): Promise<void> {
+    this.safeRev(bad)
+    this.safeRev(good)
+    if (await this.bisectState()) throw invalid('A bisect is already going on. Finish it, or stop it first.')
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes before bisecting: each step checks out another commit.')
+    await this.mut(['bisect', 'start', bad, good, '--'], { timeoutMs: 30 * 60_000 })
+  }
+
+  /** Marks a commit (the one being tested, by default) as good, bad, or skipped; git checks out the next one. */
+  async bisectMark(verdict: 'good' | 'bad' | 'skip', sha?: string): Promise<void> {
+    const state = await this.bisectState()
+    if (!state) throw invalid('There’s no bisect going on.')
+    if (sha) this.safeRev(sha)
+    const word = verdict === 'skip' ? 'skip' : state.terms[verdict]
+    await this.mut(['bisect', word, ...(sha ? [sha] : [])], { timeoutMs: 30 * 60_000 })
+  }
+
+  /**
+   * git bisect run: git tests each step with `command` (run by git's shell, in the repository's folder) until it finds
+   * the first bad commit. Exit 0 is good, 125 skip, anything else bad. Cancelling leaves the bisect where it got to.
+   */
+  async bisectRun(command: string, opId: string, onOutput: (line: string) => void): Promise<void> {
+    if (!(await this.bisectState())) throw invalid('Start a bisect first.')
+    if (!command.trim()) throw invalid('Give a command to test each commit with.')
+    // bisect run takes a program and its arguments: the command line goes through git's shell, as typed.
+    await this.mut(['bisect', 'run', 'sh', '-c', command], { opId, onOutput, timeoutMs: 12 * 60 * 60_000 })
+  }
+
+  /** Ends the bisect and checks out what was checked out when it started. */
+  async bisectReset(): Promise<void> {
+    await this.mut(['bisect', 'reset'], { timeoutMs: 30 * 60_000 })
   }
 
   /** Full messages of several commits, in the order given, with one git call. */

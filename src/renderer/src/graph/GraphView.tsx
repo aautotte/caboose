@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragE
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Focus, FolderPlus, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Tag, Trash2, Undo, Upload } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
-import { Avatar, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
+import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
 import { fullDate, relativeTime, shortSha } from '@/lib/format'
 import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
@@ -241,6 +241,18 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const hitSet = useMemo(() => (hits ? new Set(hits) : null), [hits])
   const bySha = useMemo(() => new Map(rows.map((r) => [r.sha, r])), [rows])
   const lit = useMemo(() => ancestry(hoverSha, bySha), [hoverSha, bySha])
+  // A bisect: each commit's verdict so far, and the ones still in question (the others are dimmed).
+  const bisect = status?.bisect ?? null
+  const bisectMarks = useMemo(() => {
+    if (!bisect) return null
+    const m = new Map<string, 'good' | 'bad' | 'skip' | 'first'>()
+    for (const s of bisect.good) m.set(s, 'good')
+    for (const s of bisect.skipped) m.set(s, 'skip')
+    if (bisect.bad) m.set(bisect.bad, 'bad')
+    if (bisect.firstBad) m.set(bisect.firstBad, 'first')
+    return m
+  }, [bisect])
+  const inQuestion = useMemo(() => (bisect?.candidates && !bisect.firstBad ? new Set(bisect.candidates) : null), [bisect])
   const order = useMemo(() => rows.filter((r) => r.kind === 'commit').map((r) => r.sha), [rows])
   const multiSet = useMemo(() => new Set(multi), [multi])
   // The current branch's own line, newest first: what move up / down and squash work on.
@@ -408,14 +420,16 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
             const lay = layout?.rows[it.index]
             const rowRefs = byRef.get(row.sha) ?? []
             const isSel = multi.length ? multiSet.has(row.sha) : row.sha === selected
-            const dimmed = (hitSet && row.kind === 'commit' && !hitSet.has(row.sha)) || (lit && !lit.has(row.sha))
+            const mark = bisectMarks?.get(row.sha)
+            const dimmed =
+              (hitSet && row.kind === 'commit' && !hitSet.has(row.sha)) || (lit && !lit.has(row.sha)) || (inQuestion && row.kind === 'commit' && !mark && !inQuestion.has(row.sha))
             const isHead = row.kind === 'commit' && row.sha === refs?.head.sha
             const label =
               row.kind === 'wip'
                 ? `Uncommitted changes, ${status?.changes.length ?? 0} files`
                 : row.kind === 'stash'
                   ? `Stash: ${row.summary}`
-                  : `${row.summary}, by ${row.authorName}, ${relativeTime(row.authorTime)}${rowRefs.length ? `, on ${rowRefs.map((r) => r.name).join(' and ')}` : ''}`
+                  : `${row.summary}, by ${row.authorName}, ${relativeTime(row.authorTime)}${rowRefs.length ? `, on ${rowRefs.map((r) => r.name).join(' and ')}` : ''}${mark && bisect ? `, bisect: ${mark === 'first' ? `first ${bisect.terms.bad}` : mark === 'skip' ? 'skipped' : bisect.terms[mark]}` : ''}`
             return (
               <ContextMenu key={row.sha} items={multi.length && multiSet.has(row.sha) ? multiMenu(repoId, multi, line, headBranch) : rowMenu(repoId, row, rowRefs, headBranch, refs?.head.sha ?? null, line, bySha)}>
                 <div
@@ -478,7 +492,14 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
                         <span className="truncate">{row.summary}</span>
                       </span>
                     ) : (
-                      <span className={cn('truncate text-text', isHead && 'font-medium')}>{row.summary}</span>
+                      <>
+                        {mark && bisect ? (
+                          <Badge tone={mark === 'good' ? 'success' : mark === 'skip' ? 'neutral' : 'danger'}>
+                            {mark === 'first' ? `first ${bisect.terms.bad}` : mark === 'skip' ? 'skipped' : bisect.terms[mark]}
+                          </Badge>
+                        ) : null}
+                        <span className={cn('truncate text-text', isHead && 'font-medium')}>{row.summary}</span>
+                      </>
                     )}
                   </div>
                   {cols.shown.map((c) =>
@@ -671,6 +692,21 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: 'Move commit up', icon: <ArrowUp size={14} />, disabled: !newer || mergeAfter || isMerge(row.sha), onSelect: () => act.moveCommit(repoId, row.sha, 'up') },
       // Moving below the first commit isn't possible: the older neighbour needs a parent too.
       { type: 'item', label: 'Move commit down', icon: <ArrowDown size={14} />, disabled: !older || mergeAfter || isMerge(row.sha) || isMerge(older), onSelect: () => act.moveCommit(repoId, row.sha, 'down') },
+      { type: 'separator' }
+    )
+  }
+  const bisect = useApp.getState().repos[repoId]?.status?.bisect
+  if (bisect && !bisect.firstBad) {
+    entries.push(
+      { type: 'item', label: `Bisect: mark as ${bisect.terms.good}`, onSelect: () => void act.bisectMark(repoId, 'good', row.sha) },
+      { type: 'item', label: `Bisect: mark as ${bisect.terms.bad}`, onSelect: () => void act.bisectMark(repoId, 'bad', row.sha) },
+      { type: 'item', label: 'Bisect: skip it', onSelect: () => void act.bisectMark(repoId, 'skip', row.sha) },
+      { type: 'separator' }
+    )
+  } else if (!bisect) {
+    entries.push(
+      { type: 'item', label: 'Bisect: this commit is bad…', onSelect: () => act.openDialog({ kind: 'bisect', repoId, bad: row.sha }) },
+      { type: 'item', label: 'Bisect: this commit is good…', onSelect: () => act.openDialog({ kind: 'bisect', repoId, good: row.sha }) },
       { type: 'separator' }
     )
   }

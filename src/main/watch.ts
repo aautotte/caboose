@@ -45,6 +45,8 @@ function classify(file: string): What | null {
     if (rest === 'index') return 'index'
     if (rest === 'HEAD' || rest.startsWith('refs') || rest === 'packed-refs' || /^(MERGE|CHERRY_PICK|REVERT|ORIG)_HEAD$/.test(rest) || rest.startsWith('rebase-')) return 'refs'
     if (rest === 'FETCH_HEAD') return 'refs'
+    // A bisect started, marked or ended (in a terminal too).
+    if (rest.startsWith('BISECT_')) return 'refs'
     // Another worktree switched branches: which branches are checked out where has changed.
     if (/^worktrees\/[^/]+\/HEAD$/.test(rest)) return 'refs'
     return null

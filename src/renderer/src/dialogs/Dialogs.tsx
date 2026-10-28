@@ -6,7 +6,7 @@ import { call } from '@/lib/api'
 import { CloneDialog, FolderField, InitDialog } from '@/home/RepoDialogs'
 import { ShortcutSheet } from '@/screens/Stubs'
 import { ProfilesDialog } from './ProfilesDialog'
-import { AddRemoteDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog } from './MoreDialogs'
+import { AddRemoteDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
 export function DialogHost(): React.JSX.Element | null {
@@ -41,6 +41,10 @@ export function DialogHost(): React.JSX.Element | null {
       return <GroupNameDialog d={d} />
     case 'squash':
       return <SquashDialog d={d} />
+    case 'bisect':
+      return <BisectDialog d={d} />
+    case 'bisectRun':
+      return <BisectRunDialog d={d} />
     case 'profiles':
       return <ProfilesDialog d={d} />
     case 'addWorktree':

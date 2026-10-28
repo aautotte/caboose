@@ -71,6 +71,12 @@ export function CommandPalette(): React.JSX.Element | null {
         { id: 'new-worktree', group: 'Branch', label: 'New worktree…', run: () => act.openDialog({ kind: 'addWorktree', repoId: id }) },
         { id: 'log', group: 'View', label: 'Git activity log', run: () => act.openLog() },
         {
+          id: 'bisect',
+          group: 'Repository',
+          label: 'Find the commit that broke something (bisect)…',
+          run: () => act.openDialog({ kind: 'bisect', repoId: id })
+        },
+        {
           id: 'focus',
           group: 'View',
           label: 'Focus on this branch (or show all)',
