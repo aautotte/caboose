@@ -51,6 +51,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     const ev: ProgressEvent = { opId: id, phase, percent }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('op:progress', ev)
   }
+  const output = (id: string) => (line: string) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('op:output', { opId: id, line })
+  }
 
   function handle<C extends Channel>(channel: C, schema: ZodType<Api[C]['in']>, fn: (input: Api[C]['in'], e: IpcMainInvokeEvent) => Promise<Api[C]['out']> | Api[C]['out']): void {
     ipcMain.handle(channel, async (e, raw): Promise<Result<Api[C]['out']>> => {
@@ -294,6 +297,14 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     else await ops(repoId).createBranch(name, at, false)
     return null
   })
+  handle('bisect.start', z.object({ ...R, bad: ref, good: ref }), ({ repoId, bad, good }) => exclusive(repoId, async () => (await ops(repoId).bisectStart(bad, good), null)))
+  handle('bisect.mark', z.object({ ...R, verdict: z.enum(['good', 'bad', 'skip']), sha: ref.optional() }), ({ repoId, verdict, sha }) =>
+    exclusive(repoId, async () => (await ops(repoId).bisectMark(verdict, sha), null))
+  )
+  handle('bisect.reset', z.object(R), ({ repoId }) => exclusive(repoId, async () => (await ops(repoId).bisectReset(), null)))
+  handle('bisect.run', z.object({ ...R, command: z.string().min(1).max(4000), opId }), ({ repoId, command, opId: id }) =>
+    exclusive(repoId, async () => (await ops(repoId).bisectRun(command, id, output(id)), null))
+  )
   handle('branch.checkout', z.object({ ...R, ref, opId: opId.optional() }), async ({ repoId, ref, opId: id }) => {
     await undoable(repoId, 'checkout', `Switch to ${ref}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
     return null

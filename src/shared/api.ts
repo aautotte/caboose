@@ -97,6 +97,12 @@ export interface Api {
   'worktree.discard': { in: R & { paths: string[] | 'all' }; out: null }
 
   'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: null }
+  /** Bisect: start between a bad and a good commit; mark the one being tested (or another); stop. */
+  'bisect.start': { in: R & { bad: string; good: string }; out: null }
+  'bisect.mark': { in: R & { verdict: 'good' | 'bad' | 'skip'; sha?: string }; out: null }
+  'bisect.reset': { in: R; out: null }
+  /** git bisect run with a command; its output comes as op:output events. */
+  'bisect.run': { in: R & { command: string; opId: string }; out: null }
   'branch.checkout': { in: R & { ref: string; opId?: string }; out: null }
   'branch.rename': { in: R & { name: string; newName: string }; out: null }
   'branch.delete': { in: R & { name: string; force: boolean }; out: null }
@@ -218,6 +224,8 @@ export type Channel = keyof Api
 export interface Events {
   'repo:changed': RepoChangedEvent
   'op:progress': ProgressEvent
+  /** A line of output from a long command (bisect run). */
+  'op:output': { opId: string; line: string }
   'auth:prompt': AuthPromptEvent
   'auth:closed': { promptId: string }
 }

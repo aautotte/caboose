@@ -107,6 +107,26 @@ export interface Status {
   behind: number
   changes: Change[]
   op: OperationState
+  /** A git bisect in progress (started here or in a terminal), or null. */
+  bisect: BisectState | null
+}
+
+/** What git bisect knows so far. The commit being tested is HEAD. */
+export interface BisectState {
+  /** Where Stop goes back to: the branch (or commit) checked out when it started. */
+  start: string
+  bad: string | null
+  good: string[]
+  skipped: string[]
+  /** Commits still in question, newest first (up to 5000), once there's a good and a bad one. */
+  candidates: string[] | null
+  /** Roughly how many more steps, and how many commits are left. */
+  steps: number | null
+  left: number | null
+  /** Found: the first bad commit. */
+  firstBad: string | null
+  /** The words for the two sides (good / bad, or e.g. old / new). */
+  terms: { good: string; bad: string }
 }
 
 export interface Person {

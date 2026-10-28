@@ -15,6 +15,8 @@ export interface RunOptions {
   timeoutMs?: number
   /** Called with git's progress lines (stderr) for clone / fetch / push. */
   onProgress?: (phase: string, percent?: number) => void
+  /** Called with each line git (or what it runs, e.g. bisect run's command) prints, on stdout or stderr. */
+  onOutput?: (line: string) => void
   /** Exit codes that are not failures (e.g. merge returns 1 on conflicts). */
   okCodes?: number[]
   extraEnv?: Record<string, string>
@@ -69,7 +71,7 @@ export class GitRunner extends EventEmitter {
   }
 
   cancel(opId: string): void {
-    for (const child of this.children.get(opId) ?? []) child.kill()
+    for (const child of this.children.get(opId) ?? []) killTree(child)
   }
 
   private async withRetry(opts: RunOptions): Promise<RunResult> {
@@ -129,12 +131,24 @@ export class GitRunner extends EventEmitter {
       let cancelled = false
       const timer = setTimeout(() => {
         cancelled = true
-        child.kill()
+        killTree(child)
       }, opts.timeoutMs ?? 120_000)
 
-      child.stdout.on('data', (d: Buffer) => out.push(d))
+      // Whole lines for onOutput; a chunk can end halfway through one.
+      const partial = { out: '', err: '' }
+      const lines = (which: 'out' | 'err', s: string): void => {
+        if (!opts.onOutput) return
+        const parts = (partial[which] + s).split(/\r?\n/)
+        partial[which] = parts.pop() ?? ''
+        for (const l of parts) if (l.trim()) opts.onOutput(l)
+      }
+      child.stdout.on('data', (d: Buffer) => {
+        out.push(d)
+        lines('out', d.toString('utf8'))
+      })
       child.stderr.on('data', (d: Buffer) => {
         const s = d.toString('utf8')
+        lines('err', s)
         err += s
         if (err.length > 4 * MAX_TAIL) err = err.slice(-2 * MAX_TAIL)
         if (opts.onProgress) {
@@ -150,13 +164,16 @@ export class GitRunner extends EventEmitter {
       if (opts.stdin !== undefined) child.stdin.end(opts.stdin)
       else child.stdin.end()
 
+      let done = false
       const finish = (code: number | null, spawnError?: Error): void => {
+        if (done) return
+        done = true
         clearTimeout(timer)
         set.delete(child)
         if (set.size === 0) this.children.delete(opId)
         if (tracksBusy) this.setBusy(opts.repoId!, -1)
         const stdout = Buffer.concat(out).toString('utf8')
-        const killed = code === null && !spawnError
+        const killed = !spawnError && (code === null || stopped.has(child))
         const ok = !spawnError && code !== null && (code === 0 || (opts.okCodes ?? []).includes(code))
         const status = killed ? 'cancelled' : ok ? 'ok' : 'error'
         this.db
@@ -174,6 +191,13 @@ export class GitRunner extends EventEmitter {
       }
       child.on('error', (e) => finish(null, e))
       child.on('close', (code) => finish(code))
+      // A stopped run's command can outlive git (see killTree) and hold the pipes open: don't wait for it.
+      child.on('exit', (code) => {
+        if (!stopped.has(child)) return
+        child.stdout.destroy()
+        child.stderr.destroy()
+        finish(code)
+      })
     })
   }
 
@@ -182,6 +206,25 @@ export class GitRunner extends EventEmitter {
     this.busyCount.set(repoId, n)
     if (n === 0 || (n === 1 && delta > 0)) this.emit('busy', repoId, n > 0)
   }
+}
+
+/** Children we stopped: taskkill /F ends them with exit code 1, not a signal. */
+const stopped = new WeakSet<ChildProcess>()
+
+/**
+ * On Windows, kill() ends only git itself: what it started (Git for Windows' real git.exe behind the wrapper,
+ * bisect run's command) keeps running. taskkill /T ends the tree, except what MSYS started through exec,
+ * whose Windows parent is gone: that runs on until it ends by itself.
+ */
+function killTree(child: ChildProcess): void {
+  stopped.add(child)
+  if (process.platform !== 'win32' || child.pid === undefined) {
+    child.kill()
+    return
+  }
+  spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () =>
+    child.kill()
+  )
 }
 
 /** Turns git's stderr into a short sentence for the toast, keeping the raw text as detail. */

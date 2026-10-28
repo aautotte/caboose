@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
-const EVENTS = new Set(['repo:changed', 'op:progress', 'auth:prompt', 'auth:closed'])
+const EVENTS = new Set(['repo:changed', 'op:progress', 'op:output', 'auth:prompt', 'auth:closed'])
 
 // The only bridge between the sandboxed renderer and the main process. Channels are checked in main.
 contextBridge.exposeInMainWorld('gc', {

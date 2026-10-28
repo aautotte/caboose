@@ -394,6 +394,92 @@ export function AuthDialog(): React.JSX.Element | null {
 }
 
 /** One message for the commits being squashed; the oldest commit's author and date are kept. */
+const RUN_HELP = 'Run in the repository’s folder for each commit git checks out: exit 0 means good, 125 skip it, anything else bad. Leave it empty to answer yourself.'
+
+/** Test each step of the bisect going on with a command (git bisect run). */
+export function BisectRunDialog({ d }: { d: Extract<D, { kind: 'bisectRun' }> }): React.JSX.Element {
+  const [command, setCommand] = useState(act.lastBisectCommand(d.repoId))
+  const submit = (): void => {
+    if (!command.trim()) return
+    close()
+    void act.bisectRun(d.repoId, command.trim())
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title="Test each step with a command"
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!command.trim()} onClick={submit}>
+            Run
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={submit}>
+        <p className="text-base text-muted">Git tests each commit with it, one after the other, until it finds the first bad one. You can cancel it; the answers so far are kept.</p>
+        <Field label="Command" help={RUN_HELP}>
+          {(p) => <TextInput {...p} autoFocus value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npm test" />}
+        </Field>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+/** Start a bisect: a commit that has the problem, and an older one that doesn't (a tag, a branch, a SHA). */
+export function BisectDialog({ d }: { d: Extract<D, { kind: 'bisect' }> }): React.JSX.Element {
+  const refs = useApp((s) => s.repos[d.repoId]?.refs)
+  const [bad, setBad] = useState(d.bad ?? refs?.head.branch ?? 'HEAD')
+  const [good, setGood] = useState(d.good ?? '')
+  const [command, setCommand] = useState('')
+  const [busy, setBusy] = useState(false)
+  const names = (refs?.refs ?? []).filter((r) => r.kind === 'tag' || r.kind === 'local').map((r) => r.short)
+  const submit = async (): Promise<void> => {
+    if (!bad.trim() || !good.trim() || busy) return
+    setBusy(true)
+    const ok = await act.bisectStart(d.repoId, bad.trim(), good.trim(), command)
+    setBusy(false)
+    if (ok) close()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title="Find the commit that broke something"
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!bad.trim() || !good.trim()} loading={busy} onClick={() => void submit()}>
+            Start bisect
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <p className="text-base text-muted">
+          Git checks out a commit halfway between the two; you try it and say good or bad, and it halves the rest until one commit is left: the first bad one. Stop puts you back where you are.
+        </p>
+        <datalist id="bisect-refs">
+          {names.map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+        <Field label="Bad: has the problem" help="A branch, tag or SHA. Usually where you are now.">
+          {(p) => <TextInput {...p} list="bisect-refs" value={bad} onChange={(e) => setBad(e.target.value)} />}
+        </Field>
+        <Field label="Good: before the problem" help="An older commit that worked, such as the last release’s tag.">
+          {(p) => <TextInput {...p} autoFocus={!!d.bad || !d.good} list="bisect-refs" value={good} onChange={(e) => setGood(e.target.value)} placeholder="v1.2.0" />}
+        </Field>
+        <Field label="Test each step with a command (optional)" help={RUN_HELP}>
+          {(p) => <TextInput {...p} value={command} onChange={(e) => setCommand(e.target.value)} placeholder={act.lastBisectCommand(d.repoId) || 'npm test'} />}
+        </Field>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
 export function SquashDialog({ d }: { d: Extract<D, { kind: 'squash' }> }): React.JSX.Element {
   const [first, ...rest] = d.message.split('\n')
   const [summary, setSummary] = useState(first)

@@ -61,6 +61,8 @@ export interface RepoState {
   subOp: { label: string; opId: string; phase?: string; percent?: number } | null
   /** Every worktree of the repository, this one included; null until read. */
   worktrees: Worktree[] | null
+  /** git bisect run going on: the command, and the last lines it printed. */
+  bisectRun: { opId: string; command: string; lines: string[] } | null
 }
 
 // Mirrors --gc-col-*-w in the tokens: the starting widths before the user drags a column.
@@ -86,6 +88,10 @@ export type Dialog =
   | { kind: 'renameStash'; repoId: string; sha: string; message: string }
   | { kind: 'groupName'; mode: 'create' | 'rename'; name: string; groupId?: string; repoId?: string }
   | { kind: 'squash'; repoId: string; shas: string[]; message: string }
+  /** Start a bisect; either side can come filled in (from a commit's menu). */
+  | { kind: 'bisect'; repoId: string; bad?: string; good?: string }
+  /** Test each step of the bisect going on with a command. */
+  | { kind: 'bisectRun'; repoId: string }
   | { kind: 'profiles'; edit?: string }
   /** A new worktree: of `branch` (local, free), as a new branch tracking `remote` (a remote branch's short name), or from the commit `at`. */
   | { kind: 'addWorktree'; repoId: string; branch?: string; remote?: string; at?: string; atLabel?: string }
@@ -196,7 +202,8 @@ export const emptyRepo = (): RepoState => ({
   lfsDismissed: false,
   submodules: null,
   subOp: null,
-  worktrees: null
+  worktrees: null,
+  bisectRun: null
 })
 
 export interface AppState {

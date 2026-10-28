@@ -54,6 +54,11 @@ export async function boot(): Promise<void> {
     if (e.what.includes('refs')) void loadRepo(e.repoId, { keepSelection: true })
     else void loadStatus(e.repoId)
   })
+  on('op:output', (p) => {
+    for (const [id, r] of Object.entries(useApp.getState().repos)) {
+      if (r.bisectRun?.opId === p.opId) patchRepo(id, { bisectRun: { ...r.bisectRun, lines: [...r.bisectRun.lines, p.line].slice(-300) } })
+    }
+  })
   on('op:progress', (p) => {
     const s = useApp.getState()
     for (const [id, r] of Object.entries(s.repos)) {
@@ -1481,6 +1486,93 @@ export function deleteRemoteBranches(repoId: string, shorts: string[]): void {
       await loadRepo(repoId, { keepSelection: true })
     }
   })
+}
+
+// ---------- bisect ----------
+
+const BISECT_CMD_KEY = (repoId: string): string => `caboose.bisectCommand.${repoId}`
+
+/** The command last used to test a bisect here (a convenience, so it lives in this browser's storage). */
+export function lastBisectCommand(repoId: string): string {
+  try {
+    return localStorage.getItem(BISECT_CMD_KEY(repoId)) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+/** git bisect run: git tests each step with `command` until it finds the first bad commit. Cancel stops it. */
+export async function bisectRun(repoId: string, command: string): Promise<boolean> {
+  try {
+    localStorage.setItem(BISECT_CMD_KEY(repoId), command)
+  } catch {
+    // not essential
+  }
+  const opId = newOpId()
+  patchRepo(repoId, { bisectRun: { opId, command, lines: [] } })
+  const ok = await runBisect(repoId, () => call('bisect.run', { repoId, command, opId }), 'The bisect run stopped')
+  patchRepo(repoId, { bisectRun: null })
+  return ok
+}
+
+export function cancelBisectRun(repoId: string): void {
+  const run = useApp.getState().repos[repoId]?.bisectRun
+  if (run) void call('op.cancel', { opId: run.opId })
+}
+
+/**
+ * Starts a bisect, then, with a `command`, lets git test each step with it. Each step checks out another commit, so
+ * uncommitted changes are stashed first (asked).
+ */
+export async function bisectStart(repoId: string, bad: string, good: string, command?: string): Promise<boolean> {
+  const started = await bisectBegin(repoId, bad, good)
+  if (started && command?.trim()) void bisectRun(repoId, command.trim())
+  return started
+}
+
+async function bisectBegin(repoId: string, bad: string, good: string): Promise<boolean> {
+  // Asked fresh: the window can be a moment behind an edit made elsewhere.
+  const status = await call('status.get', { repoId }).catch(() => useApp.getState().repos[repoId]?.status ?? null)
+  const tracked = (status?.changes ?? []).some((c) => c.worktree !== '?' || c.index !== '?')
+  if (tracked) {
+    return new Promise((resolve) =>
+      confirm({
+        title: 'Stash your changes first?',
+        body: 'Each step of a bisect checks out another commit. Your uncommitted changes go into a stash (“Before bisect”), and you can pop it afterwards.',
+        confirmLabel: 'Stash and start',
+        danger: false,
+        undoable: null,
+        onConfirm: async () => {
+          const ok = await attempt(() => call('stash.save', { repoId, message: 'Before bisect', stagedOnly: false, includeUntracked: false }), 'Couldn’t stash')
+          resolve(ok !== undefined ? await runBisect(repoId, () => call('bisect.start', { repoId, bad, good }), 'Couldn’t start the bisect') : false)
+        }
+      })
+    )
+  }
+  return runBisect(repoId, () => call('bisect.start', { repoId, bad, good }), 'Couldn’t start the bisect')
+}
+
+async function runBisect(repoId: string, fn: () => Promise<unknown>, failTitle: string): Promise<boolean> {
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: 'Bisecting' } }))
+  const ok = await attempt(fn, failTitle)
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined } }))
+  await loadRepo(repoId, { keepSelection: true })
+  const b = useApp.getState().repos[repoId]?.status?.bisect
+  // The commit to test (or the answer) is where the graph shows it.
+  const at = b?.firstBad ?? useApp.getState().repos[repoId]?.refs?.head.sha ?? null
+  if (b && at) select(repoId, at)
+  return ok !== undefined
+}
+
+/** Marks the commit being tested (or `sha`) as good, bad or skipped; git checks out the next one. */
+export function bisectMark(repoId: string, verdict: 'good' | 'bad' | 'skip', sha?: string): Promise<boolean> {
+  return runBisect(repoId, () => call('bisect.mark', { repoId, verdict, sha }), 'Couldn’t mark the commit')
+}
+
+/** Ends the bisect: back to what was checked out when it started. */
+export async function bisectStop(repoId: string): Promise<void> {
+  const start = useApp.getState().repos[repoId]?.status?.bisect?.start
+  if (await runBisect(repoId, () => call('bisect.reset', { repoId }), 'Couldn’t stop the bisect')) toast({ tone: 'success', title: start ? `Back to ${start}` : 'Bisect stopped' })
 }
 
 export function stashDrop(repoId: string, sha: string, label: string): void {
