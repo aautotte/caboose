@@ -133,6 +133,8 @@ export interface Prefs {
   diffIgnoreWs: boolean
   /** List files Git doesn't track yet among the unstaged changes. */
   showUntracked: boolean
+  /** Changed-file lists show their folders as a tree instead of one flat list. */
+  fileTree: boolean
   /** The side panels shrunk to a thin rail (Ctrl+J, Ctrl+K). */
   leftCollapsed: boolean
   detailCollapsed: boolean
@@ -160,6 +162,7 @@ export const defaultPrefs: Prefs = {
   mergeShowBase: true,
   diffIgnoreWs: false,
   showUntracked: true,
+  fileTree: false,
   leftCollapsed: false,
   detailCollapsed: false
 }
