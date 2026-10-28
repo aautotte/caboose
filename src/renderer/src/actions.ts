@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
@@ -151,6 +151,22 @@ const next = (m: Map<string, number>, repoId: string): number => {
 }
 const isLatest = (m: Map<string, number>, repoId: string, n: number): boolean => m.get(repoId) === n
 
+/**
+ * The open diff follows its file from one list to the other: once all of it is staged, it shows from the staged side
+ * (and back when unstaged), however that happened: a button, a key, the last lines staged, or git add in a terminal.
+ * A file with changes on both sides stays where it is.
+ */
+function followOpenFile(repoId: string, status: Status): void {
+  const c = useApp.getState().repos[repoId]?.center
+  if (c?.kind !== 'diff' || (c.source.kind !== 'worktree' && c.source.kind !== 'index')) return
+  const ch = status.changes.find((x) => x.path === c.path)
+  if (!ch || ch.conflicted) return
+  const staged = ch.index !== '.' && ch.index !== '?'
+  const unstaged = ch.worktree !== '.'
+  if (c.source.kind === 'worktree' && staged && !unstaged) setCenter(repoId, { ...c, source: { kind: 'index' } })
+  else if (c.source.kind === 'index' && unstaged && !staged) setCenter(repoId, { ...c, source: { kind: 'worktree' } })
+}
+
 export async function loadStatus(repoId: string): Promise<void> {
   const seq = next(statusSeq, repoId)
   try {
@@ -165,6 +181,7 @@ export async function loadStatus(repoId: string): Promise<void> {
       if (!isLatest(statusSeq, repoId, seq) || useApp.getState().repos[repoId]?.commits !== commits) return
       patchRepo(repoId, { status, undo, layout })
     } else patchRepo(repoId, { status, undo })
+    followOpenFile(repoId, status)
     // A submodule's own commit or changes show up in the status; its row in the list follows.
     if (r?.submodules?.list.length) void loadSubmodules(repoId)
   } catch {
@@ -450,6 +467,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       multi: opts.keepSelection && r.multi.every((m) => page.commits.some((c) => c.sha === m)) ? r.multi : [],
       selected: opts.keepSelection && r.selected && (r.selected === 'wip' || page.commits.some((c) => c.sha === r.selected)) ? r.selected : r.selected ?? (status.changes.length ? 'wip' : null)
     }))
+    if (freshStatus) followOpenFile(repoId, status)
     if (headBefore && refs.head.sha && headBefore !== refs.head.sha) void followSubmodules(repoId, headBefore, refs.head.sha)
   } catch (err) {
     if (!isLatest(repoSeq, repoId, seq)) return
