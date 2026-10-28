@@ -49,6 +49,8 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
   const op = status?.op
   const paused = op && op.kind !== 'none'
   const openPath = center.kind === 'diff' || center.kind === 'merge' ? center.path : null
+  // Which list the open file is shown from: only that one highlights it (a file can be in both).
+  const openSide = center.kind === 'merge' ? 'worktree' : center.kind === 'diff' ? center.source.kind : null
 
   // Amend fills the fields with the last commit's message, and puts the draft back when unticked.
   const toggleAmend = async (v: boolean): Promise<void> => {
@@ -244,7 +246,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
           <FileList
             title={conflicted.length ? 'Not staged (conflicts first)' : 'Not staged'}
             files={unstaged}
-            selected={openPath}
+            selected={openSide === 'worktree' ? openPath : null}
             onOpen={(f) => open(f, 'worktree')}
             // With untracked files hidden, Stage all stages only what's listed.
             bulk={{ label: 'Stage all', onClick: () => void act.stage(repoId, hiddenUntracked ? unstaged.map((f) => f.path) : 'all') }}
@@ -277,7 +279,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
           <FileList
             title="Staged"
             files={staged}
-            selected={openPath}
+            selected={openSide === 'index' ? openPath : null}
             onOpen={(f) => open(f, 'index')}
             bulk={{ label: 'Unstage all', onClick: () => void act.unstage(repoId, 'all') }}
             rowAction={{ label: 'Unstage', onClick: (f) => void act.unstage(repoId, [f.path]) }}
