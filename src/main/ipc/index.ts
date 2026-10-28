@@ -294,8 +294,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     else await ops(repoId).createBranch(name, at, false)
     return null
   })
-  handle('branch.checkout', z.object({ ...R, ref }), async ({ repoId, ref }) => {
-    await undoable(repoId, 'checkout', `Switch to ${ref}`, () => ops(repoId).checkout(ref))
+  handle('branch.checkout', z.object({ ...R, ref, opId: opId.optional() }), async ({ repoId, ref, opId: id }) => {
+    await undoable(repoId, 'checkout', `Switch to ${ref}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
     return null
   })
   handle('branch.rename', z.object({ ...R, name: ref, newName: z.string().min(1).max(255) }), ({ repoId, name, newName }) => exclusive(repoId, async () => (await ops(repoId).renameBranch(name, newName), null)))
