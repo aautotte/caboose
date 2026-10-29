@@ -16,6 +16,8 @@ const DEBOUNCE_MS = 300
  * GC_WATCH=git does the same on any system (for the tests).
  */
 const GIT_ONLY = process.platform === 'linux' || process.env.GC_WATCH === 'git'
+/** For the tests: no watching at all, to check what refreshes without it (window focus, fetch). */
+const OFF = process.env.GC_WATCH === 'off'
 
 /** For a .git file ("gitdir: <path>"): that git folder, and the one it shares refs with (its "commondir"), if another. */
 export function linkedGitDirs(worktree: string): { gitDir: string; commonDir: string | null } | null {
@@ -88,6 +90,7 @@ export class Watcher {
       if (!this.runner.isBusy(repoId)) this.schedule(repoId)
     }
     const list: FSWatcher[] = []
+    if (OFF) return
     if (GIT_ONLY) {
       this.startGitOnly(path, note, list)
       if (list.length) this.watchers.set(repoId, list)
@@ -95,7 +98,9 @@ export class Watcher {
     }
     try {
       const w = watch(path, { recursive: true }, (_event, file) => file && note(classify(String(file))))
-      w.on('error', () => this.stop(repoId))
+      // A watch can fail (on Windows, a folder it covers gets deleted by a checkout, say): watching stopped for good
+      // then, and nothing done outside the app showed. Start again, and refresh everything once.
+      w.on('error', () => this.restart(repoId, path))
       list.push(w)
       // A linked worktree (or a submodule) has a .git file pointing at its own git folder elsewhere: HEAD, index and
       // rebase state live there, and refs in the folder it shares with the main worktree.
@@ -169,6 +174,15 @@ export class Watcher {
     const worktrees = join(common, 'worktrees')
     watchDir(worktrees, () => note('refs'))
     for (const dir of subdirs(worktrees)) watchDir(dir, (file) => (file === 'HEAD' ? note('refs') : undefined))
+  }
+
+  private restart(repoId: string, path: string): void {
+    this.stop(repoId)
+    setTimeout(() => {
+      if (this.watchers.has(repoId)) return
+      this.start(repoId, path)
+      this.emit({ repoId, what: ['refs', 'index', 'worktree'] })
+    }, 1000)
   }
 
   stop(repoId: string): void {
