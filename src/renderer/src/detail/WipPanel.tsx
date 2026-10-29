@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Trash2, UserSearch } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Minus, Plus, Trash2, UserSearch } from 'lucide-react'
 import type { Change, EffectiveIdentity } from '../../../shared/types'
 import { Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -249,7 +249,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             selected={openSide === 'worktree' ? openPath : null}
             onOpen={(f) => open(f, 'worktree')}
             // With untracked files hidden, Stage all stages only what's listed.
-            bulk={{ label: 'Stage all', onClick: () => void act.stage(repoId, hiddenUntracked ? unstaged.map((f) => f.path) : 'all') }}
+            bulk={{ label: 'Stage all', icon: <Plus size={14} aria-hidden />, onClick: () => void act.stage(repoId, hiddenUntracked ? unstaged.map((f) => f.path) : 'all') }}
             tools={
               <Tooltip content={showUntracked ? 'Hide untracked files' : 'Show untracked files'}>
                 <IconButton label="Hide untracked files" size="sm" pressed={!showUntracked} onClick={() => setPrefs({ showUntracked: !showUntracked })}>
@@ -267,7 +267,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
                 </p>
               ) : null
             }
-            rowAction={{ label: 'Stage', onClick: (f) => (f.status === 'conflicted' ? open(f, 'worktree') : void act.stage(repoId, [f.path])) }}
+            rowAction={{ label: 'Stage', icon: <Plus size={12} aria-hidden />, onClick: (f) => (f.status === 'conflicted' ? open(f, 'worktree') : void act.stage(repoId, [f.path])) }}
             // Conflicted files are left for the merge tool: staging one would mark it resolved.
             dirAction={{
               label: 'Stage',
@@ -290,8 +290,8 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             files={staged}
             selected={openSide === 'index' ? openPath : null}
             onOpen={(f) => open(f, 'index')}
-            bulk={{ label: 'Unstage all', onClick: () => void act.unstage(repoId, 'all') }}
-            rowAction={{ label: 'Unstage', onClick: (f) => void act.unstage(repoId, [f.path]) }}
+            bulk={{ label: 'Unstage all', icon: <Minus size={14} aria-hidden />, onClick: () => void act.unstage(repoId, 'all') }}
+            rowAction={{ label: 'Unstage', icon: <Minus size={12} aria-hidden />, onClick: (f) => void act.unstage(repoId, [f.path]) }}
             dirAction={{ label: 'Unstage', onClick: (files) => void act.unstage(repoId, files.map((f) => f.path)) }}
             menu={(f, picked) => fileMenu(f, 'staged', picked)}
             dirMenu={(files) => manyMenu(files, 'staged')}

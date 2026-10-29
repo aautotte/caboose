@@ -59,8 +59,8 @@ export function FileList({
   files: FileItem[]
   selected?: string | null
   onOpen: (f: FileItem) => void
-  bulk?: { label: string; onClick: () => void; disabled?: boolean }
-  rowAction?: { label: string; onClick: (f: FileItem) => void }
+  bulk?: { label: string; onClick: () => void; disabled?: boolean; icon?: ReactNode }
+  rowAction?: { label: string; onClick: (f: FileItem) => void; icon?: ReactNode }
   /** The hover action on a folder row, for the files under it. */
   dirAction?: { label: string; onClick: (files: FileItem[]) => void }
   /** The menu for a row; `picked` is every picked file when the row is one of them, else just the row. */
@@ -199,7 +199,7 @@ export function FileList({
           </IconButton>
         </Tooltip>
         {bulk ? (
-          <Button size="sm" variant="ghost" onClick={bulk.onClick} disabled={bulk.disabled || files.length === 0}>
+          <Button size="sm" variant="secondary" icon={bulk.icon} onClick={bulk.onClick} disabled={bulk.disabled || files.length === 0}>
             {bulk.label}
           </Button>
         ) : null}
@@ -259,7 +259,7 @@ function Row({
   rowRef: (el: HTMLDivElement | null) => void
   onClick: (e: React.MouseEvent) => void
   onKeyDown: (e: React.KeyboardEvent) => void
-  rowAction?: { label: string; onClick: (f: FileItem) => void }
+  rowAction?: { label: string; onClick: (f: FileItem) => void; icon?: ReactNode }
   menu: MenuEntry[]
 }): ReactNode {
   const { dir, name } = splitPath(f.path)
@@ -296,7 +296,7 @@ function Row({
             LFS
           </span>
         ) : null}
-        {rowAction ? <HoverAction label={rowAction.label} onClick={() => rowAction.onClick(f)} /> : null}
+        {rowAction ? <HoverAction label={rowAction.label} icon={rowAction.icon} onClick={() => rowAction.onClick(f)} /> : null}
       </div>
     </ContextMenu>
   )
@@ -344,9 +344,10 @@ function DirRow({
   )
 }
 
-function HoverAction({ label, onClick }: { label: string; onClick: () => void }): ReactNode {
+function HoverAction({ label, icon, onClick }: { label: string; icon?: ReactNode; onClick: () => void }): ReactNode {
   return (
     // A list option can't contain a button, so this is a mouse shortcut. Keyboard: S / U on the row, or its menu.
+    // It looks like the button it is (accent outline, icon, filled on hover), on the hovered, focused or selected row.
     <span
       aria-hidden
       title={label}
@@ -354,8 +355,9 @@ function HoverAction({ label, onClick }: { label: string; onClick: () => void })
         e.stopPropagation()
         onClick()
       }}
-      className="inline-flex h-6 cursor-default items-center rounded-md border border-border bg-surface-raised px-2 text-sm text-text opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 hover:bg-row-hover"
+      className="inline-flex h-6 shrink-0 cursor-default items-center gap-1 rounded-md border border-accent/60 bg-surface-raised px-2 text-sm font-medium text-accent-text opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 group-aria-selected:opacity-100 hover:border-accent hover:bg-accent hover:text-on-accent"
     >
+      {icon}
       {label}
     </span>
   )
