@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, FileWarning, HardDrive, History, Maximize2, Minimize2, ScanSearch, Space, UserSearch, WrapText, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileWarning, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, Space, UserSearch, WrapText, X } from 'lucide-react'
 import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
 import { Button, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -17,6 +17,7 @@ import { setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { highlightLine, languageFor } from './highlight'
 import { SubmoduleDiff } from './SubmoduleDiff'
+import { FindBar, useFindInView } from './FindBar'
 
 function sourceLabel(s: DiffSource): string {
   if (s.kind === 'worktree') return 'Not staged'
@@ -93,16 +94,36 @@ export function DiffView({
   const lang = useMemo(() => languageFor(path), [path])
   const { dir, name } = splitPath(path)
 
+  // Find in file (Ctrl+F while a diff is open). The search stays when another file opens.
+  const [findOpen, setFindOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [findFocus, setFindFocus] = useState(0)
+  const find = useFindInView(scroller, findOpen ? query : '', diff)
+  const openFind = (): void => {
+    setFindOpen(true)
+    setFindFocus((n) => n + 1)
+  }
+  useEffect(() => {
+    const onFind = (e: Event): void => {
+      e.preventDefault()
+      setFindOpen(true)
+      setFindFocus((n) => n + 1)
+    }
+    window.addEventListener('gc:find-in-file', onFind)
+    return () => window.removeEventListener('gc:find-in-file', onFind)
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu]')) {
         if (sel) setSel(null)
+        else if (findOpen) setFindOpen(false)
         else if (!embedded) act.setCenter(repoId, { kind: 'graph' })
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [repoId, sel, embedded])
+  }, [repoId, sel, embedded, findOpen])
 
   const run = async (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard'): Promise<void> => {
     if (!diff || source.kind === 'commit') return
@@ -166,6 +187,11 @@ export function DiffView({
             </Tooltip>
           </>
         )}
+        <Tooltip content="Find in file" shortcut="Ctrl+F">
+          <IconButton label="Find in file" pressed={findOpen} onClick={() => (findOpen ? setFindOpen(false) : openFind())}>
+            <Search size={16} />
+          </IconButton>
+        </Tooltip>
         <SegmentedControl
           label="Diff layout"
           value={mode}
@@ -213,6 +239,20 @@ export function DiffView({
           </Tooltip>
         )}
       </header>
+      {findOpen ? (
+        <FindBar
+          query={query}
+          onQuery={setQuery}
+          count={find.count}
+          current={find.current}
+          onGo={find.go}
+          onClose={() => {
+            setFindOpen(false)
+            scroller.current?.focus()
+          }}
+          focusKey={findFocus}
+        />
+      ) : null}
       {/* Focusable so keyboard users can scroll a long diff. */}
       <div ref={scroller} tabIndex={0} className="relative min-h-0 flex-1 overflow-auto outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring" aria-busy={busy || undefined}>
         {conflicted ? (

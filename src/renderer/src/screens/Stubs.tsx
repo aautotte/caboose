@@ -37,6 +37,7 @@ export const shortcutGroups: Array<{ title: string; items: Array<[string, string
       ['Next / previous commit', 'J / K'],
       ['First / last commit', 'Ctrl+Home / Ctrl+End'],
       ['Search commits', 'Ctrl+F'],
+      ['Find in the open file', 'Ctrl+F'],
       ['Filter branches', 'Ctrl+Alt+F'],
       ['Command palette', 'Ctrl+P'],
       ['Collapse or expand the branches panel', 'Ctrl+J'],
