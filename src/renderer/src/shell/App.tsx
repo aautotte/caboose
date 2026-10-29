@@ -54,7 +54,9 @@ function useShortcuts(): void {
         const c = s.repos[repo]?.center
         if (c && (c.kind === 'diff' || c.kind === 'blame')) return run(() => act.setCenter(repo, { kind: 'history', path: c.path }))
       }
-      if (ctrl && !e.shiftKey && k === 'f') return run(() => (document.getElementById('commit-search') as HTMLInputElement | null)?.focus())
+      // An open diff finds in its file; anywhere else, Ctrl+F searches the commits.
+      if (ctrl && !e.shiftKey && !e.altKey && k === 'f')
+        return run(() => window.dispatchEvent(new Event('gc:find-in-file', { cancelable: true })) && (document.getElementById('commit-search') as HTMLInputElement | null)?.focus())
       if (ctrl && e.altKey && k === 'f') return run(() => (document.getElementById('left-filter') as HTMLInputElement | null)?.focus())
       if (ctrl && e.shiftKey && k === 's') return run(() => void act.stage(repo, 'all'))
       if (ctrl && e.shiftKey && k === 'u') return run(() => void act.unstage(repo, 'all'))
