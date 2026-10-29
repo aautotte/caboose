@@ -39,6 +39,12 @@ export function fileSize(bytes: number): string {
   return u === 0 ? plural(bytes, 'byte') : `${n < 10 ? n.toFixed(1) : Math.round(n)} ${units[u]}`
 }
 
+/** Git's progress after its phase: "45% (58234/129384)", "45%", or nothing. */
+export function progressAmount(p: { percent?: number; done?: number; total?: number }): string {
+  if (p.percent === undefined) return ''
+  return p.done !== undefined && p.total !== undefined ? `${p.percent}% (${p.done}/${p.total})` : `${p.percent}%`
+}
+
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
 }

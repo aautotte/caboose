@@ -355,6 +355,9 @@ export interface ProgressEvent {
   opId: string
   phase: string
   percent?: number
+  /** How far, as git counts it (files, objects): "45% (58234/129384)". */
+  done?: number
+  total?: number
 }
 
 export interface FileHistoryEntry extends CommitRow {

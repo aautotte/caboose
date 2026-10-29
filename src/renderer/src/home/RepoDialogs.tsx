@@ -5,6 +5,7 @@ import { ApiError, call, newOpId, on } from '@/lib/api'
 import { toast } from '@/ui/toastBus'
 import { useApp } from '@/store'
 import * as act from '@/actions'
+import { progressAmount } from '@/lib/format'
 
 const LAST_DIR = 'caboose.lastParentDir'
 const rememberDir = (d: string): void => {
@@ -61,7 +62,7 @@ export function CloneDialog(): React.JSX.Element {
   const [branch, setBranch] = useState('')
   const [sparse, setSparse] = useState(false)
   const [folders, setFolders] = useState('')
-  const [busy, setBusy] = useState<{ opId: string; phase: string; percent?: number } | null>(null)
+  const [busy, setBusy] = useState<{ opId: string; phase: string; percent?: number; done?: number; total?: number } | null>(null)
   const [error, setError] = useState<string | undefined>()
 
   useEffect(() => {
@@ -71,7 +72,7 @@ export function CloneDialog(): React.JSX.Element {
   useEffect(() => {
     if (!busy) return
     return on('op:progress', (p) => {
-      if (p.opId === busy.opId) setBusy((b) => (b ? { ...b, phase: p.phase, percent: p.percent } : b))
+      if (p.opId === busy.opId) setBusy((b) => (b ? { ...b, phase: p.phase, percent: p.percent, done: p.done, total: p.total } : b))
     })
   }, [busy?.opId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -167,7 +168,7 @@ export function CloneDialog(): React.JSX.Element {
             <ProgressBar label={busy.phase} value={busy.percent} />
             <span className="text-sm text-muted">
               {busy.phase}
-              {busy.percent !== undefined ? ` ${busy.percent}%` : '…'}
+              {busy.percent !== undefined ? ` ${progressAmount(busy)}` : '…'}
             </span>
           </div>
         ) : null}

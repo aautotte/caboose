@@ -62,8 +62,9 @@ export async function boot(): Promise<void> {
   on('op:progress', (p) => {
     const s = useApp.getState()
     for (const [id, r] of Object.entries(s.repos)) {
-      if (r.subOp?.opId === p.opId) patchRepo(id, { subOp: { ...r.subOp, phase: p.phase, percent: p.percent } })
-      else if (Object.keys(r.busy).length) patchRepo(id, { progress: { phase: p.phase, percent: p.percent } })
+      const at = { phase: p.phase, percent: p.percent, done: p.done, total: p.total }
+      if (r.subOp?.opId === p.opId) patchRepo(id, { subOp: { ...r.subOp, ...at } })
+      else if (Object.keys(r.busy).length) patchRepo(id, { progress: at })
     }
   })
   window.addEventListener('focus', () => {

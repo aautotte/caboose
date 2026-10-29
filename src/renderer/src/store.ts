@@ -34,7 +34,7 @@ export interface RepoState {
   undo: UndoPeek
   /** Running remote / long operations, by key. */
   busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout', string>>
-  progress: { phase: string; percent?: number } | null
+  progress: { phase: string; percent?: number; done?: number; total?: number } | null
   lastFetch: number | null
   fetchFailed: boolean
   search: string
@@ -58,7 +58,7 @@ export interface RepoState {
   /** The checked-out commit's submodules and this repository's submodule settings; null until read. */
   submodules: { list: Submodule[]; settings: SubmoduleSettings; present: boolean; superproject: string | null } | null
   /** A submodule set-up or update running in the background. */
-  subOp: { label: string; opId: string; phase?: string; percent?: number } | null
+  subOp: { label: string; opId: string; phase?: string; percent?: number; done?: number; total?: number } | null
   /** Every worktree of the repository, this one included; null until read. */
   worktrees: Worktree[] | null
   /** git bisect run going on: the command, and the last lines it printed. */
