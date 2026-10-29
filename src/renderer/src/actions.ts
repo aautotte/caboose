@@ -164,6 +164,8 @@ const isLatest = (m: Map<string, number>, repoId: string, n: number): boolean =>
 function followOpenFile(repoId: string, status: Status): void {
   const c = useApp.getState().repos[repoId]?.center
   if (c?.kind !== 'diff' || (c.source.kind !== 'worktree' && c.source.kind !== 'index')) return
+  // Nothing left to stage or commit (a commit took it all): back to the commit list, not an empty file.
+  if (status.changes.length === 0) return setCenter(repoId, { kind: 'graph' })
   const ch = status.changes.find((x) => x.path === c.path)
   if (!ch || ch.conflicted) return
   const staged = ch.index !== '.' && ch.index !== '?'
