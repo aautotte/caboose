@@ -14,7 +14,7 @@ export interface RunOptions {
   mutating?: boolean
   timeoutMs?: number
   /** Called with git's progress lines (stderr) for clone / fetch / push. */
-  onProgress?: (phase: string, percent?: number) => void
+  onProgress?: (phase: string, percent?: number, done?: number, total?: number) => void
   /** Called with each line git (or what it runs, e.g. bisect run's command) prints, on stdout or stderr. */
   onOutput?: (line: string) => void
   /** Exit codes that are not failures (e.g. merge returns 1 on conflicts). */
@@ -31,7 +31,8 @@ export interface RunResult {
 }
 
 const MAX_TAIL = 8 * 1024
-const PROGRESS = /^([A-Za-z ]+):\s+(\d+)%/
+// e.g. "Updating files:  45% (58234/129384)" or "Receiving objects:  12% (123/1000), 1.2 MiB | 3 MiB/s".
+const PROGRESS = /^([A-Za-z ]+):\s+(\d+)%(?:\s+\((\d+)\/(\d+)\))?/
 const CLONING = /^Cloning into '(.+)'/
 const LOCKED = /index\.lock|cannot lock ref|could not write index|unable to write new index file/i
 
@@ -154,7 +155,7 @@ export class GitRunner extends EventEmitter {
         if (opts.onProgress) {
           for (const line of s.split(/[\r\n]+/)) {
             const m = PROGRESS.exec(line.trim())
-            if (m) opts.onProgress(m[1].trim(), Number(m[2]))
+            if (m) opts.onProgress(m[1].trim(), Number(m[2]), m[3] ? Number(m[3]) : undefined, m[4] ? Number(m[4]) : undefined)
             // `git submodule update`: which submodule it's on.
             const c = CLONING.exec(line.trim())
             if (c) opts.onProgress(`Setting up ${c[1].split(/[\\/]/).filter(Boolean).pop()}`)

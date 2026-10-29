@@ -6,6 +6,7 @@ import { DropdownMenu, IconButton, Spinner, TextInput, Tooltip, Shortcut } from 
 import { cn } from '@/ui/cn'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { progressAmount } from '@/lib/format'
 
 const pullModes: Array<{ mode: PullMode; label: string }> = [
   { mode: 'ff', label: 'Pull (fast-forward when possible)' },
@@ -181,17 +182,18 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
         />
       </div>
       {busy.checkout ? (
-        <span role="status" aria-live="polite" className="flex w-56 items-center gap-1.5 truncate text-sm text-muted">
+        <span role="status" aria-live="polite" className="flex w-56 items-center gap-1.5 text-sm text-muted">
           <Spinner size={14} />
-          <span className="truncate">
-            {busy.checkout}
-            {progress ? ` ${progress.phase}${progress.percent !== undefined ? ` ${progress.percent}%` : ''}` : ''}
+          {/* What it's doing, and under it git's progress: "Updating files 45% (58234/129384)". */}
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate">{busy.checkout}</span>
+            {progress ? <span className="truncate text-xs">{`${progress.phase} ${progressAmount(progress)}`.trimEnd()}</span> : null}
           </span>
         </span>
       ) : progress ? (
-        <span role="status" aria-live="polite" className="w-44 truncate text-sm text-muted">
-          {progress.phase}
-          {progress.percent !== undefined ? ` ${progress.percent}%` : ''}
+        <span role="status" aria-live="polite" className="flex w-44 flex-col text-sm leading-tight text-muted">
+          <span className="truncate">{progress.phase}</span>
+          {progress.percent !== undefined ? <span className="truncate text-xs">{progressAmount(progress)}</span> : null}
         </span>
       ) : null}
       <div className="flex w-72 items-center gap-1">

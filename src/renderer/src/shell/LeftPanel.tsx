@@ -8,6 +8,7 @@ import { pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } fr
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
+import { progressAmount } from '@/lib/format'
 import { CollapseLeftButton, leftSectionId } from './PanelRails'
 
 /** Which sections are folded, held by the panel: one place to fold them all, and remembered with the folders. */
@@ -978,7 +979,7 @@ function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string
             <Spinner size={12} />
             <span className="min-w-0 flex-1 truncate">
               {running.phase && running.phase.startsWith('Setting up') ? running.phase : running.label}
-              {running.percent !== undefined ? ` · ${running.percent}%` : ''}
+              {running.percent !== undefined ? ` · ${progressAmount(running)}` : ''}
             </span>
             <Button size="sm" variant="ghost" onClick={() => void call('op.cancel', { opId: running.opId })}>
               Cancel

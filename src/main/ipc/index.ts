@@ -47,8 +47,8 @@ interface Deps {
 }
 
 export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig, tmpDir, isTrustedSender }: Deps): void {
-  const progress = (id: string) => (phase: string, percent?: number) => {
-    const ev: ProgressEvent = { opId: id, phase, percent }
+  const progress = (id: string) => (phase: string, percent?: number, done?: number, total?: number) => {
+    const ev: ProgressEvent = { opId: id, phase, percent, done, total }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('op:progress', ev)
   }
   const output = (id: string) => (line: string) => {
