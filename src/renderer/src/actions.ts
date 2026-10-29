@@ -937,11 +937,15 @@ function remoteBranchesOf(repoId: string, names: string[]): Map<string, { remote
 }
 
 /** The "Also delete on origin" checkbox for deleting `total` branches, when any of them is on a remote. */
-function remoteCheck(on: Map<string, { remote: string; name: string }>, total: number): { label: string; hint: string } | undefined {
+function remoteCheck(on: Map<string, { remote: string; name: string }>, total: number): { label: string; note: string } | undefined {
   if (!on.size) return undefined
   const remotes = [...new Set([...on.values()].map((b) => b.remote))]
+  const where = remotes.length === 1 ? remotes[0] : 'their remotes'
   const which = total === 1 ? 'it' : on.size === total ? 'them' : `the ${on.size} that are there`
-  return { label: `Also delete ${which} on ${remotes.length === 1 ? remotes[0] : 'their remotes'}`, hint: 'Deleting on the remote can’t be undone, and affects everyone who uses it.' }
+  return {
+    label: `Also delete ${which} on ${where}`,
+    note: `Undo only brings back the local ${total === 1 ? 'branch' : 'branches'}. Deleting on ${where} can’t be undone, and affects everyone who uses it.`
+  }
 }
 
 /** Deletes branches on their remotes, one push per remote. */
@@ -1073,7 +1077,9 @@ export function deleteTags(repoId: string, names: string[]): void {
     confirmLabel: `Delete ${names.length} tags`,
     danger: true,
     undoable: true,
-    check: remote ? { label: `Also delete them on ${remote}`, hint: 'Deleting on the remote can’t be undone, and affects everyone who uses it.' } : undefined,
+    check: remote
+      ? { label: `Also delete them on ${remote}`, note: `Undo only brings back the local tags. Deleting on ${remote} can’t be undone, and affects everyone who uses it.` }
+      : undefined,
     onConfirm: async (checked) => {
       const res = await attempt(() => call('tag.deleteMany', { repoId, names }), 'Couldn’t delete the tags')
       if (res) {

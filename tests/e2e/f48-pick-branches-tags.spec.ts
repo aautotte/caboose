@@ -1,6 +1,6 @@
 // F48: pick several local branches or tags (Ctrl / Shift-click), then push or delete them at once: one question, one
 // undo. Unmerged branches ask again; the checked-out branch and ones in another worktree are left alone. Deleting can
-// also delete them on the remote.
+// also delete them on the remote, and says undo only brings back the local ones.
 import { test, expect } from '@playwright/test'
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -132,8 +132,9 @@ test('F48-H4: Push 2 branches pushes both and sets their upstream; deleting them
   await h.page.getByRole('menuitem', { name: 'Delete 2 branches…' }).click()
   const also = dialog(h.page).getByRole('checkbox', { name: 'Also delete them on origin' })
   await expect(also).not.toBeChecked()
+  // Said under the checkbox before it's ticked: undo won't bring them back on origin.
+  await expect(dialog(h.page)).toContainText('Undo only brings back the local branches. Deleting on origin can’t be undone')
   await also.click()
-  await expect(dialog(h.page)).toContainText('Deleting on the remote can’t be undone')
   await dialog(h.page).getByRole('button', { name: 'Delete 2 branches' }).click()
   await expect(toasts().getByText('Deleted 2 branches from origin')).toBeVisible()
   for (const b of ['alpha', 'beta']) {
@@ -161,6 +162,7 @@ test('F48-H5: tags too: Shift-click picks them, Push 3 tags pushes them, Delete 
 
   await tagRow('v2').press('Delete')
   await expect(dialog(h.page)).toContainText('Delete 3 tags?')
+  await expect(dialog(h.page)).toContainText('Undo only brings back the local tags. Deleting on origin can’t be undone')
   await dialog(h.page).getByRole('checkbox', { name: 'Also delete them on origin' }).click()
   await dialog(h.page).getByRole('button', { name: 'Delete 3 tags' }).click()
   await expect(toasts().getByText('Deleted 3 tags from origin')).toBeVisible()
@@ -215,4 +217,25 @@ test('F48-H7: stashes too: Shift-click picks three, Delete 3 stashes removes the
   await h.page.getByRole('button', { name: /^Undo: Delete 3 stashes/ }).click()
   await expect(stash('two')).toBeVisible()
   expect(h.git(repo, 'stash', 'list', '--format=%H %gs')).toBe(before)
+})
+
+test('F48-H8: one branch on origin: the checkbox says undo only brings back the local branch, and it does', async () => {
+  h.git(repo, 'branch', 'solo')
+  h.git(repo, 'push', '-q', '-u', 'origin', 'solo')
+  const sha = h.git(repo, 'rev-parse', 'solo')
+  await expect(branch('solo')).toBeVisible()
+  await branch('solo').click({ button: 'right' })
+  await h.page.getByRole('menuitem', { name: 'Delete…' }).click()
+  await expect(dialog(h.page)).toContainText('Delete solo?')
+  await expect(dialog(h.page)).toContainText('Undo only brings back the local branch. Deleting on origin can’t be undone, and affects everyone who uses it.')
+  await dialog(h.page).getByRole('checkbox', { name: 'Also delete it on origin' }).click()
+  await dialog(h.page).getByRole('button', { name: 'Delete branch' }).click()
+  await expect(toasts().getByText('Deleted solo from origin')).toBeVisible()
+  expect(onOrigin('refs/heads/solo')).toBeNull()
+  await expect(branch('solo')).toHaveCount(0)
+
+  await h.page.getByRole('button', { name: /^Undo: Delete/ }).click()
+  await expect.poll(() => exists('solo')).toBe(sha)
+  await expect(branch('solo')).toBeVisible()
+  expect(onOrigin('refs/heads/solo')).toBeNull()
 })

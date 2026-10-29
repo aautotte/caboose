@@ -198,8 +198,8 @@ export function ConfirmDialog({
   undoable: boolean | null
   /** Gets the checkbox's state, when there is one. */
   onConfirm: (checked: boolean) => void
-  /** A checkbox, off by default, e.g. "Also delete them on origin". `hint` shows while it's on. */
-  check?: { label: string; hint?: string }
+  /** A checkbox, off by default, e.g. "Also delete them on origin". `note` shows under it, e.g. what undo can't bring back. */
+  check?: { label: string; note?: string }
   /** Another way out, e.g. "Create a branch…": the dialog closes first, so it can open another one. */
   alt?: { label: string; onSelect: () => void; danger?: boolean }
 }): React.JSX.Element {
@@ -240,8 +240,14 @@ export function ConfirmDialog({
       }
     >
       <p className="text-base text-text">{body}</p>
-      {check ? <Checkbox label={check.label} checked={checked} onCheckedChange={setChecked} /> : null}
-      {undoable === null ? null : <p className="text-sm text-muted">{undoable ? 'You can undo this with Ctrl+Z.' : 'This can’t be undone.'}{checked && check?.hint ? ` ${check.hint}` : ''}</p>}
+      {check ? (
+        <div className="flex flex-col gap-1">
+          <Checkbox label={check.label} checked={checked} onCheckedChange={setChecked} />
+          {/* Lined up with the label, past the box. */}
+          {check.note ? <p className="pl-[22px] text-sm text-muted">{check.note}</p> : null}
+        </div>
+      ) : null}
+      {undoable === null ? null : <p className="text-sm text-muted">{undoable ? 'You can undo this with Ctrl+Z.' : 'This can’t be undone.'}</p>}
     </Dialog>
   )
 }
