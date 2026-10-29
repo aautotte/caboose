@@ -49,6 +49,8 @@ export interface RepoState {
   focusHead: boolean
   /** The Graph column's width as the user dragged it; null fits it to the lanes. */
   graphWidth: number | null
+  /** The Branch / tag column's width, if the user dragged it; null follows the window. */
+  refsWidth: number | null
   /** The commit message being written. Kept here, not in the panel, so it survives looking at other commits. */
   draft: { summary: string; body: string }
   /** Read when the repository opens and after "Check again"; null until then. */
@@ -200,6 +202,7 @@ export const emptyRepo = (): RepoState => ({
   columns: DEFAULT_COLUMNS,
   focusHead: false,
   graphWidth: null,
+  refsWidth: null,
   draft: { summary: '', body: '' },
   lfs: null,
   lfsDismissed: false,
