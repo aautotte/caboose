@@ -455,7 +455,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
-  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore } = useApp.getState().repos[repoId]
+  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore } = useApp.getState().repos[repoId]
   try {
     const [refs, status, undo, refView, columns, repoPrefs] = await Promise.all([
       call('refs.list', { repoId }),
@@ -479,6 +479,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       columns: r.columns !== columnsBefore ? r.columns : columns ?? DEFAULT_COLUMNS,
       focusHead: r.focusHead !== focusBefore ? r.focusHead : repoPrefs['graph.focusHead'] === true,
       graphWidth: r.graphWidth !== widthBefore ? r.graphWidth : typeof repoPrefs['graph.width'] === 'number' ? repoPrefs['graph.width'] : null,
+      refsWidth: r.refsWidth !== refsBefore ? r.refsWidth : typeof repoPrefs['graph.refsWidth'] === 'number' ? repoPrefs['graph.refsWidth'] : null,
       commits: page.commits,
       hasMore: page.hasMore,
       layout,
@@ -1862,6 +1863,12 @@ export function setColumns(repoId: string, columns: GraphColumn[]): void {
 export function setGraphWidth(repoId: string, width: number | null): void {
   patchRepo(repoId, { graphWidth: width })
   void call('repoPrefs.set', { repoId, key: 'graph.width', value: width }).catch(() => {})
+}
+
+/** Remembers the Branch / tag column's width for this repository; null goes back to the default for the window. */
+export function setRefsWidth(repoId: string, width: number | null): void {
+  patchRepo(repoId, { refsWidth: width })
+  void call('repoPrefs.set', { repoId, key: 'graph.refsWidth', value: width }).catch(() => {})
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {

@@ -17,6 +17,8 @@ const LANE = 16 // --gc-lane-w
 const NODE_R = 5 // --gc-node-r
 const MAX_GRAPH_W = 400
 const MIN_MESSAGE_W = 240
+const MIN_REFS_W = 80
+const MAX_REFS_W = 480
 
 const laneVar = (c: number): string => `var(--gc-color-lane-${((c % 8) + 8) % 8})`
 const x = (i: number): number => LANE / 2 + i * LANE
@@ -96,7 +98,7 @@ const columnNames: Record<GraphColumnKey, string> = { author: 'Author', date: 'D
  * The user's visible columns, and the width the rows need for all of them with at least ~240px of message. When the
  * graph is wide or the window narrow, the history scrolls sideways rather than dropping columns.
  */
-function useColumns(ref: React.RefObject<HTMLDivElement | null>, graphW: number, columns: GraphColumn[]): { refsW: number; shown: GraphColumn[]; minW: number } {
+function useColumns(ref: React.RefObject<HTMLDivElement | null>, graphW: number, columns: GraphColumn[], savedRefsW: number | null): { refsW: number; shown: GraphColumn[]; minW: number } {
   const [w, setW] = useState(1000)
   useLayoutEffect(() => {
     const el = ref.current
@@ -105,7 +107,7 @@ function useColumns(ref: React.RefObject<HTMLDivElement | null>, graphW: number,
     ro.observe(el)
     return () => ro.disconnect()
   }, [ref])
-  const refsW = w < 700 ? 140 : 190
+  const refsW = savedRefsW ?? (w < 700 ? 140 : 190)
   const shown = columns.filter((c) => c.visible)
   return { refsW, shown, minW: refsW + graphW + MIN_MESSAGE_W + shown.reduce((n, c) => n + c.width, 0) }
 }
@@ -125,43 +127,65 @@ function ancestry(start: string | null, bySha: Map<string, CommitRow>): Set<stri
 }
 
 /**
- * The Graph column's header, with a handle on its right edge: drag it or use the arrow keys (a lane at a time);
- * double-click it to fit the lanes again. onDone(null) means fit.
+ * A handle on a column header's right edge: drag it or use the arrow keys (`step` at a time); double-click it to go
+ * back to the automatic width. onDone(null) means automatic.
  */
-function GraphHeader({ width, lanesW, onResize, onDone }: { width: number; lanesW: number; onResize: (w: number) => void; onDone: (w: number | null) => void }): React.JSX.Element {
+function RightEdgeHandle({
+  label,
+  width,
+  step,
+  clamp,
+  onResize,
+  onDone
+}: {
+  label: string
+  width: number
+  step: number
+  clamp: (n: number) => number
+  onResize: (w: number) => void
+  onDone: (w: number | null) => void
+}): React.JSX.Element {
   const start = useRef<{ x: number; w: number; last: number | null } | null>(null)
+  return (
+    <span
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuenow={width}
+      tabIndex={0}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        start.current = { x: e.clientX, w: width, last: null }
+      }}
+      onPointerMove={(e) => {
+        if (!start.current) return
+        start.current.last = clamp(start.current.w + (e.clientX - start.current.x))
+        onResize(start.current.last)
+      }}
+      onPointerUp={() => {
+        // Where the pointer ended, not the last width drawn; a click that didn't drag keeps the automatic width.
+        if (start.current?.last != null) onDone(start.current.last)
+        start.current = null
+      }}
+      onDoubleClick={() => onDone(null)}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+        e.preventDefault()
+        onDone(clamp(width + (e.key === 'ArrowRight' ? step : -step)))
+      }}
+      // Above the next column's header, which would otherwise cover its right half.
+      className="absolute inset-y-0 z-[1] right-0 w-1.5 translate-x-1/2 cursor-col-resize outline-none hover:bg-accent focus-visible:bg-accent"
+    />
+  )
+}
+
+/** The Graph column's header: its handle moves a lane at a time, and double-click fits the lanes again. */
+function GraphHeader({ width, lanesW, onResize, onDone }: { width: number; lanesW: number; onResize: (w: number) => void; onDone: (w: number | null) => void }): React.JSX.Element {
   const clamp = (n: number): number => Math.max(3 * LANE + 8, Math.min(Math.max(lanesW, MAX_GRAPH_W), Math.round(n)))
   return (
     <span role="columnheader" className="relative shrink-0 px-1" style={{ width }}>
       Graph
-      <span
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the Graph column (double-click to fit the lanes)"
-        aria-valuenow={width}
-        tabIndex={0}
-        onPointerDown={(e) => {
-          e.currentTarget.setPointerCapture(e.pointerId)
-          start.current = { x: e.clientX, w: width, last: null }
-        }}
-        onPointerMove={(e) => {
-          if (!start.current) return
-          start.current.last = clamp(start.current.w + (e.clientX - start.current.x))
-          onResize(start.current.last)
-        }}
-        onPointerUp={() => {
-          // Where the pointer ended, not the last width drawn; a click that didn't drag keeps the lanes fitting.
-          if (start.current?.last != null) onDone(start.current.last)
-          start.current = null
-        }}
-        onDoubleClick={() => onDone(null)}
-        onKeyDown={(e) => {
-          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
-          e.preventDefault()
-          onDone(clamp(width + (e.key === 'ArrowRight' ? LANE : -LANE)))
-        }}
-        className="absolute inset-y-0 right-0 w-1.5 translate-x-1/2 cursor-col-resize outline-none hover:bg-accent focus-visible:bg-accent"
-      />
+      <RightEdgeHandle label="Resize the Graph column (double-click to fit the lanes)" width={width} step={LANE} clamp={clamp} onResize={onResize} onDone={onDone} />
     </span>
   )
 }
@@ -267,8 +291,12 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const [graphDraft, setGraphDraft] = useState<number | null>(null)
   const graphW = graphDraft ?? savedGraphW ?? fitW
 
+  // The Branch / tag column: the window decides, unless the user dragged it.
+  const savedRefsW = useRepo(repoId, (r) => r.refsWidth)
+  const [refsDraft, setRefsDraft] = useState<number | null>(null)
+
   const outerRef = useRef<HTMLDivElement>(null)
-  const cols = useColumns(outerRef, graphW, liveColumns)
+  const cols = useColumns(outerRef, graphW, liveColumns, refsDraft ?? savedRefsW)
   const resize = (key: GraphColumnKey, width: number): void => setDraft(liveColumns.map((c) => (c.key === key ? { ...c, width } : c)))
   const commitDraft = (): void => {
     if (draft) act.setColumns(repoId, draft)
@@ -391,13 +419,24 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
         {/* The column header is the grid's first row, kept in view while the history scrolls. */}
         <ContextMenu items={headerMenu}>
           <div role="row" aria-rowindex={1} aria-label="Columns (right-click to show or hide)" className="sticky top-0 z-(--gc-z-panel) flex h-(--gc-list-row-h) shrink-0 items-center border-b border-border bg-surface text-xs text-muted select-none" style={{ minWidth: cols.minW }}>
-            <span role="columnheader" className="flex shrink-0 items-center gap-1 px-2" style={{ width: cols.refsW }}>
+            <span role="columnheader" className="relative flex shrink-0 items-center gap-1 px-2" style={{ width: cols.refsW }}>
               <span className="flex-1 truncate">Branch / tag</span>
               <Tooltip content={focusHead ? 'Show every branch again' : 'Show only this branch, what it tracks, and main'}>
                 <IconButton label="Focus on this branch" size="sm" pressed={focusHead} onClick={() => void act.setFocusHead(repoId, !focusHead)}>
                   <Focus size={12} />
                 </IconButton>
               </Tooltip>
+              <RightEdgeHandle
+                label="Resize the Branch / tag column (double-click for the default width)"
+                width={cols.refsW}
+                step={16}
+                clamp={(n) => Math.max(MIN_REFS_W, Math.min(MAX_REFS_W, Math.round(n)))}
+                onResize={setRefsDraft}
+                onDone={(w) => {
+                  setRefsDraft(null)
+                  act.setRefsWidth(repoId, w)
+                }}
+              />
             </span>
             <GraphHeader
               width={graphW}
