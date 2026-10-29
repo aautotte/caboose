@@ -68,7 +68,7 @@ export async function boot(): Promise<void> {
   })
   window.addEventListener('focus', () => {
     const id = useApp.getState().active
-    if (id !== 'home') void loadStatus(id)
+    if (id !== 'home') void refreshOnReturn(id)
   })
 }
 
@@ -170,6 +170,18 @@ function followOpenFile(repoId: string, status: Status): void {
   const unstaged = ch.worktree !== '.'
   if (c.source.kind === 'worktree' && staged && !unstaged) setCenter(repoId, { ...c, source: { kind: 'index' } })
   else if (c.source.kind === 'index' && unstaged && !staged) setCenter(repoId, { ...c, source: { kind: 'worktree' } })
+}
+
+/**
+ * Back to the window: things may have changed outside (a branch made or checked out in a terminal, a pull) without
+ * the file watcher saying so. A cheap look at the branches decides: changed, reload it all; else just the status.
+ */
+export async function refreshOnReturn(repoId: string): Promise<void> {
+  const before = useApp.getState().repos[repoId]?.refs
+  const now = await call('refs.list', { repoId }).catch(() => null)
+  const sig = (r: typeof now): string => (r ? `${r.head.branch} ${r.head.sha}\n${r.refs.map((x) => `${x.name} ${x.sha}`).join('\n')}` : '')
+  if (now && before && sig(now) === sig(before)) await loadStatus(repoId)
+  else await loadRepo(repoId, { keepSelection: true })
 }
 
 export async function loadStatus(repoId: string): Promise<void> {
