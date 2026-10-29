@@ -17,7 +17,8 @@ import type { Askpass } from '../askpass'
 import type { Profiles } from '../profiles'
 import { gpuState, setGpu } from '../gpu'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 
 const repoId = z.string().uuid()
 const R = { repoId }
@@ -99,8 +100,13 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
 
   handle('dialog.pickFolder', z.object({ title: z.string().max(200) }), async ({ title }, e) => {
     const win = BrowserWindow.fromWebContents(e.sender)
-    const res = await dialog.showOpenDialog(win!, { title, properties: ['openDirectory', 'createDirectory'] })
-    return res.canceled ? null : (res.filePaths[0] ?? null)
+    // Opens where the last folder was picked: in its parent, so it's right there to pick again or step past.
+    const last = prefs.getAll()['dialog.lastFolder']
+    const at = typeof last === 'string' && existsSync(dirname(last)) ? dirname(last) : undefined
+    const res = await dialog.showOpenDialog(win!, { title, defaultPath: at, properties: ['openDirectory', 'createDirectory'] })
+    const picked = res.canceled ? null : (res.filePaths[0] ?? null)
+    if (picked) prefs.set('dialog.lastFolder', picked)
+    return picked
   })
 
   // ---------- repositories ----------
