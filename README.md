@@ -95,6 +95,7 @@ works offline, and it doesn't phone home.
 - List them, set them up (shallow, nested ones too), and pick a mode for each: Follow keeps it at the commit the
   branch expects, Manual moves it only when you ask, and Working in it never moves it while it has unpushed work.
 - A pointer change says what it means: the commits it moves by, or a warning when it moves back.
+- Add a submodule, change its URL, or remove it from the repository.
 - Checks before pushing, and can push submodules first.
 
 ### Worktrees

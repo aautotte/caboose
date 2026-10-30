@@ -919,7 +919,10 @@ function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string
   const shown = list.filter((m) => match(m.path))
   const busy = !!running
 
+  const add = (): void => act.openDialog({ kind: 'addSubmodule', repoId })
   const headerMenu: MenuEntry[] = [
+    { type: 'item', label: 'Add a submodule…', icon: <Plus size={14} />, disabled: busy, onSelect: add },
+    { type: 'separator' },
     { type: 'item', label: `Set up all (${notSetUp.length})`, icon: <Download size={14} />, disabled: busy || !notSetUp.length, onSelect: () => void act.setUpSubmodules(repoId, 'all') },
     { type: 'item', label: settings.shallow ? 'Set up all with full history' : 'Set up all as shallow copies', disabled: busy || !notSetUp.length, onSelect: () => void act.setUpSubmodules(repoId, 'all', !settings.shallow) },
     { type: 'item', label: `Update all to the expected commits (${outOfStep.length})`, icon: <RefreshCw size={14} />, disabled: busy || !outOfStep.length, onSelect: () => void act.updateSubmodules(repoId, 'all') },
@@ -931,12 +934,24 @@ function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string
 
   const rowMenu = (m: Submodule, state: SubState): MenuEntry[] => {
     const mode = m.mode ?? settings.mode
+    const changeUrl: MenuEntry = { type: 'item', label: 'Change URL…', icon: <Link size={14} />, disabled: busy, onSelect: () => act.openDialog({ kind: 'submoduleUrl', repoId, path: m.path, url: m.url ?? '' }) }
+    const remove: MenuEntry = {
+      type: 'item',
+      label: state === 'changes' ? 'Remove from the repository… (has changes)' : 'Remove from the repository…',
+      icon: <Trash2 size={14} />,
+      danger: true,
+      disabled: busy || state === 'changes',
+      onSelect: () => act.deleteSubmodule(repoId, m.path)
+    }
     if (!m.setUp)
       return [
         { type: 'item', label: 'Set up', icon: <Download size={14} />, disabled: busy, onSelect: () => void act.setUpSubmodules(repoId, [m.path]) },
         { type: 'item', label: settings.shallow ? 'Set up with full history' : 'Set up as a shallow copy', disabled: busy, onSelect: () => void act.setUpSubmodules(repoId, [m.path], !settings.shallow) },
         { type: 'separator' },
-        { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(m.path) }
+        changeUrl,
+        { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(m.path) },
+        { type: 'separator' },
+        remove
       ]
     return [
       { type: 'item', label: 'Open', icon: <FolderGit2 size={14} />, onSelect: () => void act.openSubmodule(repoId, m.path) },
@@ -960,9 +975,11 @@ function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string
       },
       { type: 'separator' },
       { type: 'item', label: 'Show in folder', icon: <FolderOpen size={14} />, onSelect: () => void act.openIn(repoId, 'folder', m.path) },
+      changeUrl,
       { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(m.path) },
       { type: 'separator' },
-      { type: 'item', label: 'Remove local copy…', icon: <Trash2 size={14} />, danger: true, disabled: busy || state === 'changes', onSelect: () => act.removeSubmodules(repoId, [m.path]) }
+      { type: 'item', label: 'Remove local copy…', icon: <Trash2 size={14} />, danger: true, disabled: busy || state === 'changes', onSelect: () => act.removeSubmodules(repoId, [m.path]) },
+      remove
     ]
   }
 
@@ -972,7 +989,11 @@ function SubmoduleSection({ repoId, match }: { repoId: string; match: (s: string
       count={shown.length}
       empty="No matches"
       menu={headerMenu}
-      action={notSetUp.length ? { label: notSetUp.length === 1 ? 'Set up the submodule' : `Set up all ${notSetUp.length} submodules`, icon: <Download size={14} />, disabled: busy, onClick: () => void act.setUpSubmodules(repoId, 'all') } : undefined}
+      action={
+        notSetUp.length
+          ? { label: notSetUp.length === 1 ? 'Set up the submodule' : `Set up all ${notSetUp.length} submodules`, icon: <Download size={14} />, disabled: busy, onClick: () => void act.setUpSubmodules(repoId, 'all') }
+          : { label: 'Add a submodule', icon: <Plus size={14} />, disabled: busy, onClick: add }
+      }
       note={
         running ? (
           <div role="status" aria-label="Submodules" className="mx-2 mb-1 flex items-center gap-2 rounded-md border border-border bg-surface-raised px-2 py-1 text-sm text-muted">

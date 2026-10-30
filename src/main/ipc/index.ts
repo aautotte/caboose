@@ -214,6 +214,13 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('submodule.remove', z.object({ ...R, paths: z.array(z.string().min(1).max(4096)).min(1).max(5000) }), ({ repoId, paths: which }) =>
     exclusive(repoId, async () => (await ops(repoId).submoduleRemove(which), null))
   )
+  handle('submodule.add', z.object({ ...R, url: z.string().min(1).max(2048), path: z.string().min(1).max(4096), branch: z.string().min(1).max(255).optional(), opId }), ({ repoId, opId: id, ...input }) =>
+    exclusive(repoId, async () => ({ path: await ops(repoId).submoduleAdd(input, id, progress(id)) }))
+  )
+  handle('submodule.setUrl', z.object({ ...R, path: z.string().min(1).max(4096), url: z.string().min(1).max(2048) }), ({ repoId, path, url }) =>
+    exclusive(repoId, async () => (await ops(repoId).submoduleSetUrl(path, url), null))
+  )
+  handle('submodule.delete', z.object({ ...R, path: z.string().min(1).max(4096) }), ({ repoId, path }) => exclusive(repoId, async () => (await ops(repoId).submoduleDelete(path), null)))
   handle('submodule.setMode', z.object({ ...R, names: z.array(z.string().min(1).max(4096)).min(1).max(5000), mode: subMode.nullable() }), async ({ repoId, names, mode }) => {
     await ops(repoId).submoduleSetMode(names, mode)
     return null

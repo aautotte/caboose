@@ -69,6 +69,7 @@ export function CommandPalette(): React.JSX.Element | null {
           run: () => refs?.head.sha && act.openDialog({ kind: 'createBranch', repoId: id, at: refs.head.sha, atLabel: refs.head.branch ?? refs.head.sha.slice(0, 7) })
         },
         { id: 'new-worktree', group: 'Branch', label: 'New worktree…', run: () => act.openDialog({ kind: 'addWorktree', repoId: id }) },
+        { id: 'add-submodule', group: 'Repository', label: 'Add a submodule…', run: () => act.openDialog({ kind: 'addSubmodule', repoId: id }) },
         { id: 'log', group: 'View', label: 'Git activity log', run: () => act.openLog() },
         {
           id: 'bisect',
