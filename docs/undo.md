@@ -36,6 +36,9 @@ Anything that changes another computer:
 And a few things that are easy to reverse by hand: creating a branch, tag, stash or worktree, applying a stash,
 fetching, and submodule and worktree housekeeping.
 
+For anything older than the undo list, or done outside Caboose, the [reflog](history-and-blame.md#the-reflog) still
+knows every commit HEAD has been on.
+
 ## When Caboose refuses
 
 Before undoing, Caboose checks that the repository is still in the state the action left it in. If you've changed

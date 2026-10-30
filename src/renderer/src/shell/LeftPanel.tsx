@@ -1,5 +1,5 @@
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
 import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
@@ -694,6 +694,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               count={shownLocals.length}
               empty={f ? 'No matches' : 'No branches yet'}
               eye={eyeFor(locals) ?? undefined}
+              menu={[{ type: 'item', label: 'Reflog: where HEAD has been', icon: <History size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'reflog' }) }]}
               multiselectable
               note={branchPick.pick.length > 1 ? <PickBar count={branchPick.pick.length} actions={branchActions()} onClear={branchPick.clear} /> : null}
             >

@@ -1,4 +1,4 @@
-# File history and blame
+# File history, blame and the reflog
 
 ## File history
 
@@ -31,3 +31,21 @@ Open it from:
 - the command palette, while a file is open.
 
 **Blame the current version** goes back to today's file from an older one. Ctrl+Shift+H goes to the file's history.
+
+## The reflog
+
+Git records every move of HEAD in this repository: each checkout, commit, amend, reset, rebase, merge and pull. The
+reflog lists them, newest first, in git's own words (for example `checkout: moving from main to spike`), with the
+commit each one went to.
+
+Open it from **Reflog: where HEAD has been**, in the **Local branches** header's menu or the command palette.
+
+Click a move to see its commit in the details panel. A commit marked **not on a branch** is one no branch, tag or
+stash leads to any more, for example after deleting a branch, a hard reset or a rebase. The reflog is the only way
+back to it. To keep one:
+
+- **Create branch here…** gives it a branch;
+- **Reset *branch* here…** moves the checked-out branch back to it (the usual reset choices, and it can be undone);
+- right-click a move for **Check out this commit (detached)** and **Cherry-pick onto *branch*** too.
+
+Git forgets reflog entries after a while (90 days by default, 30 for commits no branch has), so don't wait too long.

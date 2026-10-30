@@ -10,6 +10,7 @@ import { PrefsView } from '@/screens/PrefsView'
 import { BlameView } from '@/history/BlameView'
 import { FileHistoryView } from '@/history/FileHistoryView'
 import { RebaseView } from '@/history/RebaseView'
+import { ReflogView } from '@/history/ReflogView'
 import { WipPanel } from '@/detail/WipPanel'
 import { CommitPanel } from '@/detail/CommitPanel'
 import { MultiPanel } from '@/detail/MultiPanel'
@@ -87,6 +88,8 @@ export function RepoView({ repoId }: { repoId: string }): React.JSX.Element {
             <RebaseView key={`${center.onto}:${center.range?.join(',') ?? ''}`} repoId={repoId} mode="rebase" base={center.onto} baseLabel={center.ontoLabel} range={center.range} ontoBranch={center.ontoBranch} />
           ) : center.kind === 'cherry' ? (
             <RebaseView key={center.tip} repoId={repoId} mode="cherry" base={center.tip} baseLabel={center.tipLabel} />
+          ) : center.kind === 'reflog' ? (
+            <ReflogView repoId={repoId} />
           ) : (
             <PrefsView repoId={repoId} />
           )}

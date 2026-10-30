@@ -117,6 +117,8 @@ works offline, and it doesn't phone home.
 ### History and blame
 
 - The history of a file, blame for the current version or at any commit, and back and forth between the two.
+- The reflog: everywhere HEAD has been, with the commits no branch leads to any more marked, ready to bring back
+  with a branch, a reset or a cherry-pick.
 
 ### Profiles
 
