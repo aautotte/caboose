@@ -203,6 +203,15 @@ export interface Api {
   'history.autosquash': { in: R; out: OpResult }
   /** The commits the changed lines last came from (staged changes, else unstaged), and whether pure additions were left out. */
   'history.fixupTarget': { in: R; out: { shas: string[]; addOnly: boolean } }
+  /**
+   * Takes a file (`part` null), a block or some lines out of a commit on the current branch: dropped (`remove`), into a
+   * new commit right after it (`split`, with `message`), or staged on top (`stage`; `staged` false when they couldn't
+   * be placed there).
+   */
+  'history.patchOut': {
+    in: R & { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null; action: 'remove' | 'split' | 'stage'; message?: string }
+    out: OpResult & { staged?: boolean }
+  }
   'history.move': { in: R & { sha: string; direction: 'up' | 'down' }; out: OpResult }
 
   'prefs.getAll': { in: Record<string, never>; out: Record<string, unknown> }

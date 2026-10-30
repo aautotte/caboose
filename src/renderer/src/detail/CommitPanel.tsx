@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Copy, GitCommitHorizontal, History, Pencil, ShieldAlert, ShieldCheck, ShieldQuestion, UserSearch } from 'lucide-react'
+import { AlertTriangle, Copy, FilePlus2, GitCommitHorizontal, History, ListPlus, Pencil, X, ShieldAlert, ShieldCheck, ShieldQuestion, UserSearch } from 'lucide-react'
 import type { CommitDetails, CommitSignature } from '../../../shared/types'
 import { Avatar, Badge, Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
 import { call } from '@/lib/api'
@@ -70,6 +70,8 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   // Older commits are reworded by a rebase: not past a merge (it would be flattened), and not with work in the way.
   const behindMerge = canEdit && !d.isHead && act.mergeAbove(repoId, d.sha)
   const blocker = canEdit && !d.isHead ? act.rewriteBlocker(repoId) : null
+  // Whole files can be taken out of a commit of the checked-out branch (blocks and lines, from the diff).
+  const canPatch = !stash && act.patchProblem(repoId, d.sha) === null
   const saveMessage = async (): Promise<void> => {
     if (!summary.trim()) return
     if (d.isHead) {
@@ -188,6 +190,14 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
               disabled: f.status === 'deleted',
               onSelect: () => act.setCenter(repoId, { kind: 'blame', path: f.path, rev: d.sha })
             },
+            ...(canPatch
+              ? ([
+                  { type: 'separator' },
+                  { type: 'item', label: 'Remove from this commit', icon: <X size={14} />, onSelect: () => act.patchOut(repoId, { sha: d.sha, path: f.path, oldPath: f.origPath, part: null }, 'remove') },
+                  { type: 'item', label: 'Move to a new commit…', icon: <FilePlus2 size={14} />, onSelect: () => act.patchOut(repoId, { sha: d.sha, path: f.path, oldPath: f.origPath, part: null }, 'split') },
+                  { type: 'item', label: 'Move to staged changes', icon: <ListPlus size={14} />, onSelect: () => act.patchOut(repoId, { sha: d.sha, path: f.path, oldPath: f.origPath, part: null }, 'stage') }
+                ] as const)
+              : []),
             { type: 'separator' },
             { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(f.path) }
           ]}

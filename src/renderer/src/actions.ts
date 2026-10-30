@@ -732,6 +732,58 @@ export function moveCommit(repoId: string, sha: string, direction: 'up' | 'down'
   )
 }
 
+// ---------- custom patches: taking changes out of a commit ----------
+
+export type PatchInput = { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null }
+
+/** Why changes can't be taken out of this commit (not on the branch's own line, a merge, the first commit), or null. */
+export function patchProblem(repoId: string, sha: string): string | null {
+  const commits = useApp.getState().repos[repoId]?.commits ?? []
+  const parents = commits.find((c) => c.sha === sha)?.parents
+  if (!headLine(repoId).includes(sha)) return 'Only commits on the checked-out branch’s own line can be changed.'
+  if (!parents || parents.length !== 1) return parents?.length ? 'Merge commits can’t be changed here.' : 'The very first commit can’t be changed here.'
+  if (mergeAbove(repoId, sha)) return 'There’s a merge commit after this one on the branch, and rewriting would flatten it.'
+  return null
+}
+
+/**
+ * Takes a file, a block or some lines out of a commit: dropped, into a new commit right after it (asks for its
+ * message first), or staged on top of the branch. The commits after it are replayed; undo puts it all back.
+ */
+export function patchOut(repoId: string, input: PatchInput, action: 'remove' | 'split' | 'stage', message?: string, done?: (ok: boolean) => void): void {
+  if (blocked(repoId, 'Taking changes out of a commit')) return
+  const short = input.sha.slice(0, 7)
+  if (action === 'split' && message === undefined) {
+    const summary = useApp.getState().repos[repoId]?.commits.find((c) => c.sha === input.sha)?.summary ?? ''
+    openDialog({ kind: 'patchCommit', repoId, input, summary })
+    return
+  }
+  const titles = { remove: `Removed the changes from ${short}`, split: `Moved the changes to a new commit after ${short}`, stage: `Moved the changes out of ${short}; they’re staged` }
+  let staged: boolean | undefined
+  guardPushed(repoId, [input.sha], 'Change the commit', () =>
+    void rewriteOp(
+      repoId,
+      async () => {
+        const res = await call('history.patchOut', { repoId, ...input, action, message })
+        staged = res.staged
+        return res
+      },
+      `Couldn’t change ${short}`,
+      titles[action],
+      headLine(repoId).indexOf(input.sha)
+    ).then((ok) => {
+      if (ok && staged === false) {
+        toast({ tone: 'info', title: 'Taken out, but not staged', body: `The commits after ${short} changed those lines, so they couldn’t be put back on top. Undo puts them back in the commit.` })
+      }
+      // The diff on screen was of the commit as it was.
+      const c = useApp.getState().repos[repoId]?.center
+      if (ok && c?.kind === 'diff' && c.source.kind === 'commit' && c.source.sha === input.sha) setCenter(repoId, { kind: 'graph' })
+      if (ok && action === 'stage') select(repoId, 'wip')
+      done?.(ok)
+    })
+  )
+}
+
 // ---------- fixups ----------
 
 /** Something staged, and no merge, rebase or cherry-pick paused: what putting changes into a commit needs. */
