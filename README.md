@@ -136,6 +136,12 @@ works offline, and it doesn't phone home.
 
 ![The merge tool, with yours, the common ancestor and theirs side by side](docs/images/merge.png)
 
+## User guide
+
+How to do each of these, step by step, is in the [user guide](docs/README.md): getting started, the graph, staging,
+branches, syncing, rewriting history, conflicts, bisect, submodules, worktrees, Git LFS, undo, settings and
+keyboard shortcuts.
+
 ## Requirements
 
 - **Git 2.30 or newer** on your `PATH` (tested with 2.47).
@@ -202,20 +208,8 @@ resources/       the app icon (SVG masters and generated PNG / ICO)
 
 ## Troubleshooting
 
-### `npm run dev` stops with "Error: Electron uninstall"
-
-The `electron` package is installed, but its binary isn't. Electron downloads it in an install script that runs
-during `npm ci`, and that script didn't run, usually because npm is set to skip install scripts
-(`npm config get ignore-scripts` prints `true`), or because `npm ci` was stopped before it finished. Run the script
-yourself:
-
-```bash
-node node_modules/electron/install.js
-npm run dev
-```
-
-If it can't download (behind a proxy, or offline), set `ELECTRON_MIRROR` to a mirror you can reach and run it again.
-With `ignore-scripts` on, you need that first line again after each `npm ci`.
+See [Troubleshooting](docs/troubleshooting.md) in the user guide, including what to do when `npm run dev` stops
+with "Error: Electron uninstall".
 
 ## Contributing
 
