@@ -75,7 +75,7 @@ works offline, and it doesn't phone home.
 
 ### Sync
 
-- Fetch, pull (merge, fast-forward only, fast-forward when possible, or rebase), push, force push with lease.
+- Fetch, pull (fast-forward when possible, fast-forward only, or rebase), push, force push with lease.
 - With several remotes, push the current branch or a tag to whichever one you pick.
 - Set upstreams, add and remove remotes.
 - Fetch in the background, every 1 to 60 minutes, without ever asking for a password.
@@ -106,7 +106,7 @@ works offline, and it doesn't phone home.
 
 - A badge on LFS files, and a diff that says how the file changed.
 - Track or stop tracking a file, or all files with its extension, from the file's menu. Says when LFS isn't
-  installed or set up, and sets it up for you.
+  installed or turned on, and turns it on for you.
 
 ### Undo
 
