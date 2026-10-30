@@ -4,6 +4,7 @@ import type { ResetMode } from '../../../shared/types'
 import { Button, Checkbox, Dialog, Field, Select, TextArea, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
+import { plural } from '@/lib/format'
 import { useApp, type Dialog as D } from '@/store'
 import * as act from '@/actions'
 
@@ -293,6 +294,47 @@ export function SubmoduleUrlDialog({ d }: { d: Extract<D, { kind: 'submoduleUrl'
         <Field label="URL" error={problem} help="Saved in .gitmodules, staged for your next commit. If the submodule is set up here, its remote changes too.">
           {(f) => <TextInput {...f} autoFocus value={url} onChange={(e) => setUrl(e.target.value)} />}
         </Field>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+/** The new commit that changes taken out of a commit go into, right after it. */
+export function PatchCommitDialog({ d }: { d: Extract<D, { kind: 'patchCommit' }> }): React.JSX.Element {
+  const [summary, setSummary] = useState(d.summary)
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = (): void => {
+    if (!summary.trim() || busy) return
+    setBusy(true)
+    act.patchOut(d.repoId, d.input, 'split', body.trim() ? `${summary.trim()}\n\n${body.trim()}` : summary.trim(), (ok) => {
+      setBusy(false)
+      if (ok) close()
+    })
+  }
+  const what = d.input.part ? (d.input.part.lines ? plural(d.input.part.lines.length, 'line') : 'This block') : d.input.path
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && !busy && close()}
+      title="Move to a new commit"
+      footer={
+        <>
+          <Button disabled={busy} onClick={close}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!summary.trim()} loading={busy} onClick={submit}>
+            Move to a new commit
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={submit}>
+        <p className="text-sm text-muted">
+          {d.input.part ? `${what} from ${d.input.path}` : `The changes to ${what}`} leave commit {d.input.sha.slice(0, 7)} and go into a new commit right after it. The files end up the same.
+        </p>
+        <Field label="Summary">{(f) => <TextInput {...f} autoFocus value={summary} onChange={(e) => setSummary(e.target.value)} />}</Field>
+        <Field label="Description (optional)">{(f) => <TextArea {...f} value={body} onChange={(e) => setBody(e.target.value)} />}</Field>
       </DialogForm>
     </Dialog>
   )

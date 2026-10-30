@@ -818,6 +818,38 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       return result
     })
   )
+  handle(
+    'history.patchOut',
+    z.object({
+      ...R,
+      sha,
+      path: filePath,
+      oldPath: filePath.optional(),
+      part: z.object({ hunk: z.number().int().min(0), header: z.string().max(1000), lines: z.array(z.number().int().min(0)).max(100_000).nullable(), full: z.boolean() }).nullable(),
+      action: z.enum(['remove', 'split', 'stage']),
+      message: z.string().max(100_000).optional()
+    }),
+    ({ repoId, ...input }) =>
+      exclusive(repoId, async () => {
+        const o = ops(repoId)
+        const before = await undo.snapshot(o)
+        const short = input.sha.slice(0, 7)
+        const label = { remove: `Remove changes from ${short}`, split: `Split changes out of ${short}`, stage: `Move changes out of ${short} to staged` }[input.action]
+        const res = await o.patchOut(input, rewriteDir(repoId))
+        if (res.result === 'conflicts') {
+          undo.setPending(repoId, 'rebase', label, before)
+          return res
+        }
+        const after = await undo.snapshot(o)
+        if (res.staged) {
+          // Undo needs what was staged: kept as a commit on top, under an undo ref.
+          const stash = (await o.git(['commit-tree', (await o.git(['write-tree'])).trim(), '-p', after.sha!, '-m', 'caboose: staged changes'])).trim()
+          await o.mut(['update-ref', `${UNDO_REFS}${uuid()}`, stash])
+          undo.record(repoId, 'staged_rewrite', label, before, { ...after, stash })
+        } else undo.record(repoId, 'rebase', label, before, after)
+        return res
+      })
+  )
   handle('history.fixupCommit', z.object({ ...R, sha, noVerify: z.boolean().optional() }), ({ repoId, sha, noVerify }) =>
     undoable(repoId, 'commit', `Fixup commit for ${sha.slice(0, 7)}`, async () => (await ops(repoId).fixupCommit(sha, noVerify ?? false), null))
   )

@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, FileWarning, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, Space, UserSearch, WrapText, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, Space, UserSearch, WrapText, X } from 'lucide-react'
 import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
-import { Button, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
+import { Button, DropdownMenu, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { fileSize, plural, shortSha, splitPath } from '@/lib/format'
@@ -64,6 +64,11 @@ export function DiffView({
   const editable = source.kind !== 'commit'
   // With whitespace left out, the blocks on screen aren't the file's real ones, so they can't be staged.
   const canStage = editable && !ignoreWs
+  // A commit of the checked-out branch, opened on its own (not inside a comparison or a file's history): blocks and
+  // lines can be taken out of it.
+  const commits = useRepo(repoId, (r) => r.commits)
+  const patchSha = source.kind === 'commit' && !embedded && !ignoreWs ? source.sha : null
+  const canPatch = !!patchSha && act.patchProblem(repoId, patchSha) === null && commits.find((c) => c.sha === patchSha)?.parents[0] === (source.kind === 'commit' ? source.parent : null)
 
   // A new file, source or layout starts from a blank view; a status refresh (after staging, or a change on
   // disk) quietly reloads the same view.
@@ -142,6 +147,11 @@ export function DiffView({
       undoable: true,
       onConfirm: () => void go()
     })
+  }
+
+  const runPatch = (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage'): void => {
+    if (!diff || !patchSha) return
+    act.patchOut(repoId, { sha: patchSha, path, oldPath, part: { hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline' } }, action)
   }
 
   const jump = (dirn: 1 | -1): void => {
@@ -320,6 +330,8 @@ export function DiffView({
                   showHeader={mode !== 'inline' || diff.hunks.length > 1}
                   source={source}
                   partialOk={!diff.oldPath && canStage}
+                  patchOk={!diff.oldPath && canPatch}
+                  onPatch={runPatch}
                   newFile={diff.isNew && source.kind === 'worktree'}
                   sel={sel?.hunk === i ? sel : null}
                   busy={busy}
@@ -329,7 +341,7 @@ export function DiffView({
                 {mode === 'split' ? (
                   <SplitHunk h={h} lang={lang} wrap={wrap} />
                 ) : (
-                  <UnifiedHunk h={h} index={i} lang={lang} wrap={wrap} selectable={canStage && !diff.oldPath} sel={sel?.hunk === i ? sel : null} onSelect={setSel} onRun={run} source={source} />
+                  <UnifiedHunk h={h} index={i} lang={lang} wrap={wrap} selectable={(canStage || canPatch) && !diff.oldPath} sel={sel?.hunk === i ? sel : null} onSelect={setSel} onRun={run} source={source} />
                 )}
               </section>
             ))}
@@ -351,6 +363,8 @@ function HunkBar({
   showHeader,
   source,
   partialOk,
+  patchOk,
+  onPatch,
   newFile,
   sel,
   busy,
@@ -362,20 +376,44 @@ function HunkBar({
   showHeader: boolean
   source: DiffSource
   partialOk: boolean
+  /** A commit's block that can be taken out of it. */
+  patchOk: boolean
+  onPatch: (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage') => void
   newFile: boolean
   sel: Selection | null
   busy: boolean
   onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard') => void
   onClear: () => void
 }): React.JSX.Element | null {
-  if (!showHeader && source.kind === 'commit') return null
+  if (!showHeader && source.kind === 'commit' && !patchOk) return null
   const lines = sel ? [...sel.lines].sort((a, b) => a - b) : null
   const n = lines?.length ?? 0
   const what = n ? plural(n, 'line') : 'block'
   return (
     <div className="sticky top-0 z-[1] flex min-h-7 items-center gap-2 bg-surface-raised px-3 py-0.5 font-sans">
       <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{showHeader ? h.header : ''}</span>
-      {source.kind === 'commit' || !partialOk ? null : (
+      {source.kind === 'commit' && patchOk ? (
+        <div className="flex shrink-0 items-center gap-1">
+          {n ? (
+            <Button size="sm" variant="ghost" onClick={onClear}>
+              Clear
+            </Button>
+          ) : null}
+          <DropdownMenu
+            trigger={
+              <Button size="sm" variant="secondary" disabled={busy}>
+                Take {what} out
+                <ChevronDown size={14} aria-hidden />
+              </Button>
+            }
+            items={[
+              { type: 'item', label: 'Remove from this commit', icon: <X size={14} />, onSelect: () => onPatch(index, lines, 'remove') },
+              { type: 'item', label: 'Move to a new commit…', icon: <FilePlus2 size={14} />, onSelect: () => onPatch(index, lines, 'split') },
+              { type: 'item', label: 'Move to staged changes', icon: <ListPlus size={14} />, onSelect: () => onPatch(index, lines, 'stage') }
+            ]}
+          />
+        </div>
+      ) : source.kind === 'commit' || !partialOk ? null : (
         <div className="flex shrink-0 items-center gap-1">
           {n ? (
             <Button size="sm" variant="ghost" onClick={onClear}>

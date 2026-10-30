@@ -102,6 +102,8 @@ export type Dialog =
   | { kind: 'addWorktree'; repoId: string; branch?: string; remote?: string; at?: string; atLabel?: string }
   | { kind: 'addSubmodule'; repoId: string }
   | { kind: 'submoduleUrl'; repoId: string; path: string; url: string }
+  /** The message for a new commit made of changes taken out of another (`input`). */
+  | { kind: 'patchCommit'; repoId: string; input: import('./actions').PatchInput; summary: string }
   /** Pick two branches or commits to compare. */
   | { kind: 'compare'; repoId: string }
   | {

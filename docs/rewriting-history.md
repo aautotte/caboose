@@ -22,6 +22,28 @@ To change the last commit's message and content at once, use **Amend last commit
 **Move commit up** and **Move commit down** in a commit's menu swap it with its neighbour on the current branch.
 Merge commits don't move.
 
+## Take changes out of a commit
+
+A commit that does two things, or a change that went into the wrong commit: take it out. Pick what:
+
+- **a whole file**: right-click it in the commit's file list, in the details panel;
+- **a block, or some lines**: open the file's diff from the commit, pick lines by clicking their numbers
+  (Shift-click for a range, or the arrow keys and Space), then use the button on the block's bar, **Take block out**
+  or **Take *n* lines out**.
+
+Then choose:
+
+- **Remove from this commit**: the changes are gone from the commit, and from the commits after it.
+- **Move to a new commit…**: they leave the commit and go into a new commit right after it, with the message you
+  give. The files end up exactly as they were, so this is how you split a commit in two.
+- **Move to staged changes**: they leave the commit and come back staged, on top of the branch, ready to commit
+  somewhere else or to [amend into another commit](#fix-up-an-older-commit). If later commits change the same
+  lines, Caboose says so and changes nothing.
+
+This works for commits on the checked-out branch's own line, except merge commits, the very first commit, and
+commits with a merge after them. It needs a clean working copy. Renamed and binary files can only be taken out
+whole. Undo puts the commit back as it was.
+
 ## Fix up an older commit
 
 You spotted a mistake a few commits back. Stage the fix, then:

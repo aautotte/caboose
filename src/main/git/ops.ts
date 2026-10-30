@@ -65,6 +65,9 @@ export interface RepoCtx {
   path: string
 }
 
+/** A step of a rebase the app builds itself: `exec` runs shell commands right after the commit is picked. */
+type Step = RebaseStep & { exec?: string[] }
+
 const MAX_DIFF_BYTES = 1_000_000
 const MAX_DIFF_LINES = 20_000
 
@@ -1575,7 +1578,7 @@ export class RepoOps {
    * pre-commit and commit-msg on a reword) unless `noVerify`, as for a commit; one that refuses stops it all, and the
    * branch is put back as it was.
    */
-  async rebaseInteractive(onto: string, plan: RebaseStep[], tmpDir: string, noVerify = false, autostash = false): Promise<OpResult> {
+  async rebaseInteractive(onto: string, plan: Step[], tmpDir: string, noVerify = false, autostash = false): Promise<OpResult> {
     this.safeRev(onto)
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('This range has merge commits. Interactive rebase here would flatten them, so it isn’t offered.')
@@ -1600,6 +1603,7 @@ export class RepoOps {
         writeFileSync(msgFile, (s.message ?? '').trim() + '\n')
         lines.push(`pick ${s.sha}`, `exec git commit --amend --only -q ${noVerify ? '--no-verify ' : ''}--cleanup=strip -F ${shq(msgFile)}`)
       } else lines.push(`${s.action} ${s.sha}`)
+      for (const c of s.exec ?? []) lines.push(`exec ${c}`)
     })
     const todo = join(tmpDir, 'todo.txt')
     writeFileSync(todo, lines.join('\n') + '\n')
@@ -1620,6 +1624,11 @@ export class RepoOps {
         throw new GcFail('git', `The pre-rebase hook refused, so nothing changed.${quote} Tick Skip hooks to rebase anyway.`, detail)
       }
       if ((await this.opState()).kind === 'rebase') {
+        // Changes taken out of a commit that no longer apply there: nothing to resolve by hand. Put it all back.
+        if (/Execution failed: git apply/i.test(detail)) {
+          await this.mut(['rebase', '--abort'])
+          throw invalid('Those changes can’t be taken out of the commit cleanly, so nothing changed.')
+        }
         // A reword's commit stopped by a hook (pre-commit, commit-msg): not a conflict to sort out. Put it all back.
         if (/Execution failed: git commit/i.test(detail)) {
           await this.mut(['rebase', '--abort'])
@@ -1646,7 +1655,7 @@ export class RepoOps {
   }
 
   /** Replays everything after `onto` with a plan made from the commits (oldest first). */
-  private async rewrite(onto: string, tmpDir: string, build: (rows: RebaseRow[]) => RebaseStep[], noVerify = false, autostash = false): Promise<OpResult> {
+  private async rewrite(onto: string, tmpDir: string, build: (rows: RebaseRow[]) => Step[], noVerify = false, autostash = false): Promise<OpResult> {
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('There are merge commits after this one on the branch, so this can’t be rewritten without flattening them.')
     return this.rebaseInteractive(onto, build(preview.rows), tmpDir, noVerify, autostash)
@@ -1665,6 +1674,81 @@ export class RepoOps {
 
   private async hasStaged(): Promise<boolean> {
     return !!(await this.git(['diff', '--cached', '--name-only'])).trim()
+  }
+
+  // ---------- custom patches: taking changes out of a commit ----------
+
+  /**
+   * Takes some of a commit's changes out of it (lazygit's custom patches): a whole file, one block, or some lines.
+   * `remove` drops them; `split` puts them in a new commit right after it, so the files end up the same; `stage`
+   * takes them out and stages them on top of the branch. The commits after it are replayed.
+   *
+   * The patch is built the way unstaging builds one (unpicked added lines kept as context), so `git apply -R` takes
+   * it out of the commit and `git apply` puts it back on top of what's left. Needs a clean working copy.
+   */
+  async patchOut(
+    input: { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null; action: 'remove' | 'split' | 'stage'; message?: string },
+    tmpDir: string
+  ): Promise<OpResult & { staged?: boolean }> {
+    const { full, onto } = await this.rewritable(input.sha)
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes first: taking changes out of a commit needs a clean working copy.')
+    const message = input.message?.trim()
+    if (input.action === 'split' && !message) throw invalid('Add a summary for the new commit.')
+    const path = this.safePath(input.path)
+    const old = input.oldPath ? this.safePath(input.oldPath) : undefined
+    const specs = old && old !== path ? ['--', old, path] : ['--', path]
+    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '-M']
+    let patch: string
+    if (!input.part) {
+      patch = await this.git(['diff', ...base, '--binary', onto, full, ...specs])
+      if (!patch.trim()) throw invalid(`This commit doesn’t change ${path}.`)
+    } else {
+      const raw = await this.git(['diff', ...base, ...(input.part.full ? ['--unified=1000000'] : []), onto, full, ...specs])
+      if (/^(rename from|Binary files|GIT binary patch)/m.test(raw)) throw invalid('Renamed and binary files can only be taken out as a whole.')
+      const built = buildPartialPatch(raw, input.part.hunk, input.part.lines, true)
+      if (!built || built.header !== input.part.header) throw new GcFail('changed_outside', 'This commit changed since it was shown. Look at it again, then retry.')
+      patch = built.patch
+    }
+    // Not in tmpDir: the rebase empties that.
+    const dir = `${tmpDir}-patch`
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    const patchFile = join(dir, 'change.patch')
+    writeFileSync(patchFile, patch)
+    const shq = (p: string): string => "'" + p.split('\\').join('/').split("'").join("'\\''") + "'"
+    // On the index only, which holds git's own bytes (line-ending conversion would trip an apply to the files);
+    // the files follow with a reset, safe mid-rebase where nothing else is changed.
+    const exec = [`git apply --cached -R --whitespace=nowarn ${shq(patchFile)} && git commit --amend -q --no-edit --no-verify --allow-empty && git reset -q --hard`]
+    if (input.action === 'split') {
+      const msgFile = join(dir, 'message.txt')
+      writeFileSync(msgFile, message + '\n')
+      exec.push(`git apply --cached --whitespace=nowarn ${shq(patchFile)} && git commit -q --no-verify --cleanup=strip -F ${shq(msgFile)} && git reset -q --hard`)
+    }
+    try {
+      const result = await this.rewrite(onto, tmpDir, (rows) => rows.map((r) => (r.sha === full ? { sha: r.sha, action: 'pick', exec } : { sha: r.sha, action: 'pick' })))
+      if (result.result === 'conflicts' && input.action === 'stage') {
+        // The commits after it build on those lines: staging them on top wouldn't make sense. Put it all back.
+        await this.mut(['rebase', '--abort'])
+        throw invalid('The commits after this one change the same lines, so they can’t be moved out to the staged changes. Nothing changed.')
+      }
+      if (result.result !== 'ok' || input.action !== 'stage') return result
+      // Back on top, staged: into the index (if the later commits moved the lines, a three-way apply may still place
+      // them), then the files from the index. Nothing else is changed, so overwriting them is safe.
+      const paths = [...new Set([path, ...(old ? [old] : [])])]
+      const applied =
+        (await this.tryGit(['apply', '--cached', '--whitespace=nowarn', patchFile])) !== null || (await this.tryGit(['apply', '--cached', '--3way', '--whitespace=nowarn', patchFile])) !== null
+      if (!applied) {
+        await this.tryGit(['reset', '-q', '--', ...paths])
+        return { ...result, staged: false }
+      }
+      for (const p of paths) {
+        if ((await this.git(['ls-files', '-z', '--', p])).length) await this.mut(['checkout', '-q', '--', p])
+        else rmSync(join(this.repo.path, p), { force: true })
+      }
+      return { ...result, staged: true }
+    } finally {
+      if ((await this.opState()).kind !== 'rebase') rmSync(dir, { recursive: true, force: true })
+    }
   }
 
   // ---------- fixups ----------
