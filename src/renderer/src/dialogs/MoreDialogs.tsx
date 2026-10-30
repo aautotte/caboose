@@ -182,6 +182,122 @@ export function AddRemoteDialog({ d }: { d: Extract<D, { kind: 'addRemote' }> })
   )
 }
 
+const urlProblemOf = (url: string): string | undefined => (url && (/\s/.test(url) || url.startsWith('-')) ? 'That doesn’t look like a repository URL or path.' : undefined)
+
+/** "lib" from https://host/team/lib.git, git@host:team/lib.git or ../lib. */
+const repoNameOf = (url: string): string =>
+  url
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/:]/)
+    .pop()
+    ?.replace(/\.git$/, '') ?? ''
+
+/** git submodule add: another repository cloned into a folder of this one, at a commit this one records. */
+export function AddSubmoduleDialog({ d }: { d: Extract<D, { kind: 'addSubmodule' }> }): React.JSX.Element {
+  const subs = useApp((s) => s.repos[d.repoId]?.submodules?.list) ?? []
+  const [url, setUrl] = useState('')
+  const [path, setPath] = useState('')
+  const [pathEdited, setPathEdited] = useState(false)
+  const [branch, setBranch] = useState('')
+  const [busy, setBusy] = useState(false)
+  // The folder follows the URL until the user types one.
+  const folder = pathEdited ? path : repoNameOf(url.trim())
+  const p = folder.trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  const urlProblem = urlProblemOf(url.trim())
+  const pathProblem = !p
+    ? undefined
+    : /^\/|^[A-Za-z]:|(^|\/)\.\.?(\/|$)/.test(p)
+      ? 'A folder inside the repository, like libs/name.'
+      : subs.some((m) => m.path === p)
+        ? 'There’s already a submodule in that folder.'
+        : undefined
+  const branchProblem = branch.trim() && (/\s/.test(branch.trim()) || branch.trim().startsWith('-')) ? 'That isn’t a valid branch name.' : undefined
+  const ready = !!url.trim() && !!p && !urlProblem && !pathProblem && !branchProblem
+  const submit = async (): Promise<void> => {
+    if (!ready || busy) return
+    setBusy(true)
+    const ok = await act.addSubmodule(d.repoId, { url: url.trim(), path: p, branch: branch.trim() || undefined })
+    setBusy(false)
+    if (ok) close()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && !busy && close()}
+      title="Add a submodule"
+      footer={
+        <>
+          <Button disabled={busy} onClick={close}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            Add submodule
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <p className="text-sm text-muted">Another repository, cloned into a folder of this one. This repository records which of its commits to use.</p>
+        <Field label="Repository URL" error={urlProblem} help="HTTPS, SSH (git@host:owner/repo.git) or a path.">
+          {(f) => <TextInput {...f} autoFocus value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/owner/repo.git" />}
+        </Field>
+        <Field label="Folder" error={pathProblem} help="Inside this repository. It’s created for you.">
+          {(f) => (
+            <TextInput
+              {...f}
+              value={folder}
+              onChange={(e) => {
+                setPath(e.target.value)
+                setPathEdited(true)
+              }}
+              placeholder="libs/name"
+            />
+          )}
+        </Field>
+        <Field label="Branch (optional)" error={branchProblem} help="The branch to follow when updating it from its remote. Empty: the remote’s default branch.">
+          {(f) => <TextInput {...f} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />}
+        </Field>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+/** git submodule set-url: where the submodule is cloned from, for everyone once committed. */
+export function SubmoduleUrlDialog({ d }: { d: Extract<D, { kind: 'submoduleUrl' }> }): React.JSX.Element {
+  const [url, setUrl] = useState(d.url)
+  const [busy, setBusy] = useState(false)
+  const problem = urlProblemOf(url.trim())
+  const ready = !!url.trim() && url.trim() !== d.url && !problem
+  const submit = async (): Promise<void> => {
+    if (!ready || busy) return
+    setBusy(true)
+    const ok = await act.setSubmoduleUrl(d.repoId, d.path, url.trim())
+    setBusy(false)
+    if (ok) close()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title={`Change the URL of ${d.path}`}
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            Change URL
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <Field label="URL" error={problem} help="Saved in .gitmodules, staged for your next commit. If the submodule is set up here, its remote changes too.">
+          {(f) => <TextInput {...f} autoFocus value={url} onChange={(e) => setUrl(e.target.value)} />}
+        </Field>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
 const resetModes: Array<{ mode: ResetMode; title: string; body: string }> = [
   { mode: 'soft', title: 'Keep changes staged', body: 'Moves the branch back. Everything from the commits after it ends up staged, ready to commit again.' },
   { mode: 'mixed', title: 'Keep changes, unstaged', body: 'Moves the branch back. Your files stay as they are; the changes show as not staged.' },

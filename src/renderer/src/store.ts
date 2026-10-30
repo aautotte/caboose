@@ -97,6 +97,8 @@ export type Dialog =
   | { kind: 'profiles'; edit?: string }
   /** A new worktree: of `branch` (local, free), as a new branch tracking `remote` (a remote branch's short name), or from the commit `at`. */
   | { kind: 'addWorktree'; repoId: string; branch?: string; remote?: string; at?: string; atLabel?: string }
+  | { kind: 'addSubmodule'; repoId: string }
+  | { kind: 'submoduleUrl'; repoId: string; path: string; url: string }
   | {
       kind: 'confirm'
       title: string

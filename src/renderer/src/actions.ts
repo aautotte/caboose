@@ -321,6 +321,40 @@ export function removeSubmodules(repoId: string, paths: string[]): void {
   })
 }
 
+/** git submodule add: clones it into the folder and stages it, ready to commit. */
+export async function addSubmodule(repoId: string, input: { url: string; path: string; branch?: string }): Promise<boolean> {
+  let path = input.path
+  const ok = await subOp(repoId, `Adding ${input.path}`, async (opId) => (path = (await call('submodule.add', { repoId, ...input, opId })).path), 'Couldn’t add the submodule')
+  if (ok) toast({ tone: 'success', title: `Added the submodule ${path}`, body: 'It’s staged, with .gitmodules. Commit to add it to the repository.' })
+  return ok
+}
+
+/** Changes the URL in .gitmodules (staged) and, where it's set up, the submodule's own remote. */
+export async function setSubmoduleUrl(repoId: string, path: string, url: string): Promise<boolean> {
+  const ok = await attempt(() => call('submodule.setUrl', { repoId, path, url }), 'Couldn’t change the URL')
+  if (ok !== undefined) toast({ tone: 'success', title: `Changed the URL of ${path}`, body: 'The change to .gitmodules is staged. Commit it so others get the new URL.' })
+  await loadSubmodules(repoId)
+  await loadStatus(repoId)
+  return ok !== undefined
+}
+
+/** git rm on the submodule: the removal is staged, to commit. Its history stays under .git/modules. */
+export function deleteSubmodule(repoId: string, path: string): void {
+  confirm({
+    title: `Remove the submodule ${path} from the repository?`,
+    body: `This deletes the folder ${path} and takes the submodule out of .gitmodules. The removal is staged: commit it to remove the submodule for everyone. Older commits still have it.`,
+    confirmLabel: 'Remove submodule',
+    danger: true,
+    undoable: false,
+    onConfirm: async () => {
+      const ok = await attempt(() => call('submodule.delete', { repoId, path }), `Couldn’t remove ${path}`)
+      if (ok !== undefined) toast({ tone: 'success', title: `Removed the submodule ${path}`, body: 'The removal is staged. Commit it to finish.' })
+      await loadSubmodules(repoId)
+      await loadStatus(repoId)
+    }
+  })
+}
+
 export async function setSubmoduleMode(repoId: string, names: string[], mode: SubmoduleMode | null): Promise<void> {
   await attempt(() => call('submodule.setMode', { repoId, names, mode }), 'Couldn’t change the mode')
   await loadSubmodules(repoId)

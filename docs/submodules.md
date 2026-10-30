@@ -19,13 +19,27 @@ When the checked-out commit has submodules, the branches panel lists them. Each 
 
 Hover a submodule to see its path, the commit it's at, the commit it should be at and its mode.
 
-**Set up** downloads a submodule; the button on the section header sets up all of them. Right-click the header
-for **Set up all**, **Update all to the expected commits**, **Submodule settings…** and **Remove all local
-copies…**.
+**Set up** downloads a submodule; the button on the section header sets up all of them (once they're all set up,
+it adds one). Right-click the header for **Add a submodule…**, **Set up all**, **Update all to the expected
+commits**, **Submodule settings…** and **Remove all local copies…**.
 
 A submodule's own menu has **Open** (in a new tab, as a repository of its own), **Update to the expected commit**,
-**Mode**, **Show in folder**, **Copy path** and **Remove local copy…**. Removing the local copy empties the folder;
-it's refused while the submodule has uncommitted changes.
+**Mode**, **Show in folder**, **Change URL…**, **Copy path**, **Remove local copy…** and **Remove from the
+repository…**. Removing the local copy empties the folder; it's refused while the submodule has uncommitted changes.
+
+## Add, change or remove a submodule
+
+Each of these changes `.gitmodules` and the pointer, and stages them: commit to share the change with others.
+
+- **Add a submodule…**, in the section header's menu or the command palette (the only place while there are
+  none): the repository's URL, the folder to put it in (filled in from the URL) and, if you like, a branch to follow. Caboose
+  clones it there.
+- **Change URL…**: where the submodule is cloned from, for example after the repository moved. If it's set up here,
+  its own remote changes too.
+- **Remove from the repository…**: deletes the submodule's folder and takes it out of `.gitmodules`; removing the
+  last one removes `.gitmodules` too. It's refused while the submodule has uncommitted changes. Its history stays in
+  `.git/modules`, since older commits still point at it, so adding a submodule in the same folder later gives it a
+  name of its own.
 
 ## Modes
 

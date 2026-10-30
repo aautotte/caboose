@@ -78,6 +78,9 @@ export interface Api {
   'submodule.setup': { in: R & { paths: string[] | 'all'; shallow?: boolean; opId: string }; out: null }
   'submodule.update': { in: R & { paths: string[] | 'all'; opId: string }; out: null }
   'submodule.remove': { in: R & { paths: string[] }; out: null }
+  'submodule.add': { in: R & { url: string; path: string; branch?: string; opId: string }; out: { path: string } }
+  'submodule.setUrl': { in: R & { path: string; url: string }; out: null }
+  'submodule.delete': { in: R & { path: string }; out: null }
   'submodule.setMode': { in: R & { names: string[]; mode: SubmoduleMode | null }; out: null }
   'submodule.settings': { in: R & Partial<SubmoduleSettings>; out: SubmoduleSettings }
 

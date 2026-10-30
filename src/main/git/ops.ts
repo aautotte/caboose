@@ -309,6 +309,70 @@ export class RepoOps {
     await this.mut(['submodule', 'deinit', '--', ...safe])
   }
 
+  private safeUrl(url: string): string {
+    const u = url.trim()
+    if (!u || u.startsWith('-') || /[\s\0]/.test(u)) throw invalid('That doesn’t look like a repository URL or path.')
+    return u
+  }
+
+  private async knownSubmodule(path: string): Promise<Submodule> {
+    const p = this.safePath(path)
+    const m = (await this.submodules()).find((s) => s.path === p)
+    if (!m) throw invalid(`${p} isn’t a submodule of this repository.`)
+    return m
+  }
+
+  /**
+   * git submodule add: clones `url` into `path` and stages it with .gitmodules. Git keeps a removed submodule's
+   * history under .git/modules, and won't clone over it: then the new one gets a name of its own (path-2, …).
+   */
+  async submoduleAdd(input: { url: string; path: string; branch?: string }, opId: string, onProgress: RunOptions['onProgress']): Promise<string> {
+    const url = this.safeUrl(input.url)
+    const path = this.safePath(input.path)
+    if (input.branch) await this.safeBranchName(input.branch)
+    const modules = join(resolve(this.repo.path, (await this.git(['rev-parse', '--git-common-dir'])).trim()), 'modules')
+    const staged = await this.tryGit(['cat-file', '-e', ':.gitmodules'])
+    const declared = new Set(
+      (await this.configEntries(staged !== null ? ['--blob', ':.gitmodules'] : ['--file', join(this.repo.path, '.gitmodules')], '^submodule\\..*\\.path$')).map((e) => e.sub)
+    )
+    let name = path
+    for (let i = 2; existsSync(join(modules, name)) || declared.has(name); i++) name = `${path}-${i}`
+    await this.mut(['submodule', 'add', '--progress', ...(name !== path ? ['--name', name] : []), ...(input.branch ? ['-b', input.branch] : []), '--', url, path], {
+      opId,
+      onProgress,
+      timeoutMs: 3_600_000
+    })
+    return path
+  }
+
+  /** Points a submodule at another URL: .gitmodules (staged, to commit) and, where it's set up, its own remote. */
+  async submoduleSetUrl(path: string, url: string): Promise<void> {
+    const m = await this.knownSubmodule(path)
+    const u = this.safeUrl(url)
+    await this.mut(['submodule', 'set-url', '--', m.path, u])
+    await this.mut(['add', '--', '.gitmodules'])
+  }
+
+  /**
+   * Takes a submodule out of the repository: its pointer and its .gitmodules entry (both staged, to commit), its
+   * folder, and its settings here. Its history stays under .git/modules, which older commits still need.
+   */
+  async submoduleDelete(path: string): Promise<void> {
+    const m = await this.knownSubmodule(path)
+    await this.submodulesClean([m.path])
+    // git rm and deinit refuse while .gitmodules has unstaged changes; they'd be committed with the removal anyway.
+    if (existsSync(join(this.repo.path, '.gitmodules'))) await this.mut(['add', '--', '.gitmodules'])
+    if (m.setUp) await this.mut(['submodule', 'deinit', '--', m.path])
+    await this.mut(['rm', '-q', '--', m.path])
+    if (!/[\0\r\n"\\]/.test(m.name)) {
+      await this.tryGit(['config', '--local', '--remove-section', `submodule.${m.name}`])
+      await this.tryGit(['config', '--local', '--remove-section', `caboose-submodule.${m.name}`])
+    }
+    // The last one gone: an empty .gitmodules goes too (-f: git rm just staged it, and it's empty).
+    const gm = join(this.repo.path, '.gitmodules')
+    if (existsSync(gm) && !readFileSync(gm, 'utf8').trim()) await this.mut(['rm', '-q', '-f', '--', '.gitmodules'])
+  }
+
   /** Submodule pointers that differ between two commits: moved, only in `to` (added), or only in `from` (removed). */
   private async pointerChanges(from: string, to: string): Promise<Array<{ path: string; from: string | null; to: string | null }>> {
     const out = (await this.tryGit(['diff', '--raw', '--no-abbrev', '-z', '--no-renames', '--ignore-submodules=none', this.safeRev(from), this.safeRev(to)])) ?? ''
