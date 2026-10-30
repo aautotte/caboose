@@ -15,6 +15,7 @@ export type Center =
   /** `ontoBranch`: onto another branch (moving the commits there), rather than rewriting after one of its own commits. */
   | { kind: 'rebase'; onto: string; ontoLabel: string; range?: string[]; ontoBranch?: boolean }
   | { kind: 'cherry'; tip: string; tipLabel: string }
+  | { kind: 'reflog' }
 
 export interface RepoState {
   refs: Refs | null

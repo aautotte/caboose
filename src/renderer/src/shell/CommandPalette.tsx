@@ -71,6 +71,7 @@ export function CommandPalette(): React.JSX.Element | null {
         { id: 'new-worktree', group: 'Branch', label: 'New worktree…', run: () => act.openDialog({ kind: 'addWorktree', repoId: id }) },
         { id: 'add-submodule', group: 'Repository', label: 'Add a submodule…', run: () => act.openDialog({ kind: 'addSubmodule', repoId: id }) },
         { id: 'log', group: 'View', label: 'Git activity log', run: () => act.openLog() },
+        { id: 'reflog', group: 'View', label: 'Reflog: where HEAD has been', run: () => act.setCenter(id, { kind: 'reflog' }) },
         {
           id: 'bisect',
           group: 'Repository',

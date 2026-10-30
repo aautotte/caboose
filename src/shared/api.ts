@@ -30,6 +30,7 @@ import type {
   OpResult,
   ProgressEvent,
   PullMode,
+  ReflogEntry,
   RepoChangedEvent,
   RepoList,
   RepoSummary,
@@ -182,6 +183,8 @@ export interface Api {
 
   'file.history': { in: R & { path: string; limit: number }; out: FileHistoryEntry[] }
   'file.blame': { in: R & { path: string; rev: string | null }; out: Blame }
+  /** Where HEAD has been, newest first. */
+  'reflog.list': { in: R & { limit: number }; out: ReflogEntry[] }
 
   'refView.get': { in: R; out: RefViewState }
   'refView.set': { in: R & { ref: string; state: 'normal' | 'hidden' | 'soloed' }; out: RefViewState }

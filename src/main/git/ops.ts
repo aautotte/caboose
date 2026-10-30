@@ -24,6 +24,7 @@ import type {
   OperationState,
   OpResult,
   PullMode,
+  ReflogEntry,
   Refs,
   Status,
   BisectState,
@@ -1822,6 +1823,30 @@ export class RepoOps {
     if (rev) this.safeRev(rev)
     const out = await this.git(['blame', '--porcelain', '-w', ...(rev ? [rev] : []), '--', path], { timeoutMs: 120_000 })
     return parseBlame(out, path)
+  }
+
+  // ---------- reflog ----------
+
+  /**
+   * Where HEAD has been, newest first. A commit is "lost" when no branch, tag or stash leads to it any more (the
+   * app's own undo refs don't count): the reflog is then the only way back to it.
+   */
+  async reflog(limit: number): Promise<ReflogEntry[]> {
+    const out = (await this.tryGit(['log', '-g', '--date=unix', `-n${limit}`, `--format=%H${US}%gd${US}%gs${US}%s${US}%an${RS}`, 'HEAD', '--'])) ?? ''
+    const rows = out
+      .split(RS)
+      .map((r) => r.replace(/^\n/, ''))
+      .filter((r) => r.includes(US))
+      .map((r, index) => {
+        const [sha, selector, message, summary, authorName] = r.split(US)
+        return { sha, index, time: Number(/@\{(\d+)\}/.exec(selector)?.[1] ?? 0), message, summary, authorName, lost: false }
+      })
+    if (!rows.length) return rows
+    const shas = [...new Set(rows.map((r) => r.sha))]
+    const unreachable = new Set(
+      ((await this.tryGit(['rev-list', '--no-walk', '--stdin', '--not', ...EXCLUDE_OWN, '--all'], { stdin: shas.join('\n') + '\n' })) ?? '').split('\n').filter(Boolean)
+    )
+    return rows.map((r) => (unreachable.has(r.sha) ? { ...r, lost: true } : r))
   }
 
   async hasTrackedChanges(): Promise<boolean> {

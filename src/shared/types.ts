@@ -367,6 +367,21 @@ export interface FileHistoryEntry extends CommitRow {
   oldPath?: string
 }
 
+/** One move of HEAD, newest first, as git's reflog recorded it (HEAD@{index}). */
+export interface ReflogEntry {
+  sha: string
+  index: number
+  /** When HEAD moved (unix seconds). */
+  time: number
+  /** git's own words for the move: "checkout: moving from main to dev", "commit: Add x", "reset: moving to HEAD~1". */
+  message: string
+  /** The commit HEAD moved to. */
+  summary: string
+  authorName: string
+  /** On no branch, tag or stash any more: only the reflog still knows it. */
+  lost: boolean
+}
+
 export interface BlameCommit {
   sha: string
   author: string
