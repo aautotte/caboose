@@ -85,6 +85,8 @@ works offline, and it doesn't phone home.
 - Fetch in the background, every 1 to 60 minutes, without ever asking for a password.
 - When your changes are in a pull's way, stash or discard them from the same dialog.
 - Long operations show git's own progress: the percentage and the count, for example 45% (58234/129384).
+- Open the repository, a branch or a commit on GitHub, GitLab, Bitbucket or Azure DevOps, start a pull request for a
+  branch, or copy a link to it.
 
 ### Stashes
 

@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranchPlus, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranchPlus, Globe, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
 import { DropdownMenu as RMenu } from 'radix-ui'
 import { Check } from 'lucide-react'
 import type { PullMode } from '../../../shared/types'
@@ -219,7 +219,8 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
         items={[
           { type: 'item', label: 'File manager', icon: <FolderOpen size={14} />, onSelect: () => void act.openIn(repoId, 'folder') },
           { type: 'item', label: 'Terminal', icon: <SquareTerminal size={14} />, onSelect: () => void act.openIn(repoId, 'terminal') },
-          { type: 'item', label: 'Editor', icon: <ExternalLink size={14} />, onSelect: () => void act.openIn(repoId, 'editor') }
+          { type: 'item', label: 'Editor', icon: <ExternalLink size={14} />, onSelect: () => void act.openIn(repoId, 'editor') },
+          { type: 'item', label: 'Browser', icon: <Globe size={14} />, disabled: !refs?.remotes.length, onSelect: () => void act.openOnWeb(repoId, { kind: 'repo' }) }
         ]}
       />
       <Tooltip content="Command palette" shortcut="Ctrl+P">

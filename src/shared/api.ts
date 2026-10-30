@@ -43,6 +43,9 @@ import type {
 
 type R = { repoId: string }
 
+/** A page on the git host: the repository, a branch (local or remote, by short name), a commit, or a new pull request for a branch. */
+export type WebTarget = { kind: 'repo' } | { kind: 'branch'; name: string } | { kind: 'commit'; sha: string } | { kind: 'pr'; branch: string }
+
 export interface Api {
   'dialog.pickFolder': { in: { title: string }; out: string | null }
 
@@ -238,6 +241,9 @@ export interface Api {
   'gitConfig.get': { in: { repoId?: string }; out: { global: Partial<Record<GitConfigKey, string>>; repo: Partial<Record<GitConfigKey, string>> | null } }
   'gitConfig.set': { in: { repoId?: string; key: GitConfigKey; value: string | null }; out: null }
   'commit.template': { in: R; out: string | null }
+  /** The web page on the remote's git host (GitHub, GitLab, Bitbucket, Azure DevOps): `web.open` opens it in the browser too. */
+  'web.url': { in: R & { target: WebTarget }; out: { url: string; site: string } }
+  'web.open': { in: R & { target: WebTarget }; out: { url: string; site: string } }
   'shell.open': { in: R & { target: 'folder' | 'terminal' | 'editor'; path?: string; worktree?: string }; out: null }
   'file.externalDiff': { in: R & { path: string; staged: boolean }; out: null }
   'file.externalMerge': { in: R & { path: string }; out: null }
