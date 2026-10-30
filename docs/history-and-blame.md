@@ -1,4 +1,4 @@
-# File history, blame and the reflog
+# File history, blame, compare and the reflog
 
 ## File history
 
@@ -31,6 +31,26 @@ Open it from:
 - the command palette, while a file is open.
 
 **Blame the current version** goes back to today's file from an older one. Ctrl+Shift+H goes to the file's history.
+
+## Compare two branches or commits
+
+What changed from one branch, tag or commit to another: the files that differ, each one's diff, and the commits only
+one side has.
+
+Open it from:
+
+- **Compare with *branch*** in a branch's menu (in the branches panel or on a graph row): the checked-out branch,
+  and for a local branch that tracks one, its upstream (how far it has drifted from the remote);
+- **Compare with *branch*** in a commit's menu: that commit against the checked-out branch;
+- **Compare these two** when two commits are picked in the graph (Ctrl-click): from the older to the newer;
+- **Compare two branches or commits…** in the command palette, which asks for any two.
+
+The line under the header says how many commits each side has that the other doesn't. **Files** lists what differs;
+click one to see its diff. **Commits** lists the commits only on each side; click one to see it in the details panel.
+
+Tick **Only what *branch* changed since they split** to compare from the point where the two split instead (`git
+diff a...b`). Changes made on the other side since then drop out, so you see what a pull request of that branch would
+show. The swap button turns the comparison around.
 
 ## The reflog
 

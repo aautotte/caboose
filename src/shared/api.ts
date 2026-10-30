@@ -18,6 +18,7 @@ import type {
   Remote,
   ResetMode,
   CommitDetails,
+  Comparison,
   ConflictFile,
   DiffSource,
   FileDiff,
@@ -183,6 +184,8 @@ export interface Api {
 
   'file.history': { in: R & { path: string; limit: number }; out: FileHistoryEntry[] }
   'file.blame': { in: R & { path: string; rev: string | null }; out: Blame }
+  /** What changed from `base` to `target` (or, `sinceSplit`, only on `target`'s side since they split), and the commits only one has. */
+  'compare.get': { in: R & { base: string; target: string; sinceSplit: boolean }; out: Comparison }
   /** Where HEAD has been, newest first. */
   'reflog.list': { in: R & { limit: number }; out: ReflogEntry[] }
 

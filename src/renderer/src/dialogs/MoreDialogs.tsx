@@ -298,6 +298,50 @@ export function SubmoduleUrlDialog({ d }: { d: Extract<D, { kind: 'submoduleUrl'
   )
 }
 
+/** Two branches, tags or commits to compare; the checked-out branch starts on the left. */
+export function CompareDialog({ d }: { d: Extract<D, { kind: 'compare' }> }): React.JSX.Element {
+  const refs = useApp((s) => s.repos[d.repoId]?.refs)
+  const names = useMemo(() => refs?.refs.map((r) => r.short) ?? [], [refs])
+  const [base, setBase] = useState(refs?.head.branch ?? '')
+  const [target, setTarget] = useState('')
+  const problem = (v: string): string | undefined => (v && (/\s/.test(v) || v.startsWith('-')) ? 'A branch, tag or commit SHA.' : undefined)
+  const ready = !!base.trim() && !!target.trim() && !problem(base.trim()) && !problem(target.trim())
+  const submit = (): void => {
+    if (!ready) return
+    close()
+    act.setCenter(d.repoId, { kind: 'compare', base: base.trim(), target: target.trim(), baseLabel: base.trim(), targetLabel: target.trim() })
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title="Compare"
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} onClick={submit}>
+            Compare
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={submit}>
+        <Field label="From" error={problem(base.trim())} help="A branch, tag or commit SHA.">
+          {(f) => <TextInput {...f} list="compare-refs" value={base} onChange={(e) => setBase(e.target.value)} />}
+        </Field>
+        <Field label="To" error={problem(target.trim())} help="What changed from the first to this one.">
+          {(f) => <TextInput {...f} autoFocus list="compare-refs" value={target} onChange={(e) => setTarget(e.target.value)} />}
+        </Field>
+        <datalist id="compare-refs">
+          {names.slice(0, 1000).map((n) => (
+            <option key={n} value={n} />
+          ))}
+        </datalist>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
 const resetModes: Array<{ mode: ResetMode; title: string; body: string }> = [
   { mode: 'soft', title: 'Keep changes staged', body: 'Moves the branch back. Everything from the commits after it ends up staged, ready to commit again.' },
   { mode: 'mixed', title: 'Keep changes, unstaged', body: 'Moves the branch back. Your files stay as they are; the changes show as not staged.' },

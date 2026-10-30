@@ -732,6 +732,12 @@ export function moveCommit(repoId: string, sha: string, direction: 'up' | 'down'
   )
 }
 
+/** Compares two commits picked in the graph (newest first, as the graph lists them): from the older to the newer. */
+export function compareCommits(repoId: string, shas: string[]): void {
+  const [newer, older] = shas
+  setCenter(repoId, { kind: 'compare', base: older, target: newer, baseLabel: older.slice(0, 7), targetLabel: newer.slice(0, 7) })
+}
+
 /** Opens the rebase view for just these commits (newest first): it starts from the oldest one's parent. */
 export function rebaseRange(repoId: string, shas: string[]): void {
   const r = useApp.getState().repos[repoId]

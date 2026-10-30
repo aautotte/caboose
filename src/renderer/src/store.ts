@@ -16,6 +16,8 @@ export type Center =
   | { kind: 'rebase'; onto: string; ontoLabel: string; range?: string[]; ontoBranch?: boolean }
   | { kind: 'cherry'; tip: string; tipLabel: string }
   | { kind: 'reflog' }
+  /** What changed from `base` to `target` (branch names or SHAs), and the commits only one has. */
+  | { kind: 'compare'; base: string; target: string; baseLabel: string; targetLabel: string }
 
 export interface RepoState {
   refs: Refs | null
@@ -100,6 +102,8 @@ export type Dialog =
   | { kind: 'addWorktree'; repoId: string; branch?: string; remote?: string; at?: string; atLabel?: string }
   | { kind: 'addSubmodule'; repoId: string }
   | { kind: 'submoduleUrl'; repoId: string; path: string; url: string }
+  /** Pick two branches or commits to compare. */
+  | { kind: 'compare'; repoId: string }
   | {
       kind: 'confirm'
       title: string

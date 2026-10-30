@@ -11,6 +11,7 @@ import { BlameView } from '@/history/BlameView'
 import { FileHistoryView } from '@/history/FileHistoryView'
 import { RebaseView } from '@/history/RebaseView'
 import { ReflogView } from '@/history/ReflogView'
+import { CompareView } from '@/history/CompareView'
 import { WipPanel } from '@/detail/WipPanel'
 import { CommitPanel } from '@/detail/CommitPanel'
 import { MultiPanel } from '@/detail/MultiPanel'
@@ -90,6 +91,8 @@ export function RepoView({ repoId }: { repoId: string }): React.JSX.Element {
             <RebaseView key={center.tip} repoId={repoId} mode="cherry" base={center.tip} baseLabel={center.tipLabel} />
           ) : center.kind === 'reflog' ? (
             <ReflogView repoId={repoId} />
+          ) : center.kind === 'compare' ? (
+            <CompareView key={`${center.base}..${center.target}`} repoId={repoId} base={center.base} target={center.target} baseLabel={center.baseLabel} targetLabel={center.targetLabel} />
           ) : (
             <PrefsView repoId={repoId} />
           )}
