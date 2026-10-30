@@ -15,30 +15,122 @@ works offline, and it doesn't phone home.
 
 ## What it does
 
-- **Commit graph:**
-  - branches, tags, stashes and remotes, laid out in lanes;
-  - focus on one branch, hide the branches and tags you don't care about, pin one to the left;
-  - search the whole history.
-- **Staging:** stage files, blocks or single lines (mouse or keyboard); discard them too, with undo.
-- **Commits:** amend, sign, edit any commit's message, squash several into one, move a commit up or down,
-  revert, cherry-pick, reset.
-- **Branches:**
-  - create, rename, delete, also on the remote;
-  - merge or rebase by dragging one branch onto another;
-  - "/" in names becomes folders.
-- **Interactive rebase:** keep, reword, squash, fixup, drop or reorder, for a whole branch or just the commits you
-  select.
-- **Conflicts:** a three-way merge tool, with yours, the common ancestor and theirs side by side; pick lines and save.
-- **Sync:**
-  - fetch, pull (merge, fast-forward or rebase), push, force push with lease;
-  - with several remotes, push the current branch or a tag to whichever one you pick (tags to all of them too);
-  - set upstreams, manage remotes;
-  - background fetch that never asks for a password.
-- **Undo:** most actions can be undone, even after a restart, and Caboose refuses safely if the repository
-  changed in between.
-- **Profiles:** separate tabs, settings and identity for work and personal projects, including the name, email,
-  signing key and SSH key used.
-- **Plus:** stashes, tags, blame, file history, a command palette, keyboard shortcuts, light and dark themes.
+### Repositories and tabs
+
+- Open a folder, clone a URL or start a new repository. A clone can be shallow (recent history only) or check out
+  only some folders (sparse checkout). The folder picker opens where you last picked a folder.
+- Each repository opens in its own tab. The Repositories tab lists recent ones, with favourites and groups.
+- Open the repository in your editor, terminal or file manager.
+- Changes made outside the app (a commit, a new branch, a checkout in the terminal) show up when you come back to it.
+
+### Commit graph
+
+- Branches, tags, stashes and remotes, laid out in lanes, with the uncommitted changes on top.
+- Focus on one branch, show only one commit's history, hide the branches and tags you don't care about, pin a
+  branch to the left.
+- Search the whole history by message, SHA or author.
+- Columns can be shown, hidden, reordered and resized, Graph and Branch / tag included. A wide graph scrolls
+  sideways. The widths are saved per repository.
+- Move with J / K, or Ctrl+Home / Ctrl+End.
+
+### Staging and diffs
+
+- Changed files as a flat list or a folder tree, in Not staged and Staged.
+- Stage or unstage files, blocks or single lines, with the mouse or the keyboard. Discard them too, with undo.
+- Inline or side by side, with whitespace hidden or not, long lines wrapped or not, your code size and tab width.
+- Find in the open file (Ctrl+F), with every match highlighted.
+- Binary files, Git LFS files and submodule pointers each get a diff that says what changed.
+- Ignore files from their menu, one or several at once: the file, its extension or its folder.
+- After a commit leaves nothing to commit, you're back on the commit list.
+
+### Commits
+
+- Summary and description, with your commit message template. Amend the last commit, sign commits, push after
+  committing.
+- Edit any commit's message, squash several into one (every message kept, ready to edit), move a commit up or down,
+  revert, cherry-pick one or several, reset (soft, mixed or hard).
+- Git hooks run when history is rewritten, unless you tick Skip hooks.
+
+### Branches and tags
+
+- Create a branch from any commit, rename, check out, delete. Pick several branches or tags and push or delete
+  them at once, on the remote too. The dialog says that undo only brings back the local side.
+- Merge or rebase by dragging one branch onto another.
+- Pull or fast-forward a branch without switching to it. Double-click a remote branch to fast-forward the local one
+  and check it out, or reset it when it can't fast-forward.
+- Reset a local branch to a remote branch from its menu.
+- "/" in branch names becomes folders. Collapse or expand every folder or every section at once. Filter the list
+  (Ctrl+Alt+F).
+- Tags: create, delete, push to one remote or to all of them.
+
+### Interactive rebase
+
+- Keep, reword, squash, fixup, drop or reorder, for a whole branch or only the commits you pick.
+
+### Conflicts
+
+- A three-way merge tool: yours, the common ancestor and theirs side by side. Pick lines, edit the result and save.
+- A paused merge, rebase or cherry-pick says what's left, with Continue and Abort.
+- Open a conflict in your own merge tool instead, if you prefer.
+
+### Sync
+
+- Fetch, pull (merge, fast-forward only, fast-forward when possible, or rebase), push, force push with lease.
+- With several remotes, push the current branch or a tag to whichever one you pick.
+- Set upstreams, add and remove remotes.
+- Fetch in the background, every 1 to 60 minutes, without ever asking for a password.
+- When your changes are in a pull's way, stash or discard them from the same dialog.
+- Long operations show git's own progress: the percentage and the count, for example 45% (58234/129384).
+
+### Stashes
+
+- Stash your changes (new files too, if you want), apply, pop, rename, delete one or several.
+
+### Bisect
+
+- Find the commit that broke something: mark commits good, bad or skipped by hand, or let a test command decide.
+
+### Submodules
+
+- List them, set them up (shallow, nested ones too), and pick a mode for each: Follow keeps it at the commit the
+  branch expects, Manual moves it only when you ask, and Working in it never moves it while it has unpushed work.
+- A pointer change says what it means: the commits it moves by, or a warning when it moves back.
+- Checks before pushing, and can push submodules first.
+
+### Worktrees
+
+- List, open, create (also from a branch's menu), remove, lock and unlock them, and forget the ones whose folders
+  are gone.
+
+### Git LFS
+
+- A badge on LFS files, and a diff that says how the file changed.
+- Track or stop tracking a file, or all files with its extension, from the file's menu. Says when LFS isn't
+  installed or set up, and sets it up for you.
+
+### Undo
+
+- Most actions can be undone (Ctrl+Z) and redone (Ctrl+Y), even after a restart. Caboose refuses safely if the
+  repository changed in between.
+
+### History and blame
+
+- The history of a file, blame for the current version or at any commit, and back and forth between the two.
+
+### Profiles
+
+- Separate tabs, settings and identity for work and personal projects: name, email, signing key and the SSH key
+  used to fetch and push. Caboose can create an SSH key for you and copy its public half.
+- Repository settings can override your global ones (signing, for example).
+
+### Everything else
+
+- A Git activity log with every command Caboose ran and its output, ready to copy.
+- A command palette (Ctrl+P) and keyboard shortcuts for most things (Ctrl+/ lists them).
+- Light and dark themes, or follow the system.
+- Side panels collapse to thin rails (Ctrl+J, Ctrl+K) and remember it.
+- Your own editor, terminal, diff tool and merge tool.
+- Falls back to software rendering when graphics acceleration doesn't work.
 
 ![A diff with block and line staging](docs/images/diff.png)
 
@@ -93,7 +185,7 @@ npm run e2e         # builds, then runs the Playwright end-to-end suite against 
 ```
 
 The end-to-end tests launch the real app against repositories they create under `.seed/`, with their own home
-folder and git config, so they never touch yours. A full run takes about ten minutes.
+folder and git config, so they never touch yours. A full run takes about twenty minutes.
 
 ## Project layout
 
