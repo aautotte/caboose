@@ -620,6 +620,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
 
   // ---------- file history, blame ----------
   handle('file.history', z.object({ ...R, path: filePath, limit: z.number().int().min(1).max(10_000) }), ({ repoId, path, limit }) => ops(repoId).fileHistory(path, limit))
+  handle('compare.get', z.object({ ...R, base: ref, target: ref, sinceSplit: z.boolean() }), ({ repoId, base, target, sinceSplit }) => ops(repoId).compare(base, target, sinceSplit))
   handle('reflog.list', z.object({ ...R, limit: z.number().int().min(1).max(10_000) }), ({ repoId, limit }) => ops(repoId).reflog(limit))
   handle('file.blame', z.object({ ...R, path: filePath, rev: ref.nullable() }), ({ repoId, path, rev }) => ops(repoId).blame(path, rev))
 

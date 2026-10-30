@@ -5,6 +5,7 @@ import type {
   Blame,
   CommitDetails,
   CommitSignature,
+  Comparison,
   FileHistoryEntry,
   RebasePreview,
   RebaseRow,
@@ -1823,6 +1824,43 @@ export class RepoOps {
     if (rev) this.safeRev(rev)
     const out = await this.git(['blame', '--porcelain', '-w', ...(rev ? [rev] : []), '--', path], { timeoutMs: 120_000 })
     return parseBlame(out, path)
+  }
+
+  // ---------- compare ----------
+
+  /**
+   * What changed from `base` to `target`, file by file, and the commits only one side has. With `sinceSplit`, the
+   * files are compared from where the two split instead (git diff base...target): only what `target`'s side did.
+   */
+  async compare(baseRev: string, targetRev: string, sinceSplit: boolean): Promise<Comparison> {
+    const commitOf = async (rev: string): Promise<string> => {
+      const sha = (await this.tryGit(['rev-parse', '-q', '--verify', `${this.safeRev(rev)}^{commit}`]))?.trim()
+      if (!sha) throw invalid(`“${rev}” isn’t a branch, tag or commit here.`)
+      return sha
+    }
+    const [base, target] = await Promise.all([commitOf(baseRev), commitOf(targetRev)])
+    const mergeBase = (await this.tryGit(['merge-base', base, target]))?.trim() || null
+    if (sinceSplit && !mergeBase) throw invalid('These two have no commit in common, so there’s no point where they split.')
+    const from = sinceSplit ? mergeBase! : base
+    const files = parseNameStatus(await this.git(['diff-tree', '-r', '-M', '-z', '--name-status', '--no-commit-id', from, target]))
+    const lfs = await this.lfsPaths(files.map((f) => f.path), target)
+    const [counts, targetOnly, baseOnly] = await Promise.all([
+      this.git(['rev-list', '--left-right', '--count', `${base}...${target}`]),
+      this.rangeRows(['-n200', `${base}..${target}`]),
+      this.rangeRows(['-n200', `${target}..${base}`])
+    ])
+    const [baseCount, targetCount] = counts.trim().split(/\s+/).map(Number)
+    return {
+      base,
+      target,
+      from,
+      mergeBase,
+      files: lfs.size ? files.map((f) => (lfs.has(f.path) ? { ...f, lfs: true } : f)) : files,
+      targetOnly: targetOnly.reverse(),
+      baseOnly: baseOnly.reverse(),
+      targetCount,
+      baseCount
+    }
   }
 
   // ---------- reflog ----------

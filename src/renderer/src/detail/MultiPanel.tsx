@@ -1,4 +1,4 @@
-import { Combine, Copy, GitPullRequestArrow, ListOrdered, X } from 'lucide-react'
+import { Combine, Copy, GitCompare, GitPullRequestArrow, ListOrdered, X } from 'lucide-react'
 import { Avatar, Button, IconButton, Tooltip } from '@/ui'
 import { relativeTime, shortSha } from '@/lib/format'
 import { useRepo } from '@/store'
@@ -48,6 +48,12 @@ export function MultiPanel({ repoId, shas }: { repoId: string; shas: string[] })
             <Button size="sm" onClick={() => void act.cherryPick(repoId, [...shas].reverse())}>
               <GitPullRequestArrow size={14} aria-hidden />
               Cherry-pick onto {headBranch}
+            </Button>
+          ) : null}
+          {shas.length === 2 ? (
+            <Button size="sm" onClick={() => act.compareCommits(repoId, shas)}>
+              <GitCompare size={14} aria-hidden />
+              Compare these two
             </Button>
           ) : null}
           <Tooltip content="Copy the SHAs, one per line">

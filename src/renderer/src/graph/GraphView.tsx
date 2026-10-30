@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Focus, FolderPlus, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Tag, Trash2, Undo, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Tag, Trash2, Undo, Upload } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -9,7 +9,7 @@ import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
-import { pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
+import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
 
 const ROW = 28 // matches --gc-graph-row-h
 const HEADER = 26 // --gc-list-row-h, the sticky column header
@@ -657,6 +657,7 @@ function multiMenu(repoId: string, shas: string[], line: string[], headBranch: s
     { type: 'item', label: `Squash ${shas.length} commits into one…`, icon: <Combine size={14} />, disabled: !!squashProblem(shas, line, parentsOf), onSelect: () => void act.askSquash(repoId, shas) },
     { type: 'item', label: `Rebase these ${shas.length} commits…`, icon: <ListOrdered size={14} />, disabled: !onLine, onSelect: () => act.rebaseRange(repoId, shas) },
     { type: 'item', label: `Cherry-pick ${shas.length} commits onto ${here}`, icon: <GitPullRequestArrow size={14} />, disabled: !offLine, onSelect: () => void act.cherryPick(repoId, [...shas].reverse()) },
+    ...(shas.length === 2 ? [{ type: 'item' as const, label: 'Compare these two commits', icon: <GitCompare size={14} />, onSelect: () => act.compareCommits(repoId, shas) }] : []),
     { type: 'separator' },
     { type: 'item', label: 'Copy commit SHAs', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(shas.join('\n')) },
     { type: 'item', label: 'Clear the selection', shortcut: 'Esc', onSelect: () => act.select(repoId, shas[0]) }
@@ -681,6 +682,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       items.push({ type: 'item', label: `Merge ${r.name} into ${headBranch}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.name, headBranch) })
       items.push({ type: 'item', label: `Rebase ${headBranch} onto ${r.name}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, headBranch, r.name) })
       items.push(rebaseOntoEntry(repoId, headBranch, r.name))
+      items.push(compareEntry(repoId, headBranch, r.name))
     }
     if (r.kind === 'remote') {
       items.push({ type: 'item', label: 'Fast-forward my local branch', onSelect: () => void act.fastForwardTo(repoId, r.name) })
@@ -716,7 +718,8 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: `Cherry-pick onto ${here}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.cherryPick(repoId, [row.sha]) },
       { type: 'item', label: `Pick several commits up to here…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'cherry', tip: row.sha, tipLabel: short }) },
       { type: 'item', label: `Rewrite ${here} after this commit…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'rebase', onto: row.sha, ontoLabel: short }) },
-      { type: 'item', label: `Reset ${here} to this commit…`, icon: <RotateCcw size={14} />, onSelect: () => act.openDialog({ kind: 'reset', repoId, target: row.sha, targetLabel: short }) }
+      { type: 'item', label: `Reset ${here} to this commit…`, icon: <RotateCcw size={14} />, onSelect: () => act.openDialog({ kind: 'reset', repoId, target: row.sha, targetLabel: short }) },
+      { type: 'item', label: `Compare with ${here}`, icon: <GitCompare size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'compare', base: row.sha, target: headBranch ?? headSha, baseLabel: short, targetLabel: here }) }
     )
   }
   const at = line.indexOf(row.sha)

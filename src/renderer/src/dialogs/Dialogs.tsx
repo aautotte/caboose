@@ -6,7 +6,7 @@ import { call } from '@/lib/api'
 import { CloneDialog, FolderField, InitDialog } from '@/home/RepoDialogs'
 import { ShortcutSheet } from '@/screens/Stubs'
 import { ProfilesDialog } from './ProfilesDialog'
-import { AddRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog } from './MoreDialogs'
+import { AddRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
 export function DialogHost(): React.JSX.Element | null {
@@ -53,6 +53,8 @@ export function DialogHost(): React.JSX.Element | null {
       return <AddSubmoduleDialog d={d} />
     case 'submoduleUrl':
       return <SubmoduleUrlDialog d={d} />
+    case 'compare':
+      return <CompareDialog d={d} />
     case 'confirm':
       return (
         <ConfirmDialog

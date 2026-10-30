@@ -367,6 +367,24 @@ export interface FileHistoryEntry extends CommitRow {
   oldPath?: string
 }
 
+/** Two commits (or branches) side by side: what changed from one to the other, and the commits only one has. */
+export interface Comparison {
+  /** Full SHAs of the two sides as asked. */
+  base: string
+  target: string
+  /** What the files are compared from: `base`, or where the two split (their merge base) for "since they split". */
+  from: string
+  /** null when the two have no commit in common. */
+  mergeBase: string | null
+  files: FileChange[]
+  /** Commits only `target` has, and only `base` has, newest first (at most 200 of each). */
+  targetOnly: RebaseRow[]
+  baseOnly: RebaseRow[]
+  /** The full counts, which can be more than the lists hold. */
+  targetCount: number
+  baseCount: number
+}
+
 /** One move of HEAD, newest first, as git's reflog recorded it (HEAD@{index}). */
 export interface ReflogEntry {
   sha: string

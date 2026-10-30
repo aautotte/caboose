@@ -1,4 +1,4 @@
-import { Download, Eye, EyeOff, GitBranchPlus, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
+import { Download, Eye, EyeOff, GitBranchPlus, GitCompare, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
 import type { MenuEntry } from '@/ui'
 import * as act from '@/actions'
 
@@ -58,6 +58,11 @@ export function resetToRemoteEntry(repoId: string, remoteBranch: string): MenuEn
 /** Interactive rebase of the checked-out branch onto `onto` (a branch): pick, reorder, squash or drop its commits. */
 export function rebaseOntoEntry(repoId: string, head: string, onto: string): MenuEntry {
   return { type: 'item', label: `Interactive rebase ${head} onto ${onto}…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'rebase', onto, ontoLabel: onto, ontoBranch: true }) }
+}
+
+/** What changed from `base` to `target`: the files that differ and the commits only one has. */
+export function compareEntry(repoId: string, base: string, target: string): MenuEntry {
+  return { type: 'item', label: `Compare with ${base}`, icon: <GitCompare size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'compare', base, target, baseLabel: base, targetLabel: target }) }
 }
 
 /**

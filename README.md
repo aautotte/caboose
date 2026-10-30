@@ -117,6 +117,8 @@ works offline, and it doesn't phone home.
 ### History and blame
 
 - The history of a file, blame for the current version or at any commit, and back and forth between the two.
+- Compare any two branches or commits: the files that differ with their diffs, and the commits only one side has.
+  "Since they split" shows only what one side did, as a pull request does. A branch compares with its upstream too.
 - The reflog: everywhere HEAD has been, with the commits no branch leads to any more marked, ready to bring back
   with a branch, a reset or a cherry-pick.
 

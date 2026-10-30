@@ -4,7 +4,7 @@ import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../.
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
-import { pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
+import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
@@ -218,7 +218,9 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     m.push({ type: 'item', label: `Merge into ${head}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.short, head) })
     m.push({ type: 'item', label: `Rebase ${head} onto ${r.short}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, head, r.short) })
     m.push(rebaseOntoEntry(repoId, head, r.short))
+    m.push(compareEntry(repoId, head, r.short))
   }
+  if (r.kind === 'local' && r.upstream && !r.upstreamGone) m.push(compareEntry(repoId, r.upstream.replace(/^refs\/remotes\//, ''), r.short))
   if (r.kind === 'remote') {
     m.push({ type: 'item', label: 'Fast-forward my local branch', icon: <Download size={14} />, onSelect: () => void act.fastForwardTo(repoId, r.short) })
     const reset = resetToRemoteEntry(repoId, r.short)
