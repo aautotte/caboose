@@ -805,4 +805,22 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('history.move', z.object({ ...R, sha, direction: z.enum(['up', 'down']) }), ({ repoId, sha, direction }) =>
     undoable(repoId, 'rebase', `Move ${sha.slice(0, 7)} ${direction}`, () => ops(repoId).move(sha, direction, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
   )
+  // Undo puts the changes back staged: `stash` is the commit of them that went in, kept under an undo ref.
+  handle('history.amendInto', z.object({ ...R, sha }), ({ repoId, sha }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const before = await undo.snapshot(o)
+      const { result, temp } = await o.amendInto(sha, rewriteDir(repoId))
+      await o.mut(['update-ref', `${UNDO_REFS}${uuid()}`, temp])
+      const label = `Amend staged changes into ${sha.slice(0, 7)}`
+      if (result.result === 'conflicts') undo.setPending(repoId, 'staged_rewrite', label, { ...before, stash: temp })
+      else undo.record(repoId, 'staged_rewrite', label, { ...before, stash: temp }, await undo.snapshot(o))
+      return result
+    })
+  )
+  handle('history.fixupCommit', z.object({ ...R, sha, noVerify: z.boolean().optional() }), ({ repoId, sha, noVerify }) =>
+    undoable(repoId, 'commit', `Fixup commit for ${sha.slice(0, 7)}`, async () => (await ops(repoId).fixupCommit(sha, noVerify ?? false), null))
+  )
+  handle('history.autosquash', z.object(R), ({ repoId }) => undoable(repoId, 'rebase', 'Squash fixup commits', () => ops(repoId).autosquash(), (r) => r.result !== 'conflicts'))
+  handle('history.fixupTarget', z.object(R), ({ repoId }) => ops(repoId).fixupTarget())
 }

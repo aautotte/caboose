@@ -732,6 +732,78 @@ export function moveCommit(repoId: string, sha: string, direction: 'up' | 'down'
   )
 }
 
+// ---------- fixups ----------
+
+/** Something staged, and no merge, rebase or cherry-pick paused: what putting changes into a commit needs. */
+function fixupBlocker(repoId: string): string | null {
+  const st = useApp.getState().repos[repoId]?.status
+  if (st?.op && st.op.kind !== 'none') return 'Finish or abort the operation in progress first.'
+  if (!(st?.changes ?? []).some((c) => c.index !== '.' && c.index !== '?')) return 'Stage the changes to put into it first.'
+  return null
+}
+
+/** True if the summary marks a commit made to be squashed into another (fixup!, squash!, amend!). */
+export const isFixup = (summary: string): boolean => /^(fixup|squash|amend)! /.test(summary)
+
+/** Folds the staged changes into an older commit of the current branch. Unstaged changes stay as they are. */
+export function amendInto(repoId: string, sha: string): void {
+  const why = fixupBlocker(repoId)
+  if (why) return void toast({ tone: 'info', title: why })
+  const short = sha.slice(0, 7)
+  guardPushed(repoId, [sha], 'Amend the commit', () =>
+    void rewriteOp(repoId, () => call('history.amendInto', { repoId, sha }), `Couldn’t amend ${short}`, `Put the staged changes into ${short}`, headLine(repoId).indexOf(sha))
+  )
+}
+
+/** git commit --fixup: a "fixup! …" commit with the staged changes, to squash into `sha` later. */
+export async function fixupCommit(repoId: string, sha: string): Promise<void> {
+  const why = fixupBlocker(repoId)
+  if (why) return void toast({ tone: 'info', title: why })
+  const ok = await attempt(() => call('history.fixupCommit', { repoId, sha }), 'Couldn’t make the fixup commit')
+  if (ok !== undefined) toast({ tone: 'success', title: `Made a fixup commit for ${sha.slice(0, 7)}`, body: 'Squash fixup commits, in its menu, puts it into that commit.' })
+  await loadRepo(repoId, { keepSelection: true })
+}
+
+/** git rebase --autosquash: every fixup!, squash! and amend! commit on the branch goes into the commit it names. */
+export function autosquash(repoId: string): void {
+  const st = useApp.getState().repos[repoId]?.status
+  if (st?.op && st.op.kind !== 'none') return void toast({ tone: 'info', title: 'Finish or abort the operation in progress first.' })
+  const commits = useApp.getState().repos[repoId]?.commits ?? []
+  const fixups = headLine(repoId).filter((s) => isFixup(commits.find((c) => c.sha === s)?.summary ?? ''))
+  guardPushed(repoId, fixups, 'Squash the fixup commits', () =>
+    void rewriteOp(repoId, () => call('history.autosquash', { repoId }), 'Couldn’t squash the fixup commits', 'Squashed the fixup commits into their commits', 0)
+  )
+}
+
+/** Finds the commit the changed lines come from (staged, else unstaged) and selects it in the graph. */
+export async function findFixupTarget(repoId: string): Promise<void> {
+  const res = await attempt(() => call('history.fixupTarget', { repoId }), 'Couldn’t look for the commit')
+  if (!res) return
+  const commits = useApp.getState().repos[repoId]?.commits ?? []
+  const label = (s: string): string => `${s.slice(0, 7)} ${commits.find((c) => c.sha === s)?.summary ?? ''}`.trim()
+  if (!res.shas.length) {
+    toast({
+      tone: 'info',
+      title: 'No commit found',
+      body: res.addOnly ? 'Your changes only add lines, so they don’t point at an earlier commit.' : 'There are no changes to look at.'
+    })
+    return
+  }
+  if (res.shas.length > 1) {
+    toast({ tone: 'info', title: `Your changes touch lines from ${res.shas.length} commits`, body: `${res.shas.map(label).join(', ')}. Stage the changes for one commit at a time.` })
+    return
+  }
+  const [sha] = res.shas
+  select(repoId, sha)
+  const onLine = headLine(repoId).includes(sha)
+  toast({
+    tone: 'success',
+    title: `They belong to ${label(sha)}`,
+    body: onLine ? (res.addOnly ? 'Lines that are only added were left out of the search.' : undefined) : 'It isn’t on the checked-out branch, so it can’t be amended from here.',
+    action: onLine ? { label: 'Amend it', onClick: () => amendInto(repoId, sha) } : undefined
+  })
+}
+
 /** Compares two commits picked in the graph (newest first, as the graph lists them): from the older to the newer. */
 export function compareCommits(repoId: string, shas: string[]): void {
   const [newer, older] = shas

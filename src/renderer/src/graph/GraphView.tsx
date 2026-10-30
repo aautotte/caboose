@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Tag, Trash2, Undo, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -668,6 +668,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   if (row.kind === 'wip') {
     return [
       { type: 'item', label: 'Stage all changes', onSelect: () => void act.stage(repoId, 'all') },
+      { type: 'item', label: 'Find the commit these changes belong to', icon: <Search size={14} />, onSelect: () => void act.findFixupTarget(repoId) },
       { type: 'item', label: 'Stash changes…', icon: <Archive size={14} />, onSelect: () => act.openDialog({ kind: 'stash', repoId }) },
       { type: 'item', label: 'Discard all changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, 'all') }
     ]
@@ -723,6 +724,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     )
   }
   const at = line.indexOf(row.sha)
+  const staged = (useApp.getState().repos[repoId]?.status?.changes ?? []).some((c) => c.index !== '.' && c.index !== '?')
   if (at >= 0) {
     const isMerge = (sha: string | undefined): boolean => !sha || (bySha.get(sha)?.parents.length ?? 0) !== 1
     const newer = line[at - 1]
@@ -734,6 +736,13 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: 'Move commit up', icon: <ArrowUp size={14} />, disabled: !newer || mergeAfter || isMerge(row.sha), onSelect: () => act.moveCommit(repoId, row.sha, 'up') },
       // Moving below the first commit isn't possible: the older neighbour needs a parent too.
       { type: 'item', label: 'Move commit down', icon: <ArrowDown size={14} />, disabled: !older || mergeAfter || isMerge(row.sha) || isMerge(older), onSelect: () => act.moveCommit(repoId, row.sha, 'down') },
+      { type: 'separator' },
+      // Not the very first commit: the rebase that folds them in starts from its parent.
+      { type: 'item', label: 'Amend staged changes into this commit', icon: <FilePlus2 size={14} />, disabled: !staged || mergeAfter || isMerge(row.sha) || !row.parents.length, onSelect: () => act.amendInto(repoId, row.sha) },
+      { type: 'item', label: 'Create fixup commit for this commit', icon: <Plus size={14} />, disabled: !staged, onSelect: () => void act.fixupCommit(repoId, row.sha) },
+      ...(line.some((s) => act.isFixup(bySha.get(s)?.summary ?? ''))
+        ? [{ type: 'item' as const, label: 'Squash fixup commits into their commits', icon: <Combine size={14} />, onSelect: () => act.autosquash(repoId) }]
+        : []),
       { type: 'separator' }
     )
   }

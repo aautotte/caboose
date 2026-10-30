@@ -21,6 +21,7 @@ export type UndoType =
   | 'remote_remove'
   | 'ignore'
   | 'branch_move'
+  | 'staged_rewrite'
 
 /** What each undo entry needs to move the repo back (before) and forward again (after). */
 export interface Snapshot {
@@ -31,7 +32,7 @@ export interface Snapshot {
   tags?: { name: string; sha: string }[] // tag_delete of several at once
   tip?: string // branch_move: where branch `name` points on this side
   stashes?: { stash: string; message: string; index: number }[] // stash_drop of several at once (index: where each was)
-  stash?: string // discard: snapshot commit
+  stash?: string // discard: snapshot commit; staged_rewrite: a commit on top of `sha` whose tree is what's staged on this side
   paths?: string[] | 'all' // discard: what was discarded (for redo)
   patch?: string // discard_lines: the patch that was reversed out of the working files
   message?: string // stash_drop: the stash's message
@@ -275,6 +276,21 @@ export class UndoStack {
         }
         await ops.mut(['reset', '-q', '--hard', to.sha!])
         if (dir === 'back' && before.stash) await ops.restoreSnapshot(before.stash)
+        return after
+      }
+      case 'staged_rewrite': {
+        // Changes moved between commits and the staging area. A side with `stash` has those changes staged (and
+        // nothing else changed); one without has nothing changed at all.
+        if (cur.sha !== from.sha) throw moved()
+        if (from.stash) {
+          const staged = (await ops.git(['write-tree'])).trim()
+          const want = (await ops.git(['rev-parse', `${from.stash}^{tree}`])).trim()
+          if (staged !== want || (await ops.git(['diff', '--name-only'])).trim()) throw moved()
+        } else if (await ops.hasTrackedChanges()) {
+          throw new GcFail('invalid', 'Commit or stash your changes first. Undoing this would overwrite them.')
+        }
+        await ops.mut(['reset', '-q', '--hard', to.stash ?? to.sha!])
+        if (to.stash) await ops.mut(['reset', '-q', '--soft', to.sha!])
         return after
       }
       case 'merge':

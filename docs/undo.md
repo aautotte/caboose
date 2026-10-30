@@ -14,6 +14,8 @@ Each repository keeps its own list of the last 100 actions, and the list survive
 | Check out a branch or commit | the branch you were on |
 | Merge, rebase, pull | the branch where it was before |
 | Edit message, squash, move a commit, interactive rebase | the commits as they were |
+| Amend staged changes into an older commit | the commits as they were, with the changes staged again |
+| Fixup commit, squash fixup commits | the commits as they were |
 | Cherry-pick, revert | the branch where it was before |
 | Reset (soft, mixed or hard) | the branch, and for a hard reset your files too |
 | Reset a branch to a remote branch | where the branch pointed |

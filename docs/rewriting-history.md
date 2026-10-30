@@ -22,6 +22,27 @@ To change the last commit's message and content at once, use **Amend last commit
 **Move commit up** and **Move commit down** in a commit's menu swap it with its neighbour on the current branch.
 Merge commits don't move.
 
+## Fix up an older commit
+
+You spotted a mistake a few commits back. Stage the fix, then:
+
+- **Amend staged changes into this commit**, in that commit's menu, puts what's staged into it, as **Amend last
+  commit** does for the newest one. The commits after it are replayed on top. Changes you haven't staged stay as
+  they are. Undo takes the changes back out of the commit and stages them again.
+- **Create fixup commit for this commit** commits what's staged as `fixup! <its summary>`, to fold in later. Handy
+  while the branch is still moving, or to let a reviewer see the fix on its own.
+- **Squash fixup commits into their commits**, in the menu of any commit on the branch while it has some (or the
+  command palette), puts each `fixup!`, `squash!` and `amend!` commit into the commit it names, as `git rebase
+  --autosquash` does.
+
+Not sure which commit a fix belongs to? **Find the commit these changes belong to**, in the menu of the
+uncommitted-changes row or the command palette, looks at the lines you changed (the staged ones, or all of them when
+nothing is staged), finds the commit that last touched them and selects it. Its notification offers **Amend it**.
+Lines that are only added don't point anywhere, so they're left out. When the changes touch lines from several
+commits, it lists them: stage the changes for one at a time.
+
+These work with uncommitted changes around: only the staged ones go into the commit.
+
 ## Squash
 
 Pick several commits in a row on the current branch (Ctrl+click or Shift+click), then **Squash into one…**. The
