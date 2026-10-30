@@ -54,6 +54,33 @@ Pull first if you're not sure. A force push can't be [undone](undo.md).
 **Set upstream…** (or **Change upstream…**) in a local branch's menu picks the remote branch it pulls from and
 pushes to.
 
+## On the web
+
+Caboose knows the web pages of repositories on **GitHub**, **GitLab**, **Bitbucket** and **Azure DevOps**, from the
+remote's URL alone (nothing is fetched, and no account is needed).
+
+- **On the web** in a branch's menu (in the branches panel or on a graph row): **Open the branch in the browser**,
+  **Create a pull request** (a merge request on GitLab: the host's page for a new one, with the branch filled in),
+  and **Copy link**. A local branch goes by the branch it tracks, so it has to be pushed first; a branch that isn't
+  on a remote has no entry.
+- **On the web** in a commit's menu: open the commit's page, or copy a link to it. It has to be on the remote
+  already.
+- **Browser**, under the arrow button in the toolbar, opens the repository's page. The command palette has it too,
+  and **Create a pull request for *branch*** for the checked-out one.
+
+A commit or the repository goes by the remote the checked-out branch tracks, else `origin`, else the first remote.
+
+### A server of your own
+
+Caboose guesses the site from the server's name (one with *github*, *gitlab* or *bitbucket* in it, or Azure DevOps'
+own). For a server whose name doesn't say, tell it which kind it is, once per repository:
+
+```bash
+git config caboose.hosting gitlab
+```
+
+`github`, `gitlab`, `bitbucket` and `azure` work. Add `--global` to set it for every repository.
+
 ## Signing in
 
 Caboose uses your git's credential setup: a credential manager, SSH keys and your SSH config all work as in a

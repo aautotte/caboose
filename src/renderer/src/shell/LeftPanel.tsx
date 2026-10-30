@@ -8,6 +8,7 @@ import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
+import { webEntry } from './webMenu'
 import { progressAmount } from '@/lib/format'
 import { CollapseLeftButton, leftSectionId } from './PanelRails'
 
@@ -236,6 +237,7 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     m.push({ type: 'item', label: r.worktree ? 'Delete… (checked out in a worktree)' : 'Delete…', icon: <Trash2 size={14} />, danger: true, disabled: r.isHead || !!r.worktree, onSelect: () => act.deleteBranch(repoId, r.short) })
   }
   // The branch on the remote: this remote branch itself, or the one a local branch tracks.
+  if (r.kind === 'remote' || (r.upstream && !r.upstreamGone)) m.push(webEntry(repoId, { branch: r.short }))
   const onRemote = act.remoteBranchOf(repoId, r.kind === 'remote' ? r.name : r.upstream)
   if (onRemote) {
     if (r.kind === 'remote') m.push({ type: 'separator' })

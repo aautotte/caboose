@@ -74,4 +74,5 @@ shows up when you come back to the window.
 ## Open in another app
 
 The arrow button in the toolbar opens the repository in your **terminal**, **editor** or **file manager**. Which
-terminal and editor is up to you: see [External tools](settings.md#external-tools).
+terminal and editor is up to you: see [External tools](settings.md#external-tools). **Browser** opens its page on
+the git host: see [On the web](syncing.md#on-the-web).

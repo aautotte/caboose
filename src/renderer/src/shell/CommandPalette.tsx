@@ -53,6 +53,10 @@ export function CommandPalette(): React.JSX.Element | null {
         { id: 'stash', group: 'Changes', label: 'Stash changes…', run: () => act.openDialog({ kind: 'stash', repoId: id }) },
         { id: 'pop', group: 'Changes', label: 'Pop the newest stash', run: () => act.popLatest(id) },
         { id: 'add-remote', group: 'Remote', label: 'Add a remote…', run: () => act.openDialog({ kind: 'addRemote', repoId: id }) },
+        { id: 'web-repo', group: 'Remote', label: 'Open the repository in the browser', run: () => void act.openOnWeb(id, { kind: 'repo' }) },
+        ...(refs?.head.branch
+          ? [{ id: 'web-pr', group: 'Remote', label: `Create a pull request for ${refs.head.branch}`, run: () => void act.openOnWeb(id, { kind: 'pr', branch: refs.head.branch! }) }]
+          : []),
         {
           id: 'tag-head',
           group: 'Branch',

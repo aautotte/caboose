@@ -1,6 +1,7 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
 import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
+import type { WebTarget } from '../../shared/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
 import { layoutInWorker } from './graph/layoutClient'
@@ -1906,6 +1907,21 @@ export async function rebaseInteractive(repoId: string, onto: string, plan: Reba
   if (res) setCenter(repoId, { kind: 'graph' })
   await loadRepo(repoId, { keepSelection: true })
   return !!res
+}
+
+// ---------- on the web ----------
+
+/** Opens the page on the remote's git host (GitHub, GitLab, Bitbucket, Azure DevOps) in the browser. */
+export async function openOnWeb(repoId: string, target: WebTarget): Promise<void> {
+  const page = await attempt(() => call('web.open', { repoId, target }), target.kind === 'pr' ? 'Couldn’t start the pull request' : 'Couldn’t open the page')
+  if (page) toast({ tone: 'success', title: target.kind === 'pr' ? `Opened a new pull request on ${page.site}` : `Opened on ${page.site}`, body: page.url })
+}
+
+export async function copyWebLink(repoId: string, target: WebTarget): Promise<void> {
+  const page = await attempt(() => call('web.url', { repoId, target }), 'Couldn’t make the link')
+  if (!page) return
+  await navigator.clipboard.writeText(page.url)
+  toast({ tone: 'success', title: 'Link copied', body: page.url })
 }
 
 // ---------- remotes ----------

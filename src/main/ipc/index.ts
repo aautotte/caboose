@@ -760,6 +760,18 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('commit.template', z.object(R), ({ repoId }) => ops(repoId).commitTemplate())
 
   // ---------- other programs ----------
+  const webTarget = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('repo') }),
+    z.object({ kind: z.literal('branch'), name: ref }),
+    z.object({ kind: z.literal('commit'), sha: ref }),
+    z.object({ kind: z.literal('pr'), branch: ref })
+  ])
+  handle('web.url', z.object({ ...R, target: webTarget }), ({ repoId, target }) => ops(repoId).webPage(target))
+  handle('web.open', z.object({ ...R, target: webTarget }), async ({ repoId, target }) => {
+    const page = await ops(repoId).webPage(target)
+    await shell.openExternal(page.url)
+    return page
+  })
   handle('shell.open', z.object({ ...R, target: z.enum(['folder', 'terminal', 'editor']), path: z.string().min(1).max(4096).optional(), worktree: z.string().min(1).max(4096).optional() }), async ({ repoId, target, path, worktree }) => {
     const o = ops(repoId)
     // Another worktree of this repository: only one that git lists, never any folder.

@@ -34,6 +34,7 @@ import type {
 import { GcFail, invalid } from '../errors'
 import type { GitRunner, RunOptions } from './runner'
 import { buildPartialPatch } from './patch'
+import { HOST_NAMES, webRepo, webUrl, type HostKind, type WebTarget } from './hosting'
 import {
   HISTORY_FORMAT,
   LOG_FORMAT,
@@ -1980,6 +1981,60 @@ export class RepoOps {
       if (refs.refs.some((r) => r.name === n)) out.add(n)
     }
     return [...out]
+  }
+
+  // ---------- on the web ----------
+
+  /**
+   * The web page for the repository, a branch, a commit or a new pull request, on the git host of the remote it's
+   * on. A local branch goes by its upstream, so it must be pushed; a commit by the checked-out branch's remote (else
+   * origin, else the first), where it must already be.
+   */
+  async webPage(t: WebTarget): Promise<{ url: string; site: string }> {
+    const remotes = await this.remotes()
+    if (!remotes.length) throw invalid('This repository has no remote, so it has no page on the web.')
+    const names = remotes.map((r) => r.name).sort((a, b) => b.length - a.length)
+    /** "origin/feature/x" → origin, feature/x (remote names can hold slashes, so the longest that fits). */
+    const split = (short: string): { remote: string; branch: string } | null => {
+      const r = names.find((n) => short.startsWith(`${n}/`))
+      return r ? { remote: r, branch: short.slice(r.length + 1) } : null
+    }
+    const onRemote = async (name: string): Promise<{ remote: string; branch: string }> => {
+      this.safeRev(name)
+      if (await this.tryGit(['rev-parse', '-q', '--verify', `refs/remotes/${name}`])) {
+        const s = split(name)
+        if (s) return s
+      }
+      const up = (await this.tryGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', `${name}@{upstream}`]))?.trim()
+      const s = up ? split(up) : null
+      if (!s) throw invalid(`${name} isn’t on a remote yet. Push it first.`)
+      return s
+    }
+    let remote: string
+    let target = t
+    if (t.kind === 'branch' || t.kind === 'pr') {
+      const s = await onRemote(t.kind === 'branch' ? t.name : t.branch)
+      remote = s.remote
+      target = t.kind === 'branch' ? { kind: 'branch', name: s.branch } : { kind: 'pr', branch: s.branch }
+    } else {
+      const up = (await this.tryGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']))?.trim()
+      remote = (up && split(up)?.remote) || (names.includes('origin') ? 'origin' : remotes[0].name)
+      if (t.kind === 'commit') {
+        this.safeRev(t.sha)
+        const there = (await this.tryGit(['for-each-ref', '--count=1', '--format=%(refname)', `--contains=${t.sha}`, `refs/remotes/${remote}/`]))?.trim()
+        if (!there) throw invalid(`${t.sha.slice(0, 7)} isn’t on ${remote} yet, so it has no page there. Push it first.`)
+      }
+    }
+    const url = remotes.find((r) => r.name === remote)!.fetchUrl
+    const set = (await this.tryGit(['config', '--get', 'caboose.hosting']))?.trim()
+    const kind = set && set in HOST_NAMES ? (set as HostKind) : null
+    const repo = webRepo(url, kind)
+    if (!repo) {
+      throw invalid(
+        `Caboose doesn’t know which site ${remote} (${url}) is on. It knows GitHub, GitLab, Bitbucket and Azure DevOps; for a server of your own, set the git config caboose.hosting to github, gitlab, bitbucket or azure.`
+      )
+    }
+    return { url: webUrl(repo, target), site: HOST_NAMES[repo.kind] }
   }
 
   // ---------- housekeeping ----------

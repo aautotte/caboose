@@ -7,6 +7,7 @@ import { cn } from '@/ui/cn'
 import { fullDate, relativeTime, shortSha } from '@/lib/format'
 import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { webEntry } from '@/shell/webMenu'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
 import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
@@ -696,6 +697,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       items.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.name }) })
       items.push({ type: 'item', label: 'Delete…', danger: true, icon: <Trash2 size={14} />, disabled: r.isHead, onSelect: () => act.deleteBranch(repoId, r.name) })
     }
+    if (r.kind === 'remote' || (r.local?.upstream && !r.local.upstreamGone)) items.push(webEntry(repoId, { branch: r.name }))
     const onRemote = act.remoteBranchOf(repoId, r.kind === 'remote' ? r.key : r.local?.upstream)
     if (onRemote) {
       items.push({ type: 'item', label: `Delete ${onRemote.remote}/${onRemote.name}…`, danger: true, icon: <Trash2 size={14} />, onSelect: () => act.deleteRemoteBranch(repoId, onRemote.remote, onRemote.name) })
@@ -764,6 +766,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   entries.push(
     { type: 'item', label: 'Revert this commit', icon: <Undo size={14} />, onSelect: () => act.revert(repoId, row.sha, row.parents.length > 1) },
     { type: 'separator' },
+    ...(remotes.length ? [webEntry(repoId, { sha: row.sha })] : []),
     { type: 'item', label: 'Copy commit SHA', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(row.sha) }
   )
   return entries
