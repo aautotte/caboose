@@ -49,6 +49,8 @@ works offline, and it doesn't phone home.
   committing.
 - Edit any commit's message, squash several into one (every message kept, ready to edit), move a commit up or down,
   revert, cherry-pick one or several, reset (soft, mixed or hard).
+- Fix up older commits: amend the staged changes into any commit on the branch (your other changes stay put), or
+  make `fixup!` commits and squash them in later. Caboose can find the commit your changes belong to.
 - Git hooks run when history is rewritten, unless you tick Skip hooks.
 
 ### Branches and tags

@@ -1575,7 +1575,7 @@ export class RepoOps {
    * pre-commit and commit-msg on a reword) unless `noVerify`, as for a commit; one that refuses stops it all, and the
    * branch is put back as it was.
    */
-  async rebaseInteractive(onto: string, plan: RebaseStep[], tmpDir: string, noVerify = false): Promise<OpResult> {
+  async rebaseInteractive(onto: string, plan: RebaseStep[], tmpDir: string, noVerify = false, autostash = false): Promise<OpResult> {
     this.safeRev(onto)
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('This range has merge commits. Interactive rebase here would flatten them, so it isn’t offered.')
@@ -1588,7 +1588,7 @@ export class RepoOps {
       throw invalid('The first kept commit can’t be squashed: there’s nothing above it to squash into.')
     }
     if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
-    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes before rebasing.')
+    if (!autostash && (await this.hasTrackedChanges())) throw invalid('Commit or stash your changes before rebasing.')
     rmSync(tmpDir, { recursive: true, force: true })
     mkdirSync(tmpDir, { recursive: true })
     // Paths for git's shell (sh), single-quoted.
@@ -1604,7 +1604,7 @@ export class RepoOps {
     const todo = join(tmpDir, 'todo.txt')
     writeFileSync(todo, lines.join('\n') + '\n')
     try {
-      await this.mut(['rebase', '-i', ...(noVerify ? ['--no-verify'] : []), onto], { extraEnv: { GIT_SEQUENCE_EDITOR: `cp ${shq(todo)}`, GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
+      await this.mut(['rebase', '-i', ...(noVerify ? ['--no-verify'] : []), ...(autostash ? ['--autostash'] : []), onto], { extraEnv: { GIT_SEQUENCE_EDITOR: `cp ${shq(todo)}`, GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
       return { result: 'ok' }
     } catch (e) {
       const detail = e instanceof GcFail ? (e.detail ?? '') : ''
@@ -1646,10 +1646,143 @@ export class RepoOps {
   }
 
   /** Replays everything after `onto` with a plan made from the commits (oldest first). */
-  private async rewrite(onto: string, tmpDir: string, build: (rows: RebaseRow[]) => RebaseStep[], noVerify = false): Promise<OpResult> {
+  private async rewrite(onto: string, tmpDir: string, build: (rows: RebaseRow[]) => RebaseStep[], noVerify = false, autostash = false): Promise<OpResult> {
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('There are merge commits after this one on the branch, so this can’t be rewritten without flattening them.')
-    return this.rebaseInteractive(onto, build(preview.rows), tmpDir, noVerify)
+    return this.rebaseInteractive(onto, build(preview.rows), tmpDir, noVerify, autostash)
+  }
+
+  /** A commit on the current branch's own line that can be rewritten: full SHA and its parent. */
+  private async rewritable(sha: string): Promise<{ full: string; onto: string }> {
+    const full = (await this.tryGit(['rev-parse', '-q', '--verify', `${this.safeRev(sha)}^{commit}`]))?.trim()
+    if (!full || !(await this.headLine()).includes(full)) throw invalid('That commit isn’t on the current branch’s own line of history.')
+    const onto = await this.parentOf(full)
+    if (!onto) throw invalid('The very first commit can’t be changed here.')
+    if ((await this.rebasePreview(onto)).merges) throw invalid('There are merge commits after this one on the branch, so it can’t be changed without flattening them.')
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    return { full, onto }
+  }
+
+  private async hasStaged(): Promise<boolean> {
+    return !!(await this.git(['diff', '--cached', '--name-only'])).trim()
+  }
+
+  // ---------- fixups ----------
+
+  /**
+   * Puts the staged changes into an older commit of the current branch (lazygit's "amend commit with staged
+   * changes"). They're committed on top first (`temp`, which undo needs), then folded into the commit by a rebase.
+   * Unstaged changes are set aside and put back (--autostash). If the rebase can't start, the changes are staged
+   * again as they were.
+   */
+  async amendInto(sha: string, tmpDir: string): Promise<{ result: OpResult; temp: string }> {
+    const { full, onto } = await this.rewritable(sha)
+    if (!(await this.hasStaged())) throw invalid('Stage the changes to put into the commit first.')
+    const before = (await this.headSha())!
+    await this.mut(['commit', '-q', '--no-verify', '--no-gpg-sign', '-m', `fixup! ${full}`])
+    const temp = (await this.headSha())!
+    try {
+      const result = await this.rewrite(
+        onto,
+        tmpDir,
+        (rows) =>
+          rows
+            .filter((r) => r.sha !== temp)
+            .flatMap((r): RebaseStep[] => (r.sha === full ? [{ sha: r.sha, action: 'pick' }, { sha: temp, action: 'fixup' }] : [{ sha: r.sha, action: 'pick' }])),
+        false,
+        true
+      )
+      return { result, temp }
+    } catch (e) {
+      if ((await this.headSha()) === temp && (await this.opState()).kind === 'none') await this.mut(['reset', '-q', '--soft', before])
+      throw e
+    }
+  }
+
+  /** git commit --fixup: the staged changes as a "fixup! <summary>" commit, to squash into `sha` later. */
+  async fixupCommit(sha: string, noVerify: boolean): Promise<void> {
+    const full = (await this.tryGit(['rev-parse', '-q', '--verify', `${this.safeRev(sha)}^{commit}`]))?.trim()
+    if (!full) throw invalid('That commit isn’t here any more.')
+    if (!(await this.hasStaged())) throw invalid('Stage the changes for the fixup commit first.')
+    await this.mut(['commit', '-q', `--fixup=${full}`, ...(noVerify ? ['--no-verify'] : [])])
+  }
+
+  /**
+   * The fixup!, squash! and amend! commits on the current branch's line, newest first, each with the commit it names
+   * (by summary or SHA, as git's --autosquash matches them), when that commit is on the line before it.
+   */
+  async fixups(): Promise<Array<{ sha: string; target: string | null }>> {
+    const out = await this.git(['log', '--first-parent', '-n2000', `--format=%H${US}%s`, 'HEAD', '--'])
+    const rows = out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const [sha, summary] = l.split(US)
+        return { sha, summary }
+      })
+    const marker = /^(?:(?:fixup|squash|amend)! )+/
+    const found: Array<{ sha: string; target: string | null }> = []
+    rows.forEach((r, i) => {
+      if (!marker.test(r.summary)) return
+      const want = r.summary.replace(marker, '')
+      const bySha = want.length >= 4 && /^[0-9a-f]+$/.test(want)
+      const t = rows.slice(i + 1).find((o) => !marker.test(o.summary) && (o.summary.startsWith(want) || (bySha && o.sha.startsWith(want))))
+      found.push({ sha: r.sha, target: t?.sha ?? null })
+    })
+    return found
+  }
+
+  /** git rebase -i --autosquash from the oldest commit a fixup names: each fixup goes into its commit. */
+  async autosquash(): Promise<OpResult> {
+    const list = await this.fixups()
+    if (!list.length) throw invalid('There are no fixup! commits on this branch.')
+    const targets = list.map((f) => f.target).filter((t): t is string => !!t)
+    if (!targets.length) throw invalid('None of the fixup! commits names a commit on this branch.')
+    const line = await this.headLine()
+    const oldest = targets.reduce((a, b) => (line.indexOf(a) < line.indexOf(b) ? a : b))
+    const onto = await this.parentOf(oldest)
+    if (!onto) throw invalid('A fixup for the very first commit can’t be squashed here.')
+    if ((await this.rebasePreview(onto)).merges) throw invalid('There are merge commits after those commits on the branch, so they can’t be squashed without flattening them.')
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    try {
+      await this.mut(['rebase', '-i', '--autosquash', '--autostash', onto], { extraEnv: { GIT_SEQUENCE_EDITOR: 'true', GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
+      return { result: 'ok' }
+    } catch (e) {
+      if ((await this.opState()).kind === 'rebase') return { result: 'conflicts' }
+      throw e
+    }
+  }
+
+  /**
+   * Which commits the lines being changed come from (lazygit's "find base commit for fixup"): the staged changes, or
+   * the unstaged ones when nothing is staged, blamed in HEAD. Added lines with nothing removed say nothing; `addOnly`
+   * tells when some were left out for that.
+   */
+  async fixupTarget(): Promise<{ shas: string[]; addOnly: boolean }> {
+    const staged = await this.hasStaged()
+    const raw = await this.git(['diff', ...(staged ? ['--cached'] : []), '-U0', '--no-color', '--no-ext-diff', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/'])
+    const shas = new Set<string>()
+    let addOnly = false
+    let path: string | null = null
+    for (const line of raw.split('\n')) {
+      if (line.startsWith('--- ')) {
+        path = line === '--- /dev/null' ? null : line.slice(6)
+        continue
+      }
+      const h = /^@@ -(\d+)(?:,(\d+))? /.exec(line)
+      if (!h || !path) continue
+      const count = h[2] === undefined ? 1 : Number(h[2])
+      if (!count) {
+        addOnly = true
+        continue
+      }
+      const out = (await this.tryGit(['blame', '--porcelain', '-L', `${h[1]},+${count}`, 'HEAD', '--', path])) ?? ''
+      for (const l of out.split('\n')) {
+        const m = /^([0-9a-f]{40}) \d+ \d+/.exec(l)
+        if (m && !/^0+$/.test(m[1])) shas.add(m[1])
+      }
+    }
+    return { shas: [...shas], addOnly }
   }
 
   async reword(sha: string, message: string, tmpDir: string, noVerify = false): Promise<OpResult> {

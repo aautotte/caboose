@@ -195,6 +195,14 @@ export interface Api {
   'refView.setMany': { in: R & { refs: string[]; state: 'normal' | 'hidden' }; out: RefViewState }
   'history.reword': { in: R & { sha: string; message: string; noVerify?: boolean }; out: OpResult }
   'history.squash': { in: R & { shas: string[]; message: string; noVerify?: boolean }; out: OpResult }
+  /** Folds the staged changes into an older commit of the current branch (unstaged ones are set aside and put back). */
+  'history.amendInto': { in: R & { sha: string }; out: OpResult }
+  /** git commit --fixup=<sha> with the staged changes. */
+  'history.fixupCommit': { in: R & { sha: string; noVerify?: boolean }; out: null }
+  /** git rebase --autosquash: every fixup!/squash!/amend! commit into the commit it names. */
+  'history.autosquash': { in: R; out: OpResult }
+  /** The commits the changed lines last came from (staged changes, else unstaged), and whether pure additions were left out. */
+  'history.fixupTarget': { in: R; out: { shas: string[]; addOnly: boolean } }
   'history.move': { in: R & { sha: string; direction: 'up' | 'down' }; out: OpResult }
 
   'prefs.getAll': { in: Record<string, never>; out: Record<string, unknown> }

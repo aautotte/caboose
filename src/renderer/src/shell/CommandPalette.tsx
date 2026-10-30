@@ -71,6 +71,8 @@ export function CommandPalette(): React.JSX.Element | null {
         { id: 'new-worktree', group: 'Branch', label: 'New worktree…', run: () => act.openDialog({ kind: 'addWorktree', repoId: id }) },
         { id: 'add-submodule', group: 'Repository', label: 'Add a submodule…', run: () => act.openDialog({ kind: 'addSubmodule', repoId: id }) },
         { id: 'log', group: 'View', label: 'Git activity log', run: () => act.openLog() },
+        { id: 'find-fixup', group: 'Changes', label: 'Find the commit these changes belong to', run: () => void act.findFixupTarget(id) },
+        { id: 'autosquash', group: 'Branch', label: 'Squash fixup commits into their commits', run: () => act.autosquash(id) },
         { id: 'compare', group: 'View', label: 'Compare two branches or commits…', run: () => act.openDialog({ kind: 'compare', repoId: id }) },
         { id: 'reflog', group: 'View', label: 'Reflog: where HEAD has been', run: () => act.setCenter(id, { kind: 'reflog' }) },
         {
