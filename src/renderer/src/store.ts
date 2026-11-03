@@ -106,6 +106,8 @@ export type Dialog =
   | { kind: 'patchCommit'; repoId: string; input: import('./actions').PatchInput; summary: string }
   /** Pick two branches or commits to compare. */
   | { kind: 'compare'; repoId: string }
+  /** Clean up the working tree: changes, untracked files, ignored files. `untrackedOnly`: only untracked ticked to start. */
+  | { kind: 'clean'; repoId: string; untrackedOnly?: boolean }
   /** Squash merge: what `source` brings in, as one commit on `target`, with a message to write. */
   | { kind: 'squashMerge'; repoId: string; source: string; target: string }
   /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */

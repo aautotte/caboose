@@ -425,6 +425,15 @@ export interface Blame {
 
 export type ResetMode = 'soft' | 'mixed' | 'hard'
 
+/** What cleaning up the working tree can remove. Ignored folders come as one entry each (node_modules/). */
+export interface CleanPreview {
+  tracked: string[]
+  untracked: string[]
+  ignored: string[]
+  /** Conflicted files: nothing can be put aside until they're resolved. */
+  conflicted: boolean
+}
+
 export type RebaseAction = 'pick' | 'reword' | 'edit' | 'squash' | 'fixup' | 'drop'
 
 export interface RebaseRow {

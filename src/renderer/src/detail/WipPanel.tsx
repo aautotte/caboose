@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Minus, Plus, Trash2, UserSearch } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, Eraser, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Minus, Plus, Trash2, UserSearch } from 'lucide-react'
 import type { Change, EffectiveIdentity } from '../../../shared/types'
 import { Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -203,6 +203,11 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         <Tooltip content="Stash changes">
           <IconButton label="Stash changes" disabled={changes.length === 0 || !!paused || !refs?.head.sha} onClick={() => act.openDialog({ kind: 'stash', repoId })}>
             <Archive size={16} />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content="Clean up the working tree…">
+          <IconButton label="Clean up the working tree" onClick={() => act.openDialog({ kind: 'clean', repoId })}>
+            <Eraser size={16} />
           </IconButton>
         </Tooltip>
         <Tooltip content="Discard all changes">

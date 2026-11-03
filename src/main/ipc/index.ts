@@ -304,6 +304,26 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     return null
   }))
 
+  handle('worktree.cleanPreview', z.object(R), ({ repoId }) => ops(repoId).cleanPreview())
+  handle('worktree.clean', z.object({ ...R, tracked: z.boolean(), untracked: z.boolean(), ignored: z.boolean() }), ({ repoId, tracked, untracked, ignored }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const p = await o.cleanPreview()
+      if (p.conflicted) throw invalid('Resolve the conflicts, or abort, first: conflicted files can’t be put aside for undo.')
+      const picked = [...(tracked ? p.tracked : []), ...(untracked ? p.untracked : []), ...(ignored ? p.ignored : [])]
+      if (!picked.length) return { removed: 0 }
+      // Everything of each kind there is: the whole working tree, as git sees it.
+      const all = tracked && untracked && (ignored || !p.ignored.length)
+      const before = await undo.snapshot(o)
+      const stash = await o.discard(all ? 'all' : picked, `${UNDO_REFS}${uuid()}`, ignored)
+      if (stash) {
+        const label = tracked ? (untracked || ignored ? 'Discard everything' : 'Discard changes to tracked files') : ignored ? (untracked ? 'Remove untracked and ignored files' : 'Remove ignored files') : 'Remove untracked files'
+        undo.record(repoId, 'discard', label, { ...before, stash, paths: all ? 'all' : picked, ignored }, before)
+      }
+      return { removed: stash ? picked.length : 0 }
+    })
+  )
+
   // ---------- branches ----------
   handle('branch.create', z.object({ ...R, name: z.string().min(1).max(255), at: ref, checkout: z.boolean() }), async ({ repoId, name, at, checkout }) => {
     if (checkout) await undoable(repoId, 'checkout', `Switch to ${name}`, () => ops(repoId).createBranch(name, at, true))

@@ -94,3 +94,18 @@ When a commit leaves nothing else to commit, you're taken back to the commit lis
 
 The trash icon on **Uncommitted changes** (or **Discard all changes…** in the command palette) throws away every
 change. Caboose keeps a copy first, so **Undo** brings it all back.
+
+## Cleaning up the working tree
+
+The eraser icon on **Uncommitted changes** opens **Clean up the working tree**. Tick what goes:
+
+- **Changes to tracked files**: the folder goes back to the last commit, staged changes included (`git reset
+  --hard`).
+- **Untracked files**: new files that were never committed (`git clean`).
+- **Ignored files**: what `.gitignore` leaves out, like build output and dependencies.
+
+It lists what will be removed, and **Undo** brings it all back, staged changes staged again. Ignored files are copied
+for undo too, which takes a while for a big folder like `node_modules`.
+
+**Remove untracked files…** (in the command palette, or the menu of the **Uncommitted changes** row in the graph)
+opens it with only the untracked files ticked. With conflicts, resolve them or abort first.
