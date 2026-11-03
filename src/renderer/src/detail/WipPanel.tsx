@@ -216,16 +216,22 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         <div role="region" aria-label="Paused operation" className="flex flex-col gap-2 border-b border-l-(length:--gc-stripe-w) border-border border-l-warning bg-surface-raised p-3">
           <p className="flex items-start gap-2 text-base text-text">
             <AlertTriangle size={16} className="mt-px shrink-0 text-warning" aria-hidden />
-            <span>
-              {opText[op!.kind as keyof typeof opText](op!)}{' '}
-              {conflicted.length ? `Resolve ${plural(conflicted.length, 'conflicted file')}, then continue.` : 'All conflicts are resolved. Continue to finish.'}
-            </span>
+            {op!.edit ? (
+              <span>
+                Rebasing {op!.head ?? 'your branch'}: stopped at {op!.edit.sha.slice(0, 7)} “{op!.edit.summary}” to edit it. Stage changes to add them to it (or tick Amend last commit to change its message), or make new commits. Then continue.
+              </span>
+            ) : (
+              <span>
+                {opText[op!.kind as keyof typeof opText](op!)}{' '}
+                {conflicted.length ? `Resolve ${plural(conflicted.length, 'conflicted file')}, then continue.` : 'All conflicts are resolved. Continue to finish.'}
+              </span>
+            )}
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="primary" disabled={conflicted.length > 0} loading={!!busy.op} onClick={() => void act.continueOp(repoId)}>
               Continue
             </Button>
-            {op!.kind === 'rebase' ? (
+            {op!.kind === 'rebase' && !op!.edit ? (
               <Button size="sm" onClick={() => void act.skipOp(repoId)}>
                 Skip this commit
               </Button>

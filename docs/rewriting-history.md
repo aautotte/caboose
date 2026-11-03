@@ -87,12 +87,33 @@ Each commit gets one of:
 | --- | --- | --- |
 | Keep | keep it as it is | P |
 | Reword | keep it, with a new message | R |
+| Edit | stop after this commit to change it, then continue | E |
 | Squash | fold into the commit above, keeping both messages | S |
 | Fixup | fold into the commit above, dropping this message | F |
 | Drop | leave it out | D |
 
 The oldest commit is at the top. Drag rows, or use **Alt+↑ / Alt+↓**, to reorder them. **Start rebase** runs it;
 if a step conflicts, Caboose stops and shows the [conflicts](conflicts.md).
+
+### Stop to edit a commit
+
+A commit marked **Edit** is replayed, then the rebase stops there. **Uncommitted changes** says which commit it
+stopped at. Change files and stage them: **Continue** adds what's staged to that commit. Tick **Amend last commit**
+to change its message too, or commit the changes on their own to make new commits after it. Unstaged changes have
+to be staged or discarded before you continue.
+
+### Branches stacked on these commits
+
+When another branch points at one of the commits being rewritten (a branch started from this one, say), a
+**Move *branch* along** box appears. Ticked, that branch moves to wherever its commit ends up, as `git rebase
+--update-refs` does. It starts ticked if `git config rebase.updateRefs` is on. Undo puts those branches back too.
+
+## Move commits onto another branch
+
+**Move *branch*'s commits after this onto…**, in the menu of an older commit on the checked-out branch, replays only
+the commits after that one onto the branch you pick (`git rebase --onto`). The commit itself and what came before
+it stay behind. It's for a branch started from another feature branch that has since been merged or rewritten:
+only your own commits move. Branches stacked on them can move along, as above.
 
 ## Cherry-pick
 

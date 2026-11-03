@@ -106,6 +106,8 @@ export type Dialog =
   | { kind: 'patchCommit'; repoId: string; input: import('./actions').PatchInput; summary: string }
   /** Pick two branches or commits to compare. */
   | { kind: 'compare'; repoId: string }
+  /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */
+  | { kind: 'rebaseFrom'; repoId: string; from: string; fromLabel: string }
   | {
       kind: 'confirm'
       title: string
