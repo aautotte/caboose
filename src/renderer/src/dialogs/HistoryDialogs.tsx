@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { RebasePreview } from '../../../shared/types'
-import { Button, Checkbox, Dialog, Field, TextInput } from '@/ui'
+import type { RebasePreview, RebaseRow } from '../../../shared/types'
+import { Button, Checkbox, Dialog, Field, TextArea, TextInput } from '@/ui'
 import { call } from '@/lib/api'
 import { plural } from '@/lib/format'
 import { useApp, type Dialog as D } from '@/store'
@@ -91,6 +91,80 @@ export function RebaseFromDialog({ d }: { d: Extract<D, { kind: 'rebaseFrom' }> 
             Commit or stash your changes first.
           </p>
         ) : null}
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
+  )
+}
+
+/**
+ * Squash merge: everything `source` brings in becomes one new commit on `target`, with a message to write. It starts
+ * with the one commit's message, or a summary and a line per commit.
+ */
+export function SquashMergeDialog({ d }: { d: Extract<D, { kind: 'squashMerge' }> }): React.JSX.Element {
+  const [rows, setRows] = useState<RebaseRow[] | null>(null)
+  const [summary, setSummary] = useState('')
+  const [body, setBody] = useState('')
+  const [skipHooks, setSkipHooks] = useState(false)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    call('merge.preview', { repoId: d.repoId, source: d.source, target: d.target })
+      .then((r) => {
+        if (!live) return
+        setRows(r)
+        if (r.length === 1) {
+          setSummary(r[0].summary)
+          setBody(r[0].body)
+        } else {
+          setSummary(`Merge ${d.source} (squashed)`)
+          setBody(r.map((c) => `* ${c.summary}`).join('\n'))
+        }
+      })
+      .catch(act.fail)
+    return () => {
+      live = false
+    }
+  }, [d.repoId, d.source, d.target])
+  const ready = !!rows?.length && !!summary.trim() && !busy
+  const submit = async (): Promise<void> => {
+    if (!ready) return
+    setBusy(true)
+    // Closed first: whatever happens is said in a notification, and there's nothing left to do here.
+    close()
+    await act.squashMerge(d.repoId, d.source, d.target, body.trim() ? `${summary.trim()}\n\n${body.trim()}` : summary.trim(), skipHooks)
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title={`Squash ${d.source} into one commit on ${d.target}`}
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            Squash and commit
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <p className="text-base text-muted">
+          {!rows
+            ? 'Listing the commits…'
+            : rows.length
+              ? `The changes from ${plural(rows.length, 'commit')} on ${d.source} become one new commit on ${d.target}. ${d.source} itself doesn’t change, and isn’t marked merged. Undo takes the commit off again.`
+              : `${d.target} already has every commit on ${d.source}.`}
+        </p>
+        <Field label="Summary">{(p) => <TextInput {...p} autoFocus value={summary} onChange={(e) => setSummary(e.target.value)} />}</Field>
+        <Field label="Description">{(p) => <TextArea {...p} rows={Math.min(14, Math.max(4, body.split('\n').length + 1))} value={body} onChange={(e) => setBody(e.target.value)} />}</Field>
+        <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} />
         <button type="submit" hidden />
       </form>
     </Dialog>

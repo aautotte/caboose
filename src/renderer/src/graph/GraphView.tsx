@@ -10,7 +10,7 @@ import * as act from '@/actions'
 import { webEntry } from '@/shell/webMenu'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
-import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
+import { compareEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
 
 const ROW = 28 // matches --gc-graph-row-h
 const HEADER = 26 // --gc-list-row-h, the sticky column header
@@ -681,7 +681,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     const items: MenuEntry[] = []
     if (!r.isHead) items.push({ type: 'item', label: `Check out ${r.name}`, icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, r.name) })
     if (headBranch && !r.isHead) {
-      items.push({ type: 'item', label: `Merge ${r.name} into ${headBranch}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.name, headBranch) })
+      items.push(...mergeEntries(repoId, r.name, headBranch, true))
       items.push({ type: 'item', label: `Rebase ${headBranch} onto ${r.name}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, headBranch, r.name) })
       items.push(rebaseOntoEntry(repoId, headBranch, r.name))
       items.push(compareEntry(repoId, headBranch, r.name))

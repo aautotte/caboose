@@ -59,7 +59,8 @@ works offline, and it doesn't phone home.
 
 - Create a branch from any commit, rename, check out, delete. Pick several branches or tags and push or delete
   them at once, on the remote too. The dialog says that undo only brings back the local side.
-- Merge or rebase by dragging one branch onto another.
+- Merge or rebase by dragging one branch onto another. Merge with a merge commit every time (`--no-ff`), or squash
+  a branch into one commit.
 - Pull or fast-forward a branch without switching to it. Double-click a remote branch to fast-forward the local one
   and check it out, or reset it when it can't fast-forward.
 - Reset a local branch to a remote branch from its menu.

@@ -1049,16 +1049,57 @@ export class RepoOps {
     await this.mut(['push', remote, '--delete', ...names.map((n) => `refs/heads/${n}`)], { opId, timeoutMs: 300_000 })
   }
 
-  async merge(source: string): Promise<OpResult> {
+  /** `noFf`: a merge commit even when the branch could just move forward. */
+  async merge(source: string, noFf = false): Promise<OpResult> {
     this.safeRev(source)
     try {
-      const out = await this.mut(['merge', '--no-edit', source])
+      const out = await this.mut(['merge', '--no-edit', ...(noFf ? ['--no-ff'] : []), source])
       if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
       return { result: 'ok' }
     } catch (e) {
       if ((await this.opState()).kind === 'merge') return { result: 'conflicts' }
       throw e
     }
+  }
+
+  /** The commits a merge of `source` into `target` brings in, oldest first, merges left out. */
+  async mergePreview(source: string, target: string): Promise<RebaseRow[]> {
+    return this.rangeRows(['--no-merges', `${this.safeRev(target)}..${this.safeRev(source)}`])
+  }
+
+  /**
+   * Squash merge: everything `source` brings in, as one new commit on the current branch (one parent, so the branch
+   * isn't marked merged). Conflicts put everything back: with no merge in progress, there'd be nothing to continue.
+   */
+  async squashMerge(source: string, message: string, noVerify: boolean): Promise<OpResult> {
+    this.safeRev(source)
+    if (!message.trim()) throw invalid('Add a summary first.')
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes before a squash merge.')
+    // A commit clears git's squash message; going back has to, or the next commit in a terminal would start with it.
+    const back = async (): Promise<void> => {
+      await this.mut(['reset', '-q', '--hard', 'HEAD'])
+      rmSync(join(await this.absGitDir(), 'SQUASH_MSG'), { force: true })
+    }
+    try {
+      const out = await this.mut(['merge', '--squash', source])
+      if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
+    } catch (e) {
+      if (!(await this.tryGit(['ls-files', '-u']))?.trim()) throw e
+      await back()
+      throw invalid(`${source} conflicts with this branch, so nothing changed. Merge it normally to sort the conflicts out, or rebase it first.`)
+    }
+    if ((await this.tryGit(['diff', '--cached', '--quiet'])) !== null) {
+      await back()
+      return { result: 'nothing', message: 'Those changes are already on this branch.' }
+    }
+    try {
+      await this.mut(['commit', '-F', '-', '--cleanup=strip', ...(noVerify ? ['--no-verify'] : [])], { stdin: message.trim() + '\n' })
+    } catch (e) {
+      await back()
+      throw e
+    }
+    return { result: 'ok' }
   }
 
   /** Rebases `branch` (named explicitly, so a checkout from elsewhere in between can't change which branch moves). */

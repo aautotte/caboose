@@ -34,7 +34,9 @@ Double-click a branch, or choose **Check out** from its menu.
 | | |
 | --- | --- |
 | Check out, Check out in a new worktree… | |
-| Merge into *current branch* | |
+| Merge into *current branch* | fast-forwards when it can |
+| Merge into *current branch* with a merge commit | always a merge commit (`--no-ff`) |
+| Squash into one commit on *current branch*… | see [Merge and rebase](#merge-and-rebase) |
 | Rebase *current branch* onto this | |
 | Interactive rebase *current branch* onto this… | see [Rewriting history](rewriting-history.md#interactive-rebase) |
 | Pull | the current branch pulls as the toolbar does; any other branch is fetched and fast-forwarded without switching to it |
@@ -51,6 +53,19 @@ Double-click a branch, or choose **Check out** from its menu.
 
 Use the branch menu, or drag one branch label onto another in the graph. If there are conflicts, Caboose stops
 and shows them. See [Conflicts](conflicts.md).
+
+A merge has three forms:
+
+- **Merge**: when the current branch has nothing the other doesn't, it just moves forward (a fast-forward);
+  otherwise a merge commit joins the two.
+- **With a merge commit**: always a merge commit, even when it could move forward, so the branch's work stays
+  grouped in the history.
+- **Squash into one commit…**: everything the branch brings in becomes one new, ordinary commit. The message starts
+  with the one commit's message, or a line per commit, for you to edit. The branch itself doesn't change and isn't
+  marked merged, so delete it yourself when you're done. A squash that conflicts changes nothing: merge normally to
+  sort the conflicts out, or rebase the branch first.
+
+Undo takes any of them off again.
 
 To move only some of a branch's commits onto another branch, see
 [Move commits onto another branch](rewriting-history.md#move-commits-onto-another-branch).

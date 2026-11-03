@@ -6,7 +6,7 @@ import { call } from '@/lib/api'
 import { CloneDialog, FolderField, InitDialog } from '@/home/RepoDialogs'
 import { ShortcutSheet } from '@/screens/Stubs'
 import { ProfilesDialog } from './ProfilesDialog'
-import { RebaseFromDialog } from './HistoryDialogs'
+import { RebaseFromDialog, SquashMergeDialog } from './HistoryDialogs'
 import { AddRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
@@ -60,6 +60,8 @@ export function DialogHost(): React.JSX.Element | null {
       return <PatchCommitDialog d={d} />
     case 'rebaseFrom':
       return <RebaseFromDialog d={d} />
+    case 'squashMerge':
+      return <SquashMergeDialog d={d} />
     case 'confirm':
       return (
         <ConfirmDialog

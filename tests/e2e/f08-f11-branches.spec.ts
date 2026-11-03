@@ -123,13 +123,13 @@ test('F09-H1 merge by dragging one branch onto another', async () => {
   await expect(local(/^main/)).toHaveAttribute('aria-current', 'true')
   await h.page.waitForTimeout(600)
   await pill('drag-me').dragTo(pill('main'))
-  await h.page.getByRole('menuitem', { name: 'Merge drag-me into main' }).click()
+  await h.page.getByRole('menuitem', { name: 'Merge drag-me into main', exact: true }).click()
   await expect.poll(() => existsSync(join(repo, 'dragged.txt'))).toBe(true)
   expect(head()).toBe('main')
 })
 
 test('F09-E1 merging again says there is nothing to do', async () => {
-  await menu(h.page, local(/^drag-me/), 'Merge into main')
+  await menu(h.page, local(/^drag-me/), /^Merge into main$/)
   await expect(toasts().getByText('Already up to date.')).toBeVisible()
   await dismissToasts()
 })
@@ -140,14 +140,14 @@ test('F09-E4 a branch folded into “+N” on a shared commit can still be merge
   const row = grid(h.page).getByRole('row', { name: /^Topic work/ })
   await row.getByRole('button', { name: /more on this commit: .*topic/ }).click()
   await h.page.getByRole('menuitem', { name: 'topic', exact: true }).click()
-  await h.page.getByRole('menuitem', { name: 'Merge topic into main' }).click()
+  await h.page.getByRole('menuitem', { name: 'Merge topic into main', exact: true }).click()
   await expect.poll(() => existsSync(join(repo, 'topic.txt'))).toBe(true)
 })
 
 test('F09-E3 a merge that would overwrite local changes changes nothing', async () => {
   writeFileSync(join(repo, 'a.txt'), lines(6, ' (unsaved)'))
   const before = h.git(repo, 'rev-parse', 'HEAD')
-  await menu(h.page, local(/^clash/).first(), 'Merge into main')
+  await menu(h.page, local(/^clash/).first(), /^Merge into main$/)
   await expect(toasts().getByText(/Couldn’t merge clash/)).toBeVisible()
   expect(h.git(repo, 'rev-parse', 'HEAD')).toBe(before)
   expect(existsSync(join(repo, '.git', 'MERGE_HEAD'))).toBe(false)
@@ -158,7 +158,7 @@ test('F09-E3 a merge that would overwrite local changes changes nothing', async 
 
 test('F09-E2 / F10-E1 a conflicting merge pauses; Abort puts everything back', async () => {
   const before = h.git(repo, 'rev-parse', 'HEAD')
-  await menu(h.page, local(/^clash/).first(), 'Merge into main')
+  await menu(h.page, local(/^clash/).first(), /^Merge into main$/)
   await expect(h.page.getByRole('region', { name: 'Paused operation' })).toContainText('Merging')
   await h.page.getByRole('region', { name: 'Paused operation' }).getByRole('button', { name: 'Abort' }).click()
   await dialog(h.page).getByRole('button', { name: 'Abort' }).click()
@@ -170,7 +170,7 @@ test('F09-E2 / F10-E1 a conflicting merge pauses; Abort puts everything back', a
 // ---------- F10 ----------
 
 test('F10-E2 one side deleted a file the other edited: keeping the deletion works', async () => {
-  await menu(h.page, local(/^deleter/), 'Merge into main')
+  await menu(h.page, local(/^deleter/), /^Merge into main$/)
   await openWip(h.page)
   await h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /del\.txt/ }).click()
   // The tool explains what happened instead of showing a three-way merge with a side missing.
@@ -184,7 +184,7 @@ test('F10-E2 one side deleted a file the other edited: keeping the deletion work
 })
 
 test('F10-E3 a binary conflict offers whole-file choices', async () => {
-  await menu(h.page, local(/^binbranch/), 'Merge into main')
+  await menu(h.page, local(/^binbranch/), /^Merge into main$/)
   await openWip(h.page)
   await h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /bin\.dat/ }).click()
   await expect(h.page.getByText('bin.dat is a binary file')).toBeVisible()

@@ -127,7 +127,9 @@ export interface Api {
   'branch.deleteRemote': { in: R & { remote: string; name: string; opId: string }; out: string | null }
   /** One push that deletes several branches on `remote`. */
   'branch.deleteRemoteMany': { in: R & { remote: string; names: string[]; opId: string }; out: null }
-  'branch.merge': { in: R & { source: string }; out: OpResult }
+  'branch.merge': { in: R & { source: string; noFf?: boolean }; out: OpResult }
+  'branch.squashMerge': { in: R & { source: string; message: string; noVerify: boolean }; out: OpResult }
+  'merge.preview': { in: R & { source: string; target: string }; out: RebaseRow[] }
   'branch.rebase': { in: R & { onto: string; branch?: string }; out: OpResult }
   'branch.setUpstream': { in: R & { name: string; upstream: string }; out: null }
 

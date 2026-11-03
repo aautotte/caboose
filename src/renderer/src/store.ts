@@ -106,6 +106,8 @@ export type Dialog =
   | { kind: 'patchCommit'; repoId: string; input: import('./actions').PatchInput; summary: string }
   /** Pick two branches or commits to compare. */
   | { kind: 'compare'; repoId: string }
+  /** Squash merge: what `source` brings in, as one commit on `target`, with a message to write. */
+  | { kind: 'squashMerge'; repoId: string; source: string; target: string }
   /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */
   | { kind: 'rebaseFrom'; repoId: string; from: string; fromLabel: string }
   | {
