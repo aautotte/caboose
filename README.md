@@ -37,6 +37,8 @@ works offline, and it doesn't phone home.
 
 - Changed files as a flat list or a folder tree, in Not staged and Staged.
 - Stage or unstage files, blocks or single lines, with the mouse or the keyboard. Discard them too, with undo.
+- Clean up the working tree: remove untracked files, ignored ones, or everything back to the last commit, with
+  undo.
 - Inline or side by side, with whitespace hidden or not, long lines wrapped or not, your code size and tab width.
 - Find in the open file (Ctrl+F), with every match highlighted.
 - Binary files, Git LFS files and submodule pointers each get a diff that says what changed.

@@ -23,6 +23,7 @@ import type {
   SubmoduleMode,
   SubmoduleChange,
   OperationState,
+  CleanPreview,
   OpResult,
   PullMode,
   ReflogEntry,
@@ -958,20 +959,31 @@ export class RepoOps {
   }
 
   /**
-   * Discards changes by stashing them (untracked files included) and dropping the stash entry,
-   * so the user's stash list stays clean but the snapshot can be restored by undo.
+   * Discards changes by stashing them (untracked files included, and ignored ones with `ignored`) and dropping the
+   * stash entry, so the user's stash list stays clean but the snapshot can be restored by undo.
    * Returns the snapshot commit, or null if there was nothing to discard.
    */
-  async discard(paths: string[] | 'all', snapshotRef: string): Promise<string | null> {
+  async discard(paths: string[] | 'all', snapshotRef: string, ignored = false): Promise<string | null> {
     const before = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
-    const spec = paths === 'all' ? [] : ['--', ...this.safePaths(paths)]
-    await this.mut(['stash', 'push', '--include-untracked', '-q', '-m', 'Caboose: discarded changes', ...spec])
+    // Paths go on stdin: a long list would overflow the command line.
+    const spec = paths === 'all' ? [] : ['--pathspec-from-file=-', '--pathspec-file-nul']
+    const stdin = paths === 'all' ? undefined : this.safePaths(paths).join('\0')
+    await this.mut(['stash', 'push', ignored ? '--all' : '--include-untracked', '-q', '-m', 'Caboose: discarded changes', ...spec], { stdin })
     const after = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     if (!after || after === before) return null
     const sha = after.trim()
     await this.mut(['update-ref', snapshotRef, sha])
     await this.mut(['stash', 'drop', '-q', 'stash@{0}'])
     return sha
+  }
+
+  /** What cleaning up the working tree would remove: changed tracked files, untracked files, ignored files. */
+  async cleanPreview(): Promise<CleanPreview> {
+    const st = await this.status()
+    const tracked = st.changes.filter((c) => c.worktree !== '?').flatMap((c) => (c.origPath ? [c.path, c.origPath] : [c.path]))
+    const untracked = st.changes.filter((c) => c.worktree === '?').map((c) => c.path)
+    const ignored = (await this.git(['ls-files', '-z', '-o', '-i', '--exclude-standard', '--directory'])).split('\0').filter(Boolean)
+    return { tracked, untracked, ignored, conflicted: st.changes.some((c) => c.conflicted) }
   }
 
   async restoreSnapshot(sha: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Eraser, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -671,6 +671,8 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: 'Stage all changes', onSelect: () => void act.stage(repoId, 'all') },
       { type: 'item', label: 'Find the commit these changes belong to', icon: <Search size={14} />, onSelect: () => void act.findFixupTarget(repoId) },
       { type: 'item', label: 'Stash changes…', icon: <Archive size={14} />, onSelect: () => act.openDialog({ kind: 'stash', repoId }) },
+      { type: 'item', label: 'Remove untracked files…', icon: <Eraser size={14} />, onSelect: () => act.openDialog({ kind: 'clean', repoId, untrackedOnly: true }) },
+      { type: 'item', label: 'Clean up the working tree…', icon: <Eraser size={14} />, onSelect: () => act.openDialog({ kind: 'clean', repoId }) },
       { type: 'item', label: 'Discard all changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, 'all') }
     ]
   }

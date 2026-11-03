@@ -3,6 +3,7 @@ import type {
   ActivityEntry,
   AuthPromptEvent,
   Blame,
+  CleanPreview,
   EffectiveIdentity,
   FileHistoryEntry,
   GitConfigKey,
@@ -103,6 +104,8 @@ export interface Api {
   'index.unstage': { in: R & { paths: string[] | 'all' }; out: null }
   'commit.create': { in: R & { summary: string; body: string; amend: boolean; noVerify: boolean; messageOnly?: boolean }; out: { sha: string } }
   'worktree.discard': { in: R & { paths: string[] | 'all' }; out: null }
+  'worktree.cleanPreview': { in: R; out: CleanPreview }
+  'worktree.clean': { in: R & { tracked: boolean; untracked: boolean; ignored: boolean }; out: { removed: number } }
 
   'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: null }
   /** Bisect: start between a bad and a good commit; mark the one being tested (or another); stop. */

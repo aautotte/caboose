@@ -923,6 +923,13 @@ export function discard(repoId: string, paths: string[] | 'all'): void {
   })
 }
 
+/** Cleans up the working tree (see CleanDialog). */
+export async function clean(repoId: string, what: { tracked: boolean; untracked: boolean; ignored: boolean }): Promise<void> {
+  const res = await attempt(() => call('worktree.clean', { repoId, ...what }), 'Couldn’t clean up')
+  if (res) toast({ tone: 'success', title: res.removed ? `Removed ${plural(res.removed, 'item')}` : 'Nothing to remove', body: res.removed ? 'Undo brings it all back.' : undefined })
+  await loadRepo(repoId, { keepSelection: true })
+}
+
 type CommitInput = { summary: string; body: string; amend: boolean; noVerify: boolean; push: boolean; messageOnly?: boolean; detachedOk?: boolean }
 
 /**

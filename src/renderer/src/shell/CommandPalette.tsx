@@ -50,6 +50,8 @@ export function CommandPalette(): React.JSX.Element | null {
         { id: 'stage-all', group: 'Changes', label: 'Stage all changes', shortcut: 'Ctrl+Shift+S', run: () => void act.stage(id, 'all') },
         { id: 'unstage-all', group: 'Changes', label: 'Unstage all changes', shortcut: 'Ctrl+Shift+U', run: () => void act.unstage(id, 'all') },
         { id: 'discard-all', group: 'Changes', label: 'Discard all changes…', run: () => act.discard(id, 'all') },
+        { id: 'clean-untracked', group: 'Changes', label: 'Remove untracked files…', run: () => act.openDialog({ kind: 'clean', repoId: id, untrackedOnly: true }) },
+        { id: 'clean', group: 'Changes', label: 'Clean up the working tree…', run: () => act.openDialog({ kind: 'clean', repoId: id }) },
         { id: 'stash', group: 'Changes', label: 'Stash changes…', run: () => act.openDialog({ kind: 'stash', repoId: id }) },
         { id: 'pop', group: 'Changes', label: 'Pop the newest stash', run: () => act.popLatest(id) },
         { id: 'add-remote', group: 'Remote', label: 'Add a remote…', run: () => act.openDialog({ kind: 'addRemote', repoId: id }) },

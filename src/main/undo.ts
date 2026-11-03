@@ -34,6 +34,7 @@ export interface Snapshot {
   stashes?: { stash: string; message: string; index: number }[] // stash_drop of several at once (index: where each was)
   stash?: string // discard: snapshot commit; staged_rewrite: a commit on top of `sha` whose tree is what's staged on this side
   paths?: string[] | 'all' // discard: what was discarded (for redo)
+  ignored?: boolean // discard: ignored files went too
   patch?: string // discard_lines: the patch that was reversed out of the working files
   message?: string // stash_drop: the stash's message
   mode?: ResetMode // reset
@@ -219,7 +220,7 @@ export class UndoStack {
           return after
         }
         const ref = `${UNDO_REFS}${row.id}`
-        const stash = await ops.discard(before.paths ?? 'all', ref)
+        const stash = await ops.discard(before.paths ?? 'all', ref, before.ignored)
         this.db
           .prepare('UPDATE undo_entries SET before_state = ? WHERE id = ?')
           .run(JSON.stringify({ ...before, stash: stash ?? before.stash }), row.id)
