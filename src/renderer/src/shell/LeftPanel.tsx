@@ -4,7 +4,7 @@ import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../.
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
-import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
+import { compareEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
@@ -216,7 +216,7 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     })
   }
   if (head && r.short !== head) {
-    m.push({ type: 'item', label: `Merge into ${head}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.short, head) })
+    m.push(...mergeEntries(repoId, r.short, head, false))
     m.push({ type: 'item', label: `Rebase ${head} onto ${r.short}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, head, r.short) })
     m.push(rebaseOntoEntry(repoId, head, r.short))
     m.push(compareEntry(repoId, head, r.short))

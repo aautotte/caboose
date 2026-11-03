@@ -1285,16 +1285,29 @@ function afterOp(repoId: string, res: { result: string; message?: string } | und
   else if (res.result === 'ok') toast({ tone: 'success', title: okTitle })
 }
 
-/** Merge `source` into `target`. Checks out target first if needed. */
-export async function mergeInto(repoId: string, source: string, target: string): Promise<void> {
-  const head = useApp.getState().repos[repoId]?.refs?.head.branch
-  if (target !== head) {
-    const ok = await attempt(() => call('branch.checkout', { repoId, ref: target }), `Couldn’t switch to ${target}`)
-    if (ok === undefined) return void (await loadRepo(repoId))
-  }
-  const res = await attempt(() => call('branch.merge', { repoId, source }), `Couldn’t merge ${source}`)
+/** Merge `source` into `target`. Checks out target first if needed. `noFf`: always a merge commit. */
+export async function mergeInto(repoId: string, source: string, target: string, noFf = false): Promise<void> {
+  if (!(await switchFor(repoId, target))) return
+  const res = await attempt(() => call('branch.merge', { repoId, source, noFf }), `Couldn’t merge ${source}`)
   afterOp(repoId, res, `Merged ${source} into ${target}`)
   await loadRepo(repoId, { keepSelection: true })
+}
+
+/** Checks out `target` unless it's checked out already. False if that failed. */
+async function switchFor(repoId: string, target: string): Promise<boolean> {
+  if (target === useApp.getState().repos[repoId]?.refs?.head.branch) return true
+  const ok = await attempt(() => call('branch.checkout', { repoId, ref: target }), `Couldn’t switch to ${target}`)
+  if (ok === undefined) await loadRepo(repoId)
+  return ok !== undefined
+}
+
+/** Everything `source` brings in, as one commit on `target` with `message`. Checks out target first if needed. */
+export async function squashMerge(repoId: string, source: string, target: string, message: string, noVerify: boolean): Promise<boolean> {
+  if (!(await switchFor(repoId, target))) return false
+  const res = await attempt(() => call('branch.squashMerge', { repoId, source, message, noVerify }), `Couldn’t squash ${source}`)
+  afterOp(repoId, res, `Squashed ${source} into one commit on ${target}`)
+  await loadRepo(repoId, { keepSelection: true })
+  return !!res
 }
 
 /** Rebase `branch` onto `onto`. Checks out branch first if needed. */

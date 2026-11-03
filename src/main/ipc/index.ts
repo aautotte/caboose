@@ -366,9 +366,13 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('branch.deleteRemoteMany', z.object({ ...R, remote: ref, names: z.array(ref).min(1).max(1000), opId }), ({ repoId, remote, names, opId }) =>
     exclusive(repoId, async () => (await ops(repoId).deleteRemoteBranches(remote, names, opId), null))
   )
-  handle('branch.merge', z.object({ ...R, source: ref }), ({ repoId, source }) =>
-    undoable(repoId, 'merge', `Merge ${source}`, () => ops(repoId).merge(source), (r) => r.result !== 'conflicts')
+  handle('branch.merge', z.object({ ...R, source: ref, noFf: z.boolean().optional() }), ({ repoId, source, noFf }) =>
+    undoable(repoId, 'merge', `Merge ${source}`, () => ops(repoId).merge(source, noFf), (r) => r.result !== 'conflicts')
   )
+  handle('branch.squashMerge', z.object({ ...R, source: ref, message: z.string().min(1).max(100_000), noVerify: z.boolean() }), ({ repoId, source, message, noVerify }) =>
+    undoable(repoId, 'merge', `Squash merge ${source}`, () => ops(repoId).squashMerge(source, message, noVerify))
+  )
+  handle('merge.preview', z.object({ ...R, source: ref, target: ref }), ({ repoId, source, target }) => ops(repoId).mergePreview(source, target))
   handle('branch.rebase', z.object({ ...R, onto: ref, branch: ref.optional() }), ({ repoId, onto, branch }) =>
     undoable(repoId, 'rebase', `Rebase ${branch ? `${branch} ` : ''}onto ${onto}`, () => ops(repoId).rebase(onto, branch), (r) => r.result !== 'conflicts')
   )

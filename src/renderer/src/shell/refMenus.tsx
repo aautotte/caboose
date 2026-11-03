@@ -1,4 +1,4 @@
-import { Download, Eye, EyeOff, GitBranchPlus, GitCompare, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
+import { Download, Eye, EyeOff, GitBranchPlus, GitCommitVertical, GitCompare, GitMerge, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
 import type { MenuEntry } from '@/ui'
 import * as act from '@/actions'
 
@@ -56,6 +56,19 @@ export function resetToRemoteEntry(repoId: string, remoteBranch: string): MenuEn
 }
 
 /** Interactive rebase of the checked-out branch onto `onto` (a branch): pick, reorder, squash or drop its commits. */
+/**
+ * Merge `source` into `target`, and the other ways to: always with a merge commit (--no-ff), or squashed into one
+ * new commit. `named`: the labels name the source (where the menu isn't the source's own).
+ */
+export function mergeEntries(repoId: string, source: string, target: string, named: boolean): MenuEntry[] {
+  const what = named ? `${source} ` : ''
+  return [
+    { type: 'item', label: `Merge ${what}into ${target}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, source, target) },
+    { type: 'item', label: `Merge ${what}into ${target} with a merge commit`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, source, target, true) },
+    { type: 'item', label: `Squash ${what}into one commit on ${target}…`, icon: <GitCommitVertical size={14} />, onSelect: () => act.openDialog({ kind: 'squashMerge', repoId, source, target }) }
+  ]
+}
+
 export function rebaseOntoEntry(repoId: string, head: string, onto: string): MenuEntry {
   return { type: 'item', label: `Interactive rebase ${head} onto ${onto}…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'rebase', onto, ontoLabel: onto, ontoBranch: true }) }
 }
