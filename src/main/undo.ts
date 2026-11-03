@@ -40,6 +40,7 @@ export interface Snapshot {
   remote?: Remote // remote_remove
   gitignore?: string | null // ignore: the root .gitignore on this side (null: none)
   index?: string // ignore: the index entries of the files it stopped tracking
+  tips?: { name: string; sha: string }[] // rebase: other branches it moved along (stacked ones), where each is on this side
 }
 
 interface Row {
@@ -63,6 +64,23 @@ export class UndoStack {
   async snapshot(ops: RepoOps): Promise<Snapshot> {
     const refs = await ops.refs()
     return { branch: refs.head.branch, sha: refs.head.sha }
+  }
+
+  /** Before a rebase: every other branch's tip too, since a rebase can move stacked branches along. */
+  async snapshotTips(ops: RepoOps): Promise<Snapshot> {
+    const s = await this.snapshot(ops)
+    return { ...s, tips: await ops.branchTips(s.branch) }
+  }
+
+  /** Both sides of an action that has finished. A rebase keeps only the other branches that moved, on each side. */
+  async settle(ops: RepoOps, before: Snapshot): Promise<[Snapshot, Snapshot]> {
+    const after = await this.snapshot(ops)
+    if (!before.tips) return [before, after]
+    const { tips, ...rest } = before
+    const now = new Map((await ops.branchTips(after.branch)).map((t) => [t.name, t.sha]))
+    const moved = tips.filter((t) => now.has(t.name) && now.get(t.name) !== t.sha)
+    if (!moved.length) return [rest, after]
+    return [{ ...rest, tips: moved }, { ...after, tips: moved.map((t) => ({ name: t.name, sha: now.get(t.name)! })) }]
   }
 
   /**
@@ -111,7 +129,8 @@ export class UndoStack {
     const p = this.pending.get(ops.repo.id)
     if (!p) return
     this.pending.delete(ops.repo.id)
-    this.record(ops.repo.id, p.type, p.label, p.before, await this.snapshot(ops))
+    const [before, after] = await this.settle(ops, p.before)
+    this.record(ops.repo.id, p.type, p.label, before, after)
   }
 
   dropPending(repoId: string): void {
@@ -301,8 +320,11 @@ export class UndoStack {
         if (await ops.hasTrackedChanges()) {
           throw new GcFail('invalid', 'Commit or stash your changes first. Undoing this would overwrite them.')
         }
+        // Stacked branches the rebase moved along: each must still be where it left them.
+        for (const t of from.tips ?? []) if ((await ops.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${t.name}`]))?.trim() !== t.sha) throw moved()
         if (to.branch && to.branch !== cur.branch) await ops.mut(['switch', to.branch])
         await ops.mut(['reset', '-q', '--hard', to.sha!])
+        for (const t of to.tips ?? []) await ops.mut(['update-ref', `refs/heads/${t.name}`, t.sha])
         return after
       }
     }

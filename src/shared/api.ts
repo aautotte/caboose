@@ -179,7 +179,8 @@ export interface Api {
   'cherry.preview': { in: R & { tip: string }; out: RebaseRow[] }
   'rebase.preview': { in: R & { onto: string }; out: RebasePreview }
   /** `noVerify`: skip git hooks, as for a commit (they run by default). Also for reword and squash. */
-  'rebase.interactive': { in: R & { onto: string; plan: RebaseStep[]; noVerify?: boolean }; out: OpResult }
+  'rebase.interactive': { in: R & { onto: string; plan: RebaseStep[]; noVerify?: boolean; updateRefs?: boolean }; out: OpResult }
+  'rebase.onto': { in: R & { from: string; onto: string; updateRefs: boolean }; out: OpResult }
 
   'remote.list': { in: R; out: Remote[] }
   'remote.add': { in: R & { name: string; url: string }; out: null }

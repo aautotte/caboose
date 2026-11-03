@@ -693,7 +693,13 @@ export class RepoOps {
       if (existsSync(join(dir, d))) {
         const step = Number(read(`${d}/msgnum`) ?? read(`${d}/next`) ?? 0)
         const total = Number(read(`${d}/end`) ?? read(`${d}/last`) ?? 0)
-        return { kind: 'rebase', step, total, onto: read(`${d}/onto`), head: read(`${d}/head-name`)?.replace(/^refs\/heads\//, '') }
+        const state: OperationState = { kind: 'rebase', step, total, onto: read(`${d}/onto`), head: read(`${d}/head-name`)?.replace(/^refs\/heads\//, '') }
+        // Stopped by an Edit step (git writes `amend` for those, not for conflicts), and nothing conflicts.
+        const amend = read(`${d}/amend`)
+        if (amend && /^[0-9a-f]{40}$/.test(amend) && !(await this.tryGit(['ls-files', '-u']))?.trim()) {
+          state.edit = { sha: amend, summary: (await this.tryGit(['log', '-1', '--format=%s', amend]))?.trim() ?? '' }
+        }
+        return state
       }
     }
     if (existsSync(join(dir, 'MERGE_HEAD'))) return { kind: 'merge', head: read('MERGE_MSG')?.split('\n')[0] }
@@ -1264,13 +1270,22 @@ export class RepoOps {
       revert: ['revert', '--continue']
     }
     if (op.kind === 'none') return { result: 'nothing' }
+    // Stopped to edit a commit: git would only say to resolve conflicts there aren't.
+    if (op.edit && (await this.tryGit(['diff', '--quiet'])) === null) {
+      throw invalid('Stage or discard your changes first. Staged changes go into this commit when you continue.')
+    }
     try {
       await this.mut(cmd[op.kind])
     } catch (e) {
-      if ((await this.opState()).kind !== 'none') return { result: 'conflicts' }
+      if ((await this.opState()).kind !== 'none') return this.stopped()
       throw e
     }
-    return (await this.opState()).kind === 'none' ? { result: 'ok' } : { result: 'conflicts' }
+    return (await this.opState()).kind === 'none' ? { result: 'ok' } : this.stopped()
+  }
+
+  /** A rebase that stopped again: at a commit to edit, or on conflicts. */
+  private async stopped(): Promise<OpResult> {
+    return (await this.opState()).edit ? { result: 'paused' } : { result: 'conflicts' }
   }
 
   async abortOp(): Promise<void> {
@@ -1290,10 +1305,10 @@ export class RepoOps {
     try {
       await this.mut(['rebase', '--skip'])
     } catch (e) {
-      if ((await this.opState()).kind !== 'none') return { result: 'conflicts' }
+      if ((await this.opState()).kind !== 'none') return this.stopped()
       throw e
     }
-    return (await this.opState()).kind === 'none' ? { result: 'ok' } : { result: 'conflicts' }
+    return (await this.opState()).kind === 'none' ? { result: 'ok' } : this.stopped()
   }
 
   // ---------- partial staging and ignore ----------
@@ -1570,7 +1585,57 @@ export class RepoOps {
     this.safeRev(onto)
     const st = await this.status()
     const merges = Number((await this.git(['rev-list', '--count', '--min-parents=2', `${onto}..HEAD`])).trim())
-    return { branch: st.branch, onto, rows: await this.rangeRows(['--no-merges', `${onto}..HEAD`]), merges }
+    const rows = await this.rangeRows(['--no-merges', `${onto}..HEAD`])
+    const updateRefs = (await this.tryGit(['config', '--type=bool', 'rebase.updateRefs']))?.trim() === 'true'
+    return { branch: st.branch, onto, rows, merges, stacked: await this.stackedOn(rows, st.branch), updateRefs }
+  }
+
+  /**
+   * Local branches other than `current` whose tips are among `rows`: stacked on those commits. One checked out in
+   * another worktree is left out, as git leaves it.
+   */
+  private async stackedOn(rows: RebaseRow[], current: string | null): Promise<Array<{ name: string; sha: string }>> {
+    const shas = new Set(rows.map((r) => r.sha))
+    const out = await this.git(['for-each-ref', '--format=%(refname:short)%00%(objectname)%00%(worktreepath)', 'refs/heads'])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split('\0'))
+      .filter(([name, sha, wt]) => name !== current && shas.has(sha) && !wt)
+      .map(([name, sha]) => ({ name, sha }))
+  }
+
+  /** Local branch tips but `except`'s (the one being rebased), for undo to put back any a rebase moved along. */
+  async branchTips(except: string | null): Promise<Array<{ name: string; sha: string }>> {
+    const out = await this.git(['for-each-ref', '--format=%(refname:short)%00%(objectname)', 'refs/heads'])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split('\0'))
+      .filter(([name]) => name !== except)
+      .map(([name, sha]) => ({ name, sha }))
+  }
+
+  /**
+   * Moves the commits after `from` (an older commit on the current branch) onto `onto`: git rebase --onto. With
+   * `updateRefs`, branches stacked on those commits move along.
+   */
+  async rebaseFrom(from: string, onto: string, updateRefs: boolean): Promise<OpResult> {
+    this.safeRev(from)
+    this.safeRev(onto)
+    const st = await this.status()
+    if (!st.branch) throw invalid('Check out a branch first: these commits move with it.')
+    if (st.op.kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if ((await this.tryGit(['merge-base', '--is-ancestor', from, 'HEAD'])) === null) throw invalid(`That commit isn’t on ${st.branch}.`)
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes before rebasing.')
+    try {
+      const out = await this.mut(['rebase', updateRefs ? '--update-refs' : '--no-update-refs', '--onto', onto, from, st.branch])
+      if (/is up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
+      return { result: 'ok' }
+    } catch (e) {
+      if ((await this.opState()).kind === 'rebase') return { result: 'conflicts' }
+      throw e
+    }
   }
 
   /**
@@ -1579,7 +1644,7 @@ export class RepoOps {
    * pre-commit and commit-msg on a reword) unless `noVerify`, as for a commit; one that refuses stops it all, and the
    * branch is put back as it was.
    */
-  async rebaseInteractive(onto: string, plan: Step[], tmpDir: string, noVerify = false, autostash = false): Promise<OpResult> {
+  async rebaseInteractive(onto: string, plan: Step[], tmpDir: string, noVerify = false, autostash = false, updateRefs = false): Promise<OpResult> {
     this.safeRev(onto)
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('This range has merge commits. Interactive rebase here would flatten them, so it isn’t offered.')
@@ -1593,6 +1658,8 @@ export class RepoOps {
     }
     if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
     if (!autostash && (await this.hasTrackedChanges())) throw invalid('Commit or stash your changes before rebasing.')
+    // Each stacked branch moves to wherever its commit ends up (our todo replaces git's, so its own update-ref lines too).
+    const stacked = updateRefs ? preview.stacked : []
     rmSync(tmpDir, { recursive: true, force: true })
     mkdirSync(tmpDir, { recursive: true })
     // Paths for git's shell (sh), single-quoted.
@@ -1605,12 +1672,14 @@ export class RepoOps {
         lines.push(`pick ${s.sha}`, `exec git commit --amend --only -q ${noVerify ? '--no-verify ' : ''}--cleanup=strip -F ${shq(msgFile)}`)
       } else lines.push(`${s.action} ${s.sha}`)
       for (const c of s.exec ?? []) lines.push(`exec ${c}`)
+      for (const b of stacked) if (b.sha === s.sha) lines.push(`update-ref refs/heads/${b.name}`)
     })
     const todo = join(tmpDir, 'todo.txt')
     writeFileSync(todo, lines.join('\n') + '\n')
     try {
       await this.mut(['rebase', '-i', ...(noVerify ? ['--no-verify'] : []), ...(autostash ? ['--autostash'] : []), onto], { extraEnv: { GIT_SEQUENCE_EDITOR: `cp ${shq(todo)}`, GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
-      return { result: 'ok' }
+      // An Edit step stops the rebase without failing.
+      return (await this.opState()).kind === 'rebase' ? { result: 'paused' } : { result: 'ok' }
     } catch (e) {
       const detail = e instanceof GcFail ? (e.detail ?? '') : ''
       // What the hook itself printed, without git's own lines around it.

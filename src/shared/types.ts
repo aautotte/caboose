@@ -97,6 +97,8 @@ export interface OperationState {
   total?: number
   onto?: string
   head?: string
+  /** A rebase stopped at a commit marked Edit (not on conflicts): that commit, to change before continuing. */
+  edit?: { sha: string; summary: string }
 }
 
 export interface Status {
@@ -314,8 +316,8 @@ export interface LfsState {
 }
 
 export interface OpResult {
-  /** dirty: uncommitted changes are in the way (a pull that would overwrite them). */
-  result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale' | 'dirty'
+  /** dirty: uncommitted changes are in the way (a pull that would overwrite them). paused: a rebase stopped at a commit to edit. */
+  result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale' | 'dirty' | 'paused'
   message?: string
   /** A fast-forward refused: how many commits the branch has that the target doesn't. */
   ahead?: number
@@ -423,7 +425,7 @@ export interface Blame {
 
 export type ResetMode = 'soft' | 'mixed' | 'hard'
 
-export type RebaseAction = 'pick' | 'reword' | 'squash' | 'fixup' | 'drop'
+export type RebaseAction = 'pick' | 'reword' | 'edit' | 'squash' | 'fixup' | 'drop'
 
 export interface RebaseRow {
   sha: string
@@ -447,6 +449,10 @@ export interface RebasePreview {
   rows: RebaseRow[]
   /** Merge commits in the range: interactive rebase here would flatten them, so it's refused. */
   merges: number
+  /** Other local branches that point at commits in the range (stacked on them): a rebase can move them along. */
+  stacked: Array<{ name: string; sha: string }>
+  /** git config rebase.updateRefs: whether git moves stacked branches by default. */
+  updateRefs: boolean
 }
 
 export interface GitIdentity {

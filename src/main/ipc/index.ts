@@ -90,9 +90,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   async function undoable<T>(id: string, type: Parameters<UndoStack['record']>[1], label: string, run: () => Promise<T>, finished: (r: T) => boolean = () => true): Promise<T> {
     return exclusive(id, async () => {
       const o = ops(id)
-      const before = await undo.snapshot(o)
+      const before = type === 'rebase' ? await undo.snapshotTips(o) : await undo.snapshot(o)
       const result = await run()
-      if (finished(result)) undo.record(id, type, label, before, await undo.snapshot(o))
+      if (finished(result)) undo.record(id, type, label, ...(await undo.settle(o, before)))
       else undo.setPending(id, type, label, before)
       return result
     })
@@ -588,19 +588,23 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       ...R,
       onto: ref,
       plan: z
-        .array(z.object({ sha, action: z.enum(['pick', 'reword', 'squash', 'fixup', 'drop']), message: z.string().max(100_000).optional() }))
+        .array(z.object({ sha, action: z.enum(['pick', 'reword', 'edit', 'squash', 'fixup', 'drop']), message: z.string().max(100_000).optional() }))
         .min(1)
         .max(5000),
-      noVerify: z.boolean().optional()
+      noVerify: z.boolean().optional(),
+      updateRefs: z.boolean().optional()
     }),
-    ({ repoId, onto, plan, noVerify }) =>
+    ({ repoId, onto, plan, noVerify, updateRefs }) =>
       undoable(
         repoId,
         'rebase',
         `Interactive rebase onto ${onto.slice(0, 12)}`,
-        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`), noVerify),
-        (r) => r.result !== 'conflicts'
+        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`), noVerify, false, updateRefs),
+        (r) => r.result !== 'conflicts' && r.result !== 'paused'
       )
+  )
+  handle('rebase.onto', z.object({ ...R, from: sha, onto: ref, updateRefs: z.boolean() }), ({ repoId, from, onto, updateRefs }) =>
+    undoable(repoId, 'rebase', `Move the commits after ${from.slice(0, 7)} onto ${shortRef(onto)}`, () => ops(repoId).rebaseFrom(from, onto, updateRefs), (r) => r.result !== 'conflicts')
   )
 
   // ---------- remotes ----------

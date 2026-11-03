@@ -721,6 +721,9 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: `Cherry-pick onto ${here}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.cherryPick(repoId, [row.sha]) },
       { type: 'item', label: `Pick several commits up to here…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'cherry', tip: row.sha, tipLabel: short }) },
       { type: 'item', label: `Rewrite ${here} after this commit…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'rebase', onto: row.sha, ontoLabel: short }) },
+      ...(headBranch && line.includes(row.sha)
+        ? [{ type: 'item' as const, label: `Move ${here}’s commits after this onto…`, icon: <GitPullRequestArrow size={14} />, onSelect: () => act.openDialog({ kind: 'rebaseFrom', repoId, from: row.sha, fromLabel: short }) }]
+        : []),
       { type: 'item', label: `Reset ${here} to this commit…`, icon: <RotateCcw size={14} />, onSelect: () => act.openDialog({ kind: 'reset', repoId, target: row.sha, targetLabel: short }) },
       { type: 'item', label: `Compare with ${here}`, icon: <GitCompare size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'compare', base: row.sha, target: headBranch ?? headSha, baseLabel: short, targetLabel: here }) }
     )

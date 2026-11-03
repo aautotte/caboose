@@ -1278,6 +1278,9 @@ function afterOp(repoId: string, res: { result: string; message?: string } | und
   if (res.result === 'conflicts') {
     toast({ tone: 'info', title: 'Conflicts to sort out', body: 'Both sides changed the same lines. Open each file, pick what to keep, then continue.' })
     select(repoId, 'wip')
+  } else if (res.result === 'paused') {
+    toast({ tone: 'info', title: 'Stopped to edit a commit', body: 'Change the files and stage them to add them to it, or make new commits. Then continue.' })
+    select(repoId, 'wip')
   } else if (res.result === 'nothing') toast({ tone: 'info', title: res.message ?? 'Nothing to do' })
   else if (res.result === 'ok') toast({ tone: 'success', title: okTitle })
 }
@@ -1304,6 +1307,15 @@ export async function rebaseOnto(repoId: string, branch: string, onto: string): 
   const res = await attempt(() => call('branch.rebase', { repoId, onto, branch }), `Couldn’t rebase ${branch}`)
   afterOp(repoId, res, `Rebased ${branch} onto ${onto}`)
   await loadRepo(repoId, { keepSelection: true })
+}
+
+/** Moves the commits after `from` (on the current branch) onto `onto`: git rebase --onto. */
+export async function rebaseFrom(repoId: string, from: string, onto: string, updateRefs: boolean): Promise<boolean> {
+  const branch = useApp.getState().repos[repoId]?.refs?.head.branch ?? 'the branch'
+  const res = await attempt(() => call('rebase.onto', { repoId, from, onto, updateRefs }), `Couldn’t rebase ${branch}`)
+  afterOp(repoId, res, `Moved ${branch}’s commits onto ${onto}`)
+  await loadRepo(repoId, { keepSelection: true })
+  return !!res
 }
 
 // ---------- sync ----------
@@ -1518,6 +1530,7 @@ export async function continueOp(repoId: string): Promise<void> {
   const res = await attempt(() => call('op.continue', { repoId }), 'Couldn’t continue')
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined } }))
   if (res?.result === 'conflicts') toast({ tone: 'info', title: 'More conflicts', body: 'The next commit also conflicts. Resolve these files, then continue again.' })
+  else if (res?.result === 'paused') afterOp(repoId, res, '')
   else if (res?.result === 'ok') toast({ tone: 'success', title: 'Finished. Everything’s back in one piece.' })
   setCenter(repoId, { kind: 'graph' })
   await loadRepo(repoId, { keepSelection: true })
@@ -1899,9 +1912,9 @@ export async function cherryPick(repoId: string, shas: string[]): Promise<boolea
   return !!res && res.result !== 'conflicts'
 }
 
-export async function rebaseInteractive(repoId: string, onto: string, plan: RebaseStep[], noVerify = false): Promise<boolean> {
+export async function rebaseInteractive(repoId: string, onto: string, plan: RebaseStep[], noVerify = false, updateRefs = false): Promise<boolean> {
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: 'Rebasing' } }))
-  const res = await attempt(() => call('rebase.interactive', { repoId, onto, plan, noVerify }), 'Interactive rebase failed')
+  const res = await attempt(() => call('rebase.interactive', { repoId, onto, plan, noVerify, updateRefs }), 'Interactive rebase failed')
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined } }))
   afterOp(repoId, res, 'Rebase finished')
   if (res) setCenter(repoId, { kind: 'graph' })

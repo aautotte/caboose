@@ -69,7 +69,10 @@ works offline, and it doesn't phone home.
 
 ### Interactive rebase
 
-- Keep, reword, squash, fixup, drop or reorder, for a whole branch or only the commits you pick.
+- Keep, reword, edit, squash, fixup, drop or reorder, for a whole branch or only the commits you pick. Edit stops
+  at a commit so you can change it, then continue.
+- Branches stacked on the rewritten commits can move along (`--update-refs`).
+- Move only a branch's own commits onto another branch (`--onto`).
 
 ### Conflicts
 

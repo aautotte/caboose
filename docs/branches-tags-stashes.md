@@ -52,6 +52,9 @@ Double-click a branch, or choose **Check out** from its menu.
 Use the branch menu, or drag one branch label onto another in the graph. If there are conflicts, Caboose stops
 and shows them. See [Conflicts](conflicts.md).
 
+To move only some of a branch's commits onto another branch, see
+[Move commits onto another branch](rewriting-history.md#move-commits-onto-another-branch).
+
 ### Delete
 
 **Delete…** asks first. When the branch is also on a remote, the dialog has **Also delete it on *origin***, off by

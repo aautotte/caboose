@@ -8,6 +8,9 @@ buttons to finish.
 | --- | --- |
 | **Continue** | once every conflicted file is resolved and staged |
 | **Skip this commit** | during a rebase: leave out the commit that conflicts and go on |
+
+A rebase also stops at a commit marked [Edit](rewriting-history.md#stop-to-edit-a-commit). There's nothing to
+resolve: change the commit, then **Continue**.
 | **Abort** | put everything back as it was before the operation started |
 
 Conflicted files are marked **U** in the file list. Click one to open it in the merge tool.

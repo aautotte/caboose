@@ -17,6 +17,7 @@ interface Step {
 const actions: Array<{ value: RebaseAction; key: string; label: string; help: string }> = [
   { value: 'pick', key: 'p', label: 'Keep', help: 'Keep this commit as it is' },
   { value: 'reword', key: 'r', label: 'Reword', help: 'Keep it, with a new message' },
+  { value: 'edit', key: 'e', label: 'Edit', help: 'Stop after this commit to change it, then continue' },
   { value: 'squash', key: 's', label: 'Squash', help: 'Fold into the commit above, keeping both messages' },
   { value: 'fixup', key: 'f', label: 'Fixup', help: 'Fold into the commit above, dropping this message' },
   { value: 'drop', key: 'd', label: 'Drop', help: 'Leave this commit out' }
@@ -44,6 +45,9 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const [running, setRunning] = useState(false)
   // As for a commit, git hooks run unless this is ticked.
   const [skipHooks, setSkipHooks] = useState(false)
+  // Branches stacked on these commits, and whether they move along (git config rebase.updateRefs says by default).
+  const [stacked, setStacked] = useState<string[]>([])
+  const [moveStacked, setMoveStacked] = useState(false)
   const head = useRepo(repoId, (r) => r.refs?.head)
   const status = useRepo(repoId, (r) => r.status)
   const listRef = useRef<HTMLOListElement>(null)
@@ -53,13 +57,15 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
     let live = true
     setRows(null)
     setError(null)
-    const load = mode === 'rebase' ? call('rebase.preview', { repoId, onto: base }) : call('cherry.preview', { repoId, tip: base }).then((r) => ({ rows: r, merges: 0, branch: null as string | null }))
+    const load = mode === 'rebase' ? call('rebase.preview', { repoId, onto: base }) : call('cherry.preview', { repoId, tip: base }).then((r) => ({ rows: r, merges: 0, branch: null as string | null, stacked: [], updateRefs: false }))
     load
       .then((p) => {
         if (!live) return
         setRows(p.rows)
         setMerges(p.merges)
         setBranch(p.branch)
+        setStacked(p.stacked.map((b) => b.name))
+        setMoveStacked(p.updateRefs)
         setSteps(p.rows.filter((row) => !range || range.includes(row.sha)).map((row) => ({ row, action: 'pick' })))
       })
       .catch((e: Error) => live && setError(e.message))
@@ -115,7 +121,8 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
         repoId,
         base,
         [...steps.map((s) => ({ sha: s.row.sha, action: s.action, message: s.action === 'reword' ? s.message : undefined })), ...tail.map((r) => ({ sha: r.sha, action: 'pick' as const }))],
-        skipHooks
+        skipHooks,
+        moveStacked && stacked.length > 0
       )
     setRunning(false)
     close()
@@ -251,17 +258,26 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
               Then {plural(tail.length, 'newer commit')} on {branch ?? 'the branch'} {tail.length === 1 ? 'is' : 'are'} replayed on top, unchanged.
             </p>
           ) : null}
-          <footer className="flex shrink-0 items-center gap-2 border-t border-border bg-surface px-4 py-3">
-            <p role={problem || dirty || busyOp ? 'alert' : undefined} className={cn('min-w-0 flex-1 text-sm', problem || dirty || busyOp ? 'text-danger' : 'text-muted')}>
+          <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-surface px-4 py-3">
+            <p role={problem || dirty || busyOp ? 'alert' : undefined} className={cn('min-w-60 flex-1 text-sm', problem || dirty || busyOp ? 'text-danger' : 'text-muted')}>
               {busyOp
                 ? 'Finish or abort the operation in progress first.'
                 : dirty
                   ? 'Commit or stash your changes first.'
                   : problem ??
                     (mode === 'rebase'
-                      ? `${plural(kept.length + tail.length, 'commit')} after rewriting. Undo puts the branch back.`
+                      ? steps.some((s) => s.action === 'edit')
+                        ? 'It stops after each commit marked Edit: change it, then continue. Undo puts the branch back.'
+                        : `${plural(kept.length + tail.length, 'commit')} after rewriting. Undo puts the branch back.`
                       : `${plural(kept.length, 'commit')} will be copied onto ${head?.branch ?? 'HEAD'}. Undo removes them again.`)}
             </p>
+            {mode === 'rebase' && stacked.length ? (
+              <Tooltip content={`Branches that point at these commits: ${stacked.join(', ')}. They move to wherever their commit ends up.`}>
+                <span>
+                  <Checkbox label={`Move ${stackedLabel(stacked)} along`} checked={moveStacked} onCheckedChange={setMoveStacked} />
+                </span>
+              </Tooltip>
+            ) : null}
             {mode === 'rebase' ? <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} /> : null}
             <Tooltip content="Back to the original list">
               <IconButton label="Reset the list" disabled={unchanged} onClick={() => setSteps(rows.map((row) => ({ row, action: 'pick' })))}>
@@ -287,6 +303,11 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
       ) : null}
     </section>
   )
+}
+
+/** "feature-b", "feature-b and feature-c", or "3 stacked branches". */
+export function stackedLabel(names: string[]): string {
+  return names.length === 1 ? names[0] : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names.length} stacked branches`
 }
 
 function fullMessage(r: RebaseRow): string {
