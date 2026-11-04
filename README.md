@@ -51,6 +51,7 @@ works offline, and it doesn't phone home.
   committing.
 - Edit any commit's message, squash several into one (every message kept, ready to edit), move a commit up or down,
   revert, cherry-pick one or several, reset (soft, mixed or hard).
+- Change who commits are by: reset the author to you, set another author, or add a co-author.
 - Take changes out of any commit on the branch, a whole file, a block or a few lines: drop them, move them to a new
   commit right after it (to split a commit), or move them to your staged changes.
 - Fix up older commits: amend the staged changes into any commit on the branch (your other changes stay put), or

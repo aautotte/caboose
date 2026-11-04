@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
+  AuthorChange,
   Blame,
   CommitDetails,
   CommitSignature,
@@ -69,6 +70,11 @@ export interface RepoCtx {
 
 /** A step of a rebase the app builds itself: `exec` runs shell commands right after the commit is picked. */
 type Step = RebaseStep & { exec?: string[] }
+
+/** One argument for git's shell (sh) in a rebase exec line, single-quoted; backslashes in paths become slashes. */
+const shq = (p: string): string => "'" + p.split('\\').join('/').split("'").join("'\\''") + "'"
+/** "Name <email>", as git's --author and a Co-authored-by trailer want it. */
+const PERSON = /^[^<>\n]+ <[^<>\s]+>$/
 
 const MAX_DIFF_BYTES = 1_000_000
 const MAX_DIFF_LINES = 20_000
@@ -1715,8 +1721,6 @@ export class RepoOps {
     const stacked = updateRefs ? preview.stacked : []
     rmSync(tmpDir, { recursive: true, force: true })
     mkdirSync(tmpDir, { recursive: true })
-    // Paths for git's shell (sh), single-quoted.
-    const shq = (p: string): string => "'" + p.split('\\').join('/').split("'").join("'\\''") + "'"
     const lines: string[] = []
     plan.forEach((s, i) => {
       if (s.action === 'reword') {
@@ -2005,6 +2009,38 @@ export class RepoOps {
     const onto = await this.parentOf(full)
     if (!onto) throw invalid('The very first commit can’t be reworded here.')
     return this.rewrite(onto, tmpDir, (rows) => rows.map((r) => (r.sha === full ? { sha: r.sha, action: 'reword', message: m } : { sha: r.sha, action: 'pick' })), noVerify)
+  }
+
+  /**
+   * Changes who commits on the current branch are by: you as the author (as the next commit would be, dated now),
+   * someone else, or a co-author added to the message (not twice). The newest commit alone is amended, which leaves
+   * staged changes out; otherwise everything after the oldest one is replayed with an amend after each of them.
+   * Hooks don't run: the changes and the message stay as they were.
+   */
+  async setAuthorship(shas: string[], change: AuthorChange, tmpDir: string): Promise<OpResult> {
+    if (change.kind !== 'reset' && !PERSON.test(change.author.trim())) throw invalid('Write it as Name <email>.')
+    if (change.kind === 'reset' && (await this.tryGit(['var', 'GIT_AUTHOR_IDENT'])) === null) throw invalid('Set your name and email in Settings first.')
+    const amend = ['commit', '--amend', '--only', '--no-edit', '--no-verify', '--allow-empty', '-q']
+    if (change.kind === 'reset') amend.push('--reset-author')
+    else if (change.kind === 'set') amend.push(`--author=${change.author.trim()}`)
+    else {
+      amend.unshift('-c', 'trailer.ifexists=addIfDifferent')
+      amend.push('--trailer', `Co-authored-by: ${change.author.trim()}`)
+    }
+    const line = await this.headLine()
+    const full = await Promise.all(shas.map(async (s) => (await this.git(['rev-parse', '--verify', `${this.safeRev(s)}^{commit}`])).trim()))
+    const idx = full.map((s) => line.indexOf(s)).sort((a, b) => a - b)
+    if (!idx.length || idx[0] < 0) throw invalid('Only commits on the current branch’s own line of history can be changed.')
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if (idx.length === 1 && idx[0] === line.length - 1) {
+      await this.mut(amend)
+      return { result: 'ok' }
+    }
+    const onto = await this.parentOf(line[idx[0]])
+    if (!onto) throw invalid('The very first commit can’t be changed here.')
+    const chosen = new Set(full)
+    const exec = `git ${amend.map(shq).join(' ')}`
+    return this.rewrite(onto, tmpDir, (rows) => rows.map((r) => ({ sha: r.sha, action: 'pick', ...(chosen.has(r.sha) ? { exec: [exec] } : {}) })))
   }
 
   /** Squashes commits that sit next to each other on the current branch into one, with the given message. */

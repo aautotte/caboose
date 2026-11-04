@@ -425,6 +425,9 @@ export interface Blame {
 
 export type ResetMode = 'soft' | 'mixed' | 'hard'
 
+/** Who commits are by: you as the author, someone else, or a co-author added. `author` is "Name <email>". */
+export type AuthorChange = { kind: 'reset' } | { kind: 'set'; author: string } | { kind: 'coAuthor'; author: string }
+
 /** What cleaning up the working tree can remove. Ignored folders come as one entry each (node_modules/). */
 export interface CleanPreview {
   tracked: string[]

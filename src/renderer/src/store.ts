@@ -112,6 +112,8 @@ export type Dialog =
   | { kind: 'squashMerge'; repoId: string; source: string; target: string }
   /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */
   | { kind: 'rebaseFrom'; repoId: string; from: string; fromLabel: string }
+  /** Set the author of commits, or add a co-author to them. */
+  | { kind: 'author'; repoId: string; shas: string[]; mode: 'set' | 'coAuthor' }
   | {
       kind: 'confirm'
       title: string

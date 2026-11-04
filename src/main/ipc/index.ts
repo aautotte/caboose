@@ -839,6 +839,17 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('history.reword', z.object({ ...R, sha, message: z.string().min(1).max(100_000), noVerify: z.boolean().optional() }), ({ repoId, sha, message, noVerify }) =>
     undoable(repoId, 'rebase', `Edit message of ${sha.slice(0, 7)}`, () => ops(repoId).reword(sha, message, rewriteDir(repoId), noVerify), (r) => r.result !== 'conflicts')
   )
+  const person = z.string().min(3).max(500)
+  const authorChange = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('reset') }),
+    z.object({ kind: z.literal('set'), author: person }),
+    z.object({ kind: z.literal('coAuthor'), author: person })
+  ])
+  handle('history.authorship', z.object({ ...R, shas: z.array(sha).min(1).max(1000), change: authorChange }), ({ repoId, shas, change }) => {
+    const what = shas.length === 1 ? shas[0].slice(0, 7) : `${shas.length} commits`
+    const label = change.kind === 'reset' ? `Reset the author of ${what}` : change.kind === 'set' ? `Set the author of ${what}` : `Add a co-author to ${what}`
+    return undoable(repoId, 'rebase', label, () => ops(repoId).setAuthorship(shas, change, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  })
   handle('history.squash', z.object({ ...R, shas: z.array(sha).min(2).max(1000), message: z.string().min(1).max(100_000), noVerify: z.boolean().optional() }), ({ repoId, shas, message, noVerify }) =>
     undoable(repoId, 'rebase', `Squash ${shas.length} commits`, () => ops(repoId).squash(shas, message, rewriteDir(repoId), noVerify), (r) => r.result !== 'conflicts')
   )
