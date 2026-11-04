@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural } from './lib/format'
@@ -1978,6 +1978,21 @@ export async function addRemote(repoId: string, name: string, url: string, fetch
   if (fetchAfter) await fetchAll(repoId, true)
   else await loadRepo(repoId, { keepSelection: true })
   return true
+}
+
+/** Renames a remote and sets its URLs (an empty push URL pushes to the fetch URL). */
+export async function editRemote(repoId: string, name: string, next: Remote): Promise<boolean> {
+  const ok = await attempt(() => call('remote.edit', { repoId, name, next }), 'Couldn’t change the remote')
+  if (ok === undefined) return false
+  toast({ tone: 'success', title: next.name !== name ? `Renamed ${name} to ${next.name}` : `Updated ${name}` })
+  await loadRepo(repoId, { keepSelection: true })
+  return true
+}
+
+export async function fetchRemote(repoId: string, name: string): Promise<void> {
+  const ok = await remoteOp(repoId, 'fetch', `Fetching ${name}`, (opId) => call('remote.fetchOne', { repoId, name, opId }), `Couldn’t fetch ${name}`)
+  if (ok !== undefined) toast({ tone: 'success', title: `Fetched ${name}` })
+  await loadRepo(repoId, { keepSelection: true })
 }
 
 export function removeRemote(repoId: string, name: string): void {

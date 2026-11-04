@@ -115,5 +115,14 @@ conflicts keeps the stash, as git does, so delete it yourself once you're done.
 ## Remotes
 
 The **+** on the Remotes header adds a remote: a name (like `origin` or `upstream`) and a URL (HTTPS, SSH or a
-folder path). Tick **Fetch its branches now** to see them straight away. A remote's menu has **Remove *name*…**,
-which [Undo](undo.md) can bring back.
+folder path). Tick **Fetch its branches now** to see them straight away.
+
+A remote's menu (with a single remote, the menu of the **Remotes** header) has:
+
+- **Fetch *name***, only that remote, and **Fetch all remotes**;
+- **Edit *name*…**: rename it, change its URL, or give it a separate **Push URL** (to fetch from one place and push
+  to another; leave it empty to push to the URL). Renaming moves its remote branches, and your branches keep
+  tracking them under the new name;
+- **Remove *name*…**.
+
+[Undo](undo.md) takes back an edit or a removal.

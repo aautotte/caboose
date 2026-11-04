@@ -636,6 +636,20 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('remote.add', z.object({ ...R, name: z.string().min(1).max(255), url: z.string().min(1).max(2048) }), ({ repoId, name, url }) =>
     exclusive(repoId, async () => (await ops(repoId).addRemote(name, url), null))
   )
+  const url = z.string().max(2048)
+  handle('remote.edit', z.object({ ...R, name: ref, next: z.object({ name: z.string().min(1).max(255), fetchUrl: url.min(1), pushUrl: url }) }), ({ repoId, name, next }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const was = await o.editRemote(name, next)
+      const now = (await o.remotes()).find((r) => r.name === next.name)!
+      if (now.name !== was.name || now.fetchUrl !== was.fetchUrl || now.pushUrl !== was.pushUrl) {
+        undo.record(repoId, 'remote_edit', now.name !== name ? `Rename remote ${name} to ${now.name}` : `Change the URL of ${name}`, { ...head, remote: was }, { ...head, remote: now })
+      }
+      return null
+    })
+  )
+  handle('remote.fetchOne', z.object({ ...R, name: ref, opId }), async ({ repoId, name, opId }) => (await ops(repoId).fetchRemote(name, opId, progress(opId)), null))
   handle('remote.remove', z.object({ ...R, name: ref }), ({ repoId, name }) =>
     exclusive(repoId, async () => {
       const o = ops(repoId)

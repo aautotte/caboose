@@ -19,6 +19,7 @@ export type UndoType =
   | 'stash_drop'
   | 'tag_delete'
   | 'remote_remove'
+  | 'remote_edit'
   | 'ignore'
   | 'branch_move'
   | 'staged_rewrite'
@@ -38,7 +39,7 @@ export interface Snapshot {
   patch?: string // discard_lines: the patch that was reversed out of the working files
   message?: string // stash_drop: the stash's message
   mode?: ResetMode // reset
-  remote?: Remote // remote_remove
+  remote?: Remote // remote_remove; remote_edit: the remote on this side
   gitignore?: string | null // ignore: the root .gitignore on this side (null: none)
   index?: string // ignore: the index entries of the files it stopped tracking
   tips?: { name: string; sha: string }[] // rebase: other branches it moved along (stacked ones), where each is on this side
@@ -271,6 +272,12 @@ export class UndoStack {
         const r = before.remote!
         if (dir === 'back') await ops.addRemote(r.name, r.fetchUrl, r.pushUrl)
         else await ops.removeRemote(r.name)
+        return after
+      }
+      case 'remote_edit': {
+        const r = (await ops.remotes()).find((x) => x.name === from.remote!.name)
+        if (!r || r.fetchUrl !== from.remote!.fetchUrl || r.pushUrl !== from.remote!.pushUrl) throw moved()
+        await ops.editRemote(r.name, to.remote!)
         return after
       }
       case 'ignore': {

@@ -2104,15 +2104,46 @@ export class RepoOps {
     return [...m.values()]
   }
 
-  async addRemote(name: string, url: string, pushUrl?: string): Promise<void> {
+  private async safeRemoteName(name: string): Promise<void> {
     if (!name || name.startsWith('-') || (await this.tryGit(['check-ref-format', `refs/remotes/${name}/x`])) === null) {
       throw invalid(`“${name}” isn’t a valid remote name.`)
     }
-    const u = url.trim()
-    if (!u || u.startsWith('-') || /[\s\0]/.test(u)) throw invalid('That doesn’t look like a repository URL or path.')
     if ((await this.remotes()).some((r) => r.name === name)) throw invalid(`There’s already a remote called “${name}”.`)
+  }
+
+  async addRemote(name: string, url: string, pushUrl?: string): Promise<void> {
+    await this.safeRemoteName(name)
+    const u = this.safeUrl(url)
     await this.mut(['remote', 'add', '--', name, u])
     if (pushUrl && pushUrl !== u) await this.mut(['remote', 'set-url', '--push', '--', name, pushUrl])
+  }
+
+  /**
+   * Renames a remote (git moves its remote branches, and the branches tracking them follow) and sets its URLs. A push
+   * URL that's the fetch URL, or empty, is dropped, so pushes go to the fetch URL. Returns the remote as it was.
+   */
+  async editRemote(name: string, next: Remote): Promise<Remote> {
+    const r = (await this.remotes()).find((x) => x.name === name)
+    if (!r) throw invalid(`No remote called “${name}”.`)
+    const url = this.safeUrl(next.fetchUrl)
+    const push = next.pushUrl.trim() ? this.safeUrl(next.pushUrl) : url
+    if (next.name !== name) {
+      await this.safeRemoteName(next.name)
+      await this.mut(['remote', 'rename', '--', name, next.name])
+    }
+    if (url !== r.fetchUrl) await this.mut(['remote', 'set-url', '--', next.name, url])
+    if (push !== url) {
+      if (push !== r.pushUrl || url !== r.fetchUrl) await this.mut(['remote', 'set-url', '--push', '--', next.name, push])
+    } else if ((await this.tryGit(['config', '--get-all', `remote.${next.name}.pushurl`])) !== null) {
+      await this.mut(['config', '--unset-all', `remote.${next.name}.pushurl`])
+    }
+    return r
+  }
+
+  /** Fetches one remote, pruning remote branches deleted there. */
+  async fetchRemote(name: string, opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
+    if (!(await this.remotes()).some((r) => r.name === name)) throw invalid(`No remote called “${name}”.`)
+    await this.mut(['fetch', '--prune', '--progress', '--', name], { opId, onProgress, timeoutMs: 300_000 })
   }
 
   async removeRemote(name: string): Promise<Remote> {
