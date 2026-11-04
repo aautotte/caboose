@@ -1650,11 +1650,20 @@ export async function ignore(repoId: string, choice: IgnoreChoice): Promise<bool
 
 // ---------- stash ----------
 
-export async function stashSave(repoId: string, message: string, stagedOnly: boolean): Promise<boolean> {
-  const includeUntracked = useApp.getState().prefs.stashUntracked
-  const res = await attempt(() => call('stash.save', { repoId, message, stagedOnly, includeUntracked }), 'Couldn’t stash')
+/**
+ * Stashes the changes: all of them, the staged ones, or some files (new files picked go too, whatever the setting).
+ * `keepIndex`: the staged changes also stay in the folder.
+ */
+export async function stashSave(repoId: string, message: string, opts: { stagedOnly: boolean; paths?: string[]; keepIndex?: boolean }): Promise<boolean> {
+  const { stagedOnly, paths, keepIndex } = opts
+  const s = useApp.getState()
+  const isNew = new Set((s.repos[repoId]?.status?.changes ?? []).filter((c) => c.worktree === '?').map((c) => c.path))
+  const includeUntracked = s.prefs.stashUntracked || !!paths?.some((p) => isNew.has(p))
+  const res = await attempt(() => call('stash.save', { repoId, message, stagedOnly, includeUntracked, paths, keepIndex }), 'Couldn’t stash')
+  const title = stagedOnly ? 'Staged changes stashed' : paths ? `Stashed ${plural(paths.length, 'file')}` : 'Changes stashed'
+  const body = [message, keepIndex ? 'The staged changes are still in the folder too.' : ''].filter(Boolean).join(' · ')
   if (res?.result === 'nothing') toast({ tone: 'info', title: res.message ?? 'Nothing to stash' })
-  else if (res?.result === 'ok') toast({ tone: 'success', title: stagedOnly ? 'Staged changes stashed' : 'Changes stashed', body: message || undefined })
+  else if (res?.result === 'ok') toast({ tone: 'success', title, body: body || undefined })
   await loadRepo(repoId, { keepSelection: true })
   if (res?.result === 'ok' && useApp.getState().repos[repoId]?.selected === 'wip') patchRepo(repoId, { selected: null })
   return res?.result === 'ok'
@@ -2093,6 +2102,13 @@ async function backgroundFetch(repoId: string): Promise<void> {
 }
 
 // ---------- stash names, graph layout, focus ----------
+
+export async function stashBranch(repoId: string, sha: string, name: string): Promise<boolean> {
+  const ok = await attempt(() => call('stash.branch', { repoId, sha, name }), 'Couldn’t make the branch')
+  if (ok !== undefined) toast({ tone: 'success', title: `Switched to ${name}, made from the stash`, body: 'Its changes are in the folder, and the stash is deleted.' })
+  await loadRepo(repoId, { keepSelection: true })
+  return ok !== undefined
+}
 
 export async function renameStash(repoId: string, sha: string, message: string): Promise<boolean> {
   const ok = await attempt(() => call('stash.rename', { repoId, sha, message }), 'Couldn’t rename the stash')

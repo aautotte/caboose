@@ -631,6 +631,7 @@ export function stashMenu(repoId: string, sha: string, label: string): MenuEntry
     { type: 'item', label: 'Pop (apply and delete)', icon: <ArchiveRestore size={14} />, onSelect: () => void act.stashApply(repoId, sha, true) },
     { type: 'item', label: 'Apply (keep the stash)', onSelect: () => void act.stashApply(repoId, sha, false) },
     { type: 'item', label: 'Rename…', icon: <Pencil size={14} />, onSelect: () => act.openDialog({ kind: 'renameStash', repoId, sha, message: label.replace(/^On [^:]+: /, '') }) },
+    { type: 'item', label: 'Create a branch from this stash…', icon: <GitBranch size={14} />, onSelect: () => act.openDialog({ kind: 'stashBranch', repoId, sha, label: label.replace(/^On [^:]+: /, '') }) },
     { type: 'separator' },
     { type: 'item', label: 'Delete stash…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.stashDrop(repoId, sha, label) }
   ]

@@ -84,7 +84,9 @@ export type Dialog =
   | { kind: 'renameBranch'; repoId: string; name: string }
   | { kind: 'publish'; repoId: string; branch: string }
   | { kind: 'shortcuts' }
-  | { kind: 'stash'; repoId: string }
+  /** `paths`: start with only these files picked. */
+  | { kind: 'stash'; repoId: string; paths?: string[] }
+  | { kind: 'stashBranch'; repoId: string; sha: string; label: string }
   | { kind: 'createTag'; repoId: string; at: string; atLabel: string }
   | { kind: 'addRemote'; repoId: string }
   | { kind: 'editRemote'; repoId: string; name: string }

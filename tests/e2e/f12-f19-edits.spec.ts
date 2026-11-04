@@ -30,7 +30,7 @@ async function dismissToasts(): Promise<void> {
 test('F13-E1 stash only the staged changes', async () => {
   await toolbar('Stash your changes').click()
   await dialog(h.page).getByLabel('Name (optional)').fill('staged only')
-  await dialog(h.page).getByRole('checkbox', { name: /Only staged changes/ }).click()
+  await dialog(h.page).getByRole('radio', { name: /^Staged only/ }).click()
   await dialog(h.page).getByRole('button', { name: 'Stash', exact: true }).click()
   // The seed already has a stash; wait for this one.
   await expect.poll(h.gitOr(demo, 'log', '-1', '-g', '--format=%gs', 'stash@{0}')).toContain('staged only')

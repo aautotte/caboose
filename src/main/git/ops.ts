@@ -1482,16 +1482,30 @@ export class RepoOps {
     return i
   }
 
-  async stashSave(message: string, stagedOnly: boolean, includeUntracked: boolean): Promise<OpResult> {
+  async stashSave(message: string, stagedOnly: boolean, includeUntracked: boolean, paths?: string[], keepIndex = false): Promise<OpResult> {
     const before = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     const args = ['stash', 'push', '-q']
     if (message.trim()) args.push('-m', message.trim())
     if (stagedOnly) args.push('--staged')
-    else if (includeUntracked) args.push('--include-untracked')
-    await this.mut(args)
+    else {
+      if (includeUntracked) args.push('--include-untracked')
+      if (keepIndex) args.push('--keep-index')
+    }
+    // Paths go on stdin: a long list would overflow the command line.
+    if (paths) args.push('--pathspec-from-file=-', '--pathspec-file-nul')
+    await this.mut(args, paths ? { stdin: this.safePaths(paths).join('\0') } : undefined)
     const after = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     if (!after || after === before) return { result: 'nothing', message: stagedOnly ? 'Nothing staged to stash.' : 'No changes to stash.' }
     return { result: 'ok' }
+  }
+
+  /** git stash branch: a new branch at the commit the stash was made on, checked out, the stash applied and deleted. */
+  async stashBranch(sha: string, name: string): Promise<void> {
+    await this.safeBranchName(name)
+    const index = await this.stashIndex(sha)
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes first: the new branch starts from an older commit.')
+    await this.mut(['stash', 'branch', name, `stash@{${index}}`])
   }
 
   async stashApply(sha: string, pop: boolean): Promise<OpResult> {

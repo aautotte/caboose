@@ -99,14 +99,25 @@ and **Copy name**.
 
 ## Stashes
 
-**Stash** in the toolbar puts your uncommitted changes aside. You can give it a **Name**, and stash **Only staged
-changes**. Whether new (untracked) files go too is a [setting](settings.md#commits-and-stashes).
+**Stash** in the toolbar puts your uncommitted changes aside. You can give it a **Name**, and pick what goes:
+
+- **All changes**. Whether new (untracked) files go too is a [setting](settings.md#commits-and-stashes).
+- **Staged only**: what you staged goes, the rest stays.
+- **Some files**: tick them in the list. New files you tick go too, whatever the setting. **Stash this file…** in a
+  file's menu (or **Stash *N* files…** with several picked) opens it with those files ticked. As git does, staged
+  changes to the other files are copied into the stash too: they stay staged, and come back with the stash.
+
+**Keep the staged changes in the folder too** (`--keep-index`) stashes them but leaves them staged, so you can test
+or commit just those, with the rest put aside.
 
 **Pop** in the toolbar applies the newest stash and deletes it. A stash's own menu has:
 
 - **Pop (apply and delete)**;
 - **Apply (keep the stash)**;
 - **Rename…**, which moves it to the top of the list;
+- **Create a branch from this stash…**: a new branch from the commit the stash was made on, so its changes apply
+  without conflicts. You switch to it, the changes come back (staged ones staged), and the stash is deleted. Commit
+  or stash your changes first;
 - **Delete stash…**, which can be [undone](undo.md).
 
 If a stash conflicts with your files, Caboose says so: resolve the conflicted files, then stage them. A pop that
