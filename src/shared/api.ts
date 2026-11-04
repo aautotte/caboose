@@ -191,6 +191,9 @@ export interface Api {
   'remote.list': { in: R; out: Remote[] }
   'remote.add': { in: R & { name: string; url: string }; out: null }
   'remote.remove': { in: R & { name: string }; out: null }
+  /** Rename a remote and set its URLs; an empty push URL pushes to the fetch URL. */
+  'remote.edit': { in: R & { name: string; next: Remote }; out: null }
+  'remote.fetchOne': { in: R & { name: string; opId: string }; out: null }
 
   'file.history': { in: R & { path: string; limit: number }; out: FileHistoryEntry[] }
   'file.blame': { in: R & { path: string; rev: string | null }; out: Blame }

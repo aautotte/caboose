@@ -88,7 +88,7 @@ works offline, and it doesn't phone home.
 
 - Fetch, pull (fast-forward when possible, fast-forward only, or rebase), push, force push with lease.
 - With several remotes, push the current branch or a tag to whichever one you pick.
-- Set upstreams, add and remove remotes.
+- Set upstreams, add, rename and remove remotes, change their URLs (a separate push URL too), fetch just one.
 - Fetch in the background, every 1 to 60 minutes, without ever asking for a password.
 - When your changes are in a pull's way, stash or discard them from the same dialog.
 - Long operations show git's own progress: the percentage and the count, for example 45% (58234/129384).

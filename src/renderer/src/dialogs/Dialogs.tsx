@@ -8,7 +8,7 @@ import { ShortcutSheet } from '@/screens/Stubs'
 import { ProfilesDialog } from './ProfilesDialog'
 import { AuthorDialog, RebaseFromDialog, SquashMergeDialog } from './HistoryDialogs'
 import { CleanDialog } from './CleanDialog'
-import { AddRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
+import { AddRemoteDialog, EditRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
 export function DialogHost(): React.JSX.Element | null {
@@ -33,6 +33,8 @@ export function DialogHost(): React.JSX.Element | null {
       return <CreateTagDialog d={d} />
     case 'addRemote':
       return <AddRemoteDialog d={d} />
+    case 'editRemote':
+      return <EditRemoteDialog d={d} />
     case 'reset':
       return <ResetDialog d={d} />
     case 'upstream':

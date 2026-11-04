@@ -1,5 +1,5 @@
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
 import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
@@ -535,8 +535,10 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   // Just one remote (the usual case): no row for it, only its branches.
   const single = byRemote.size === 1 ? [...byRemote.keys()][0] : null
   const remoteMenu = (remote: string): MenuEntry[] => [
-    { type: 'item', label: 'Fetch all remotes', icon: <RefreshCw size={14} />, onSelect: () => void act.fetchAll(repoId) },
+    { type: 'item', label: `Fetch ${remote}`, icon: <RefreshCw size={14} />, onSelect: () => void act.fetchRemote(repoId, remote) },
+    { type: 'item', label: 'Fetch all remotes', onSelect: () => void act.fetchAll(repoId) },
     { type: 'separator' },
+    { type: 'item', label: `Edit ${remote}…`, icon: <Pencil size={14} />, onSelect: () => act.openDialog({ kind: 'editRemote', repoId, name: remote }) },
     { type: 'item', label: `Remove ${remote}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.removeRemote(repoId, remote) }
   ]
   const shownLocals = locals.filter((r) => match(r.short))

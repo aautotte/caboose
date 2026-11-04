@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { KeyRound } from 'lucide-react'
-import type { ResetMode } from '../../../shared/types'
+import type { Remote, ResetMode } from '../../../shared/types'
 import { Button, Checkbox, Dialog, Field, Select, TextArea, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
@@ -178,6 +178,71 @@ export function AddRemoteDialog({ d }: { d: Extract<D, { kind: 'addRemote' }> })
           {(p) => <TextInput {...p} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/owner/repo.git" />}
         </Field>
         <Checkbox label="Fetch its branches now" checked={fetchAfter} onCheckedChange={setFetchAfter} />
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+/** Rename a remote, change its URL, or push somewhere else than it fetches from. */
+export function EditRemoteDialog({ d }: { d: Extract<D, { kind: 'editRemote' }> }): React.JSX.Element {
+  const remotes = useApp((s) => s.repos[d.repoId]?.refs?.remotes) ?? []
+  const [was, setWas] = useState<Remote | null>(null)
+  const [name, setName] = useState(d.name)
+  const [url, setUrl] = useState('')
+  const [pushUrl, setPushUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    call('remote.list', { repoId: d.repoId })
+      .then((list) => {
+        const r = list.find((x) => x.name === d.name)
+        if (!live || !r) return
+        setWas(r)
+        setUrl(r.fetchUrl)
+        setPushUrl(r.pushUrl === r.fetchUrl ? '' : r.pushUrl)
+      })
+      .catch(act.fail)
+    return () => {
+      live = false
+    }
+  }, [d.repoId, d.name])
+  const n = name.trim()
+  const nameProblem = !n || n === d.name ? undefined : remotes.includes(n) ? 'A remote with that name already exists.' : /[\s~^:?*[\\]|\.\.|^-|\/$/.test(n) ? 'Use letters, numbers, dashes and dots.' : undefined
+  const urlProblem = urlProblemOf(url.trim())
+  const pushProblem = urlProblemOf(pushUrl.trim())
+  const changed = !!was && (n !== was.name || url.trim() !== was.fetchUrl || (pushUrl.trim() || url.trim()) !== was.pushUrl)
+  const ready = changed && !!n && !!url.trim() && !nameProblem && !urlProblem && !pushProblem
+  const submit = async (): Promise<void> => {
+    if (!ready) return
+    setBusy(true)
+    const ok = await act.editRemote(d.repoId, d.name, { name: n, fetchUrl: url.trim(), pushUrl: pushUrl.trim() })
+    setBusy(false)
+    if (ok) close()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title={`Edit remote ${d.name}`}
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <Field label="Name" error={nameProblem} help="Renaming moves its remote branches, and your branches keep tracking them.">
+          {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} />}
+        </Field>
+        <Field label="URL" error={urlProblem} help="Where fetch and pull get commits from.">
+          {(p) => <TextInput {...p} value={url} disabled={!was} onChange={(e) => setUrl(e.target.value)} />}
+        </Field>
+        <Field label="Push URL (optional)" error={pushProblem} help="Leave it empty to push to the URL above.">
+          {(p) => <TextInput {...p} value={pushUrl} disabled={!was} onChange={(e) => setPushUrl(e.target.value)} />}
+        </Field>
       </DialogForm>
     </Dialog>
   )

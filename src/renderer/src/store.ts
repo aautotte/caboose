@@ -87,6 +87,7 @@ export type Dialog =
   | { kind: 'stash'; repoId: string }
   | { kind: 'createTag'; repoId: string; at: string; atLabel: string }
   | { kind: 'addRemote'; repoId: string }
+  | { kind: 'editRemote'; repoId: string; name: string }
   /** `branch`: a local branch other than the checked-out one, which just moves (no files involved). */
   | { kind: 'reset'; repoId: string; target: string; targetLabel: string; branch?: string }
   | { kind: 'upstream'; repoId: string; branch: string }
