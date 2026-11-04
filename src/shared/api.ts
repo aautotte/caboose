@@ -162,7 +162,10 @@ export interface Api {
   }
   'ignore.add': { in: R & { patterns: string[]; label: string }; out: { untracked: number } }
 
-  'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean }; out: OpResult }
+  /** `paths`: only these files. `keepIndex`: what's staged is stashed and also stays in the folder, staged. */
+  'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[]; keepIndex?: boolean }; out: OpResult }
+  /** A new branch from the commit the stash was made on, checked out, with the stash applied there and deleted. */
+  'stash.branch': { in: R & { sha: string; name: string }; out: null }
   'stash.apply': { in: R & { sha: string }; out: OpResult }
   'stash.pop': { in: R & { sha: string }; out: OpResult }
   'stash.drop': { in: R & { sha: string }; out: null }

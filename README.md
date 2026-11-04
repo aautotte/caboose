@@ -97,7 +97,8 @@ works offline, and it doesn't phone home.
 
 ### Stashes
 
-- Stash your changes (new files too, if you want), apply, pop, rename, delete one or several.
+- Stash your changes (new files too, if you want), only the staged ones, or some files; keep the staged changes in
+  the folder if you like. Apply, pop, rename, delete one or several, or make a branch from a stash.
 
 ### Bisect
 

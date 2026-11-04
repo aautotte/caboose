@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { KeyRound } from 'lucide-react'
 import type { Remote, ResetMode } from '../../../shared/types'
-import { Button, Checkbox, Dialog, Field, Select, TextArea, TextInput } from '@/ui'
+import { Button, Checkbox, Dialog, Field, SegmentedControl, Select, TextArea, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { plural } from '@/lib/format'
@@ -26,20 +26,30 @@ function DialogForm({ onSubmit, children }: { onSubmit: () => void; children: Re
   )
 }
 
-/** F13: stash the uncommitted work, optionally named, optionally only what's staged. */
+type StashWhat = 'all' | 'staged' | 'files'
+
+/** F13: stash the uncommitted work, optionally named: all of it, only what's staged, or some files. */
 export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.JSX.Element {
   const [message, setMessage] = useState('')
-  const [stagedOnly, setStagedOnly] = useState(false)
+  const [what, setWhat] = useState<StashWhat>(d.paths ? 'files' : 'all')
+  const [picked, setPicked] = useState<string[]>(d.paths ?? [])
+  const [keepIndex, setKeepIndex] = useState(false)
   const [busy, setBusy] = useState(false)
   const status = useApp((s) => s.repos[d.repoId]?.status)
   const untracked = useApp((s) => s.prefs.stashUntracked)
-  const stagedCount = status?.changes.filter((c) => c.index !== '.' && c.index !== '?' && !c.conflicted).length ?? 0
+  const changes = useMemo(() => (status?.changes ?? []).filter((c) => !c.conflicted), [status])
+  const stagedCount = changes.filter((c) => c.index !== '.' && c.index !== '?').length
+  const ready = what !== 'files' || picked.length > 0
+  // git records the whole staging area in a stash, so staged changes to files left out are copied into it too.
+  const stagedOther = changes.filter((c) => c.index !== '.' && c.index !== '?' && !picked.includes(c.path)).length
   const submit = async (): Promise<void> => {
+    if (!ready) return
     setBusy(true)
-    const ok = await act.stashSave(d.repoId, message, stagedOnly)
+    const ok = await act.stashSave(d.repoId, message, { stagedOnly: what === 'staged', paths: what === 'files' ? picked : undefined, keepIndex: what !== 'staged' && keepIndex })
     setBusy(false)
     if (ok) close()
   }
+  const toggle = (path: string, on: boolean): void => setPicked((cur) => (on ? [...cur, path] : cur.filter((p) => p !== path)))
   return (
     <Dialog
       open
@@ -48,8 +58,8 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
-          <Button variant="primary" loading={busy} onClick={() => void submit()}>
-            Stash
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            {what === 'files' && picked.length ? `Stash ${plural(picked.length, 'file')}` : 'Stash'}
           </Button>
         </>
       }
@@ -59,8 +69,32 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
         <Field label="Name (optional)" help="Helps you find it later in the Stashes list.">
           {(p) => <TextInput {...p} autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="half-done settings page" />}
         </Field>
-        <Checkbox label={`Only staged changes (${stagedCount})`} checked={stagedOnly} disabled={stagedCount === 0} onCheckedChange={setStagedOnly} />
-        {!stagedOnly ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
+        <SegmentedControl
+          label="What to stash"
+          value={what}
+          onValueChange={setWhat}
+          options={[
+            { value: 'all', label: 'All changes' },
+            { value: 'staged', label: `Staged only (${stagedCount})` },
+            { value: 'files', label: 'Some files' }
+          ]}
+        />
+        {what === 'files' ? (
+          <ul aria-label="Files to stash" className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-border bg-surface-sunken px-3 py-2">
+            {changes.map((c) => (
+              <li key={c.path}>
+                <Checkbox label={<span className="font-mono text-sm">{c.worktree === '?' ? `${c.path} (new)` : c.path}</span>} checked={picked.includes(c.path)} onCheckedChange={(on) => toggle(c.path, on)} />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {what === 'files' && stagedOther ? (
+          <p className="text-sm text-muted">
+            {`Staged changes to ${plural(stagedOther, 'other file')} are copied into the stash too, as git does. They stay staged here, and come back with the stash when you apply it.`}
+          </p>
+        ) : null}
+        {what === 'all' ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
+        {what !== 'staged' ? <Checkbox label="Keep the staged changes in the folder too" checked={keepIndex} onCheckedChange={setKeepIndex} /> : null}
       </DialogForm>
     </Dialog>
   )

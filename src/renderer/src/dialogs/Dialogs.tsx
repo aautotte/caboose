@@ -29,6 +29,8 @@ export function DialogHost(): React.JSX.Element | null {
       return <ShortcutSheet />
     case 'stash':
       return <StashDialog d={d} />
+    case 'stashBranch':
+      return <StashBranchDialog d={d} />
     case 'createTag':
       return <CreateTagDialog d={d} />
     case 'addRemote':
@@ -136,6 +138,53 @@ function CreateBranchDialog({ d }: { d: Extract<D, { kind: 'createBranch' }> }):
           {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="feature/short-description" />}
         </Field>
         <Switch label="Switch to it now" checked={checkout} onCheckedChange={setCheckout} />
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
+  )
+}
+
+/** git stash branch: a branch from the commit the stash was made on, where its changes apply cleanly. */
+function StashBranchDialog({ d }: { d: Extract<D, { kind: 'stashBranch' }> }): React.JSX.Element {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const refs = useApp((s) => s.repos[d.repoId]?.refs)
+  const existing = useMemo(() => refs?.refs.filter((r) => r.kind === 'local').map((r) => r.short) ?? [], [refs])
+  const problem = branchNameProblem(name.trim(), existing)
+  const submit = async (): Promise<void> => {
+    if (!name.trim() || problem) return
+    setBusy(true)
+    const ok = await act.stashBranch(d.repoId, d.sha, name.trim())
+    setBusy(false)
+    if (ok) act.closeDialog()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && act.closeDialog()}
+      title="Branch from a stash"
+      footer={
+        <>
+          <Button onClick={() => act.closeDialog()}>Cancel</Button>
+          <Button variant="primary" disabled={!name.trim() || !!problem} loading={busy} onClick={() => void submit()}>
+            Create branch
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <p className="text-base text-muted">
+          The branch starts from the commit “{d.label}” was made on, so its changes apply without conflicts. You switch to it, the changes come back as they were (staged ones staged), and the stash is deleted.
+        </p>
+        <Field label="Branch name" error={problem}>
+          {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="feature/short-description" />}
+        </Field>
         <button type="submit" hidden />
       </form>
     </Dialog>

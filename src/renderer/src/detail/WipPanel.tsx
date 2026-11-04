@@ -154,6 +154,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         : { type: 'item', label: `Unstage ${n}`, onSelect: () => void act.unstage(repoId, paths) },
       { type: 'item', label: 'Copy paths', onSelect: () => void navigator.clipboard.writeText(paths.join('\n')) },
       { type: 'separator' },
+      { type: 'item', label: `Stash ${n}…`, icon: <Archive size={14} />, disabled: files.some((f) => f.status === 'conflicted'), onSelect: () => act.openDialog({ kind: 'stash', repoId, paths }) },
       ignoreMenu(files),
       { type: 'separator' },
       { type: 'item', label: `Discard changes to ${n}…`, danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, paths) }
@@ -182,6 +183,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     { type: 'separator' as const },
     { type: 'item' as const, label: 'File history', icon: <History size={14} />, disabled: f.status === 'untracked' || f.status === 'added', onSelect: () => act.setCenter(repoId, { kind: 'history', path: f.path }) },
     { type: 'item' as const, label: 'Blame', icon: <UserSearch size={14} />, disabled: f.status === 'untracked' || f.status === 'added' || f.status === 'deleted', onSelect: () => act.setCenter(repoId, { kind: 'blame', path: f.path, rev: null }) },
+    { type: 'item' as const, label: 'Stash this file…', icon: <Archive size={14} />, disabled: f.status === 'conflicted', onSelect: () => act.openDialog({ kind: 'stash', repoId, paths: [f.path] }) },
     ignoreMenu([f]),
     lfsMenu(f),
     { type: 'separator' as const },
