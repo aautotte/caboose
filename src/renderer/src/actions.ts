@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural } from './lib/format'
@@ -689,6 +689,18 @@ async function rewriteOp(repoId: string, fn: () => Promise<{ result: string; mes
 export function reword(repoId: string, sha: string, message: string, done?: (ok: boolean) => void, noVerify = false): void {
   guardPushed(repoId, [sha], 'Edit the message', () =>
     void rewriteOp(repoId, () => call('history.reword', { repoId, sha, message, noVerify }), 'Couldn’t change the message', 'Message changed', headLine(repoId).indexOf(sha)).then((ok) => done?.(ok))
+  )
+}
+
+/** Who commits are by: you, someone else, or an added co-author. The newest commit alone can change with other work around. */
+export function setAuthorship(repoId: string, shas: string[], change: AuthorChange): void {
+  const line = headLine(repoId)
+  if (!(shas.length === 1 && shas[0] === line[0]) && blocked(repoId, 'Changing the author')) return
+  const what = shas.length === 1 ? shas[0].slice(0, 7) : plural(shas.length, 'commit')
+  const name = change.kind === 'reset' ? '' : change.author.replace(/\s*<[^>]*>\s*$/, '')
+  const done = change.kind === 'reset' ? `You’re now the author of ${what}` : change.kind === 'set' ? `${name} is now the author of ${what}` : `Added ${name} as a co-author of ${what}`
+  guardPushed(repoId, shas, 'Change the author', () =>
+    void rewriteOp(repoId, () => call('history.authorship', { repoId, shas, change }), 'Couldn’t change the author', done, Math.min(...shas.map((s) => line.indexOf(s))))
   )
 }
 

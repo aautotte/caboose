@@ -13,7 +13,7 @@ Each repository keeps its own list of the last 100 actions, and the list survive
 | Discard changes (files, blocks or lines, or everything) | the changes, from a copy Caboose kept |
 | Check out a branch or commit | the branch you were on |
 | Merge, rebase, pull | the branch where it was before |
-| Edit message, squash, move a commit, interactive rebase | the commits as they were, and any stacked branches it moved along |
+| Edit message, change the author, squash, move a commit, interactive rebase | the commits as they were, and any stacked branches it moved along |
 | Amend staged changes into an older commit | the commits as they were, with the changes staged again |
 | Fixup commit, squash fixup commits | the commits as they were |
 | Take changes out of a commit (remove, move to a new commit, move to staged) | the commits as they were, with nothing staged |

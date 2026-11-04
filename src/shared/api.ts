@@ -1,6 +1,7 @@
 // The IPC contract. Every channel: input and output types. Main validates inputs with zod (main/ipc/schemas.ts).
 import type {
   ActivityEntry,
+  AuthorChange,
   AuthPromptEvent,
   Blame,
   CleanPreview,
@@ -203,6 +204,7 @@ export interface Api {
   'refView.pin': { in: R & { ref: string | null }; out: RefViewState }
   'refView.setMany': { in: R & { refs: string[]; state: 'normal' | 'hidden' }; out: RefViewState }
   'history.reword': { in: R & { sha: string; message: string; noVerify?: boolean }; out: OpResult }
+  'history.authorship': { in: R & { shas: string[]; change: AuthorChange }; out: OpResult }
   'history.squash': { in: R & { shas: string[]; message: string; noVerify?: boolean }; out: OpResult }
   /** Folds the staged changes into an older commit of the current branch (unstaged ones are set aside and put back). */
   'history.amendInto': { in: R & { sha: string }; out: OpResult }

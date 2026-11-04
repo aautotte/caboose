@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Eraser, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Eraser, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload, UserPen } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -647,6 +647,33 @@ export function squashProblem(shas: string[], line: string[], parentsOf: (sha: s
   return null
 }
 
+/** Who the commits are by: you, someone else, or an added co-author. `why`: why it can't be changed here. */
+function authorMenu(repoId: string, shas: string[], why: string | null): MenuEntry {
+  const off = why ? [{ type: 'item' as const, label: why, disabled: true }, { type: 'separator' as const }] : []
+  return {
+    type: 'sub',
+    label: 'Author',
+    icon: <UserPen size={14} />,
+    items: [
+      ...off,
+      { type: 'item', label: 'Reset author to you', disabled: !!why, onSelect: () => act.setAuthorship(repoId, shas, { kind: 'reset' }) },
+      { type: 'item', label: 'Set author…', disabled: !!why, onSelect: () => act.openDialog({ kind: 'author', repoId, shas, mode: 'set' }) },
+      { type: 'item', label: 'Add co-author…', disabled: !!why, onSelect: () => act.openDialog({ kind: 'author', repoId, shas, mode: 'coAuthor' }) }
+    ]
+  }
+}
+
+/** Why the authors of these commits can't be changed (off the branch's line, merges in the way), or null. */
+function authorProblem(shas: string[], line: string[], parentsOf: (sha: string) => string[] | undefined): string | null {
+  const idx = shas.map((s) => line.indexOf(s))
+  if (idx.some((i) => i < 0)) return 'Only commits on the checked-out branch’s own line'
+  if (shas.some((s) => (parentsOf(s)?.length ?? 1) > 1)) return 'Merge commits can’t be changed here'
+  // The newest commit alone is amended; anything older is replayed from its parent.
+  if (line.length > 1 && shas.some((s) => parentsOf(s)?.length === 0)) return 'The very first commit can’t be changed here'
+  if (line.slice(0, Math.max(...idx)).some((s) => (parentsOf(s)?.length ?? 1) > 1)) return 'A merge commit after these would be flattened'
+  return null
+}
+
 /** The right-click menu for several selected commits. */
 function multiMenu(repoId: string, shas: string[], line: string[], headBranch: string | null): MenuEntry[] {
   const r = useApp.getState().repos[repoId]
@@ -659,6 +686,7 @@ function multiMenu(repoId: string, shas: string[], line: string[], headBranch: s
     { type: 'item', label: `Rebase these ${shas.length} commits…`, icon: <ListOrdered size={14} />, disabled: !onLine, onSelect: () => act.rebaseRange(repoId, shas) },
     { type: 'item', label: `Cherry-pick ${shas.length} commits onto ${here}`, icon: <GitPullRequestArrow size={14} />, disabled: !offLine, onSelect: () => void act.cherryPick(repoId, [...shas].reverse()) },
     ...(shas.length === 2 ? [{ type: 'item' as const, label: 'Compare these two commits', icon: <GitCompare size={14} />, onSelect: () => act.compareCommits(repoId, shas) }] : []),
+    ...(onLine ? [authorMenu(repoId, shas, authorProblem(shas, line, parentsOf))] : []),
     { type: 'separator' },
     { type: 'item', label: 'Copy commit SHAs', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(shas.join('\n')) },
     { type: 'item', label: 'Clear the selection', shortcut: 'Esc', onSelect: () => act.select(repoId, shas[0]) }
@@ -743,6 +771,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: 'Move commit up', icon: <ArrowUp size={14} />, disabled: !newer || mergeAfter || isMerge(row.sha), onSelect: () => act.moveCommit(repoId, row.sha, 'up') },
       // Moving below the first commit isn't possible: the older neighbour needs a parent too.
       { type: 'item', label: 'Move commit down', icon: <ArrowDown size={14} />, disabled: !older || mergeAfter || isMerge(row.sha) || isMerge(older), onSelect: () => act.moveCommit(repoId, row.sha, 'down') },
+      authorMenu(repoId, [row.sha], authorProblem([row.sha], line, (s) => bySha.get(s)?.parents)),
       { type: 'separator' },
       // Not the very first commit: the rebase that folds them in starts from its parent.
       { type: 'item', label: 'Amend staged changes into this commit', icon: <FilePlus2 size={14} />, disabled: !staged || mergeAfter || isMerge(row.sha) || !row.parents.length, onSelect: () => act.amendInto(repoId, row.sha) },

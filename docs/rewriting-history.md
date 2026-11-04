@@ -17,6 +17,20 @@ them, can't be edited this way.
 To change the last commit's message and content at once, use **Amend last commit** in the
 [commit box](staging-and-committing.md#committing).
 
+## Change who a commit is by
+
+**Author** in a commit's menu, or in the menu of several selected commits:
+
+- **Reset author to you**: you become the author, as for a new commit, dated now. Useful after committing with the
+  wrong name or email.
+- **Set author…**: someone else, written as `Name <email>` (the people already in the history are suggested). You
+  stay the committer.
+- **Add co-author…**: adds a `Co-authored-by: Name <email>` line to the message, which GitHub and GitLab show as a
+  second author. A commit that already has that line doesn't get it twice.
+
+The last commit alone is amended, so your other changes can stay in the folder. Anything older rewrites the commits
+after it too. Hooks don't run, since the changes stay the same.
+
 ## Move a commit
 
 **Move commit up** and **Move commit down** in a commit's menu swap it with its neighbour on the current branch.

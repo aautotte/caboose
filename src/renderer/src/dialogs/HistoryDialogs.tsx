@@ -9,6 +9,61 @@ import * as act from '@/actions'
 
 const close = (): void => act.closeDialog()
 
+/** Set the author of commits, or add a co-author: "Name <email>", typed or picked from the people in the history. */
+export function AuthorDialog({ d }: { d: Extract<D, { kind: 'author' }> }): React.JSX.Element {
+  const commits = useApp((s) => s.repos[d.repoId]?.commits)
+  const people = useMemo(() => [...new Set((commits ?? []).filter((c) => c.kind === 'commit').map((c) => `${c.authorName} <${c.authorEmail}>`))].slice(0, 200), [commits])
+  const [author, setAuthor] = useState('')
+  const value = author.trim()
+  const problem = value && !/^[^<>\n]+ <[^<>\s]+>$/.test(value) ? 'Write it as Name <email>.' : undefined
+  const ready = !!value && !problem
+  const what = d.shas.length === 1 ? d.shas[0].slice(0, 7) : plural(d.shas.length, 'commit')
+  const set = d.mode === 'set'
+  const submit = (): void => {
+    if (!ready) return
+    // Closed first: the toast shows once the dialog is gone.
+    close()
+    act.setAuthorship(d.repoId, d.shas, { kind: d.mode, author: value })
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title={set ? `Set the author of ${what}` : `Add a co-author to ${what}`}
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} onClick={submit}>
+            {set ? 'Set author' : 'Add co-author'}
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          submit()
+        }}
+      >
+        <Field
+          label={set ? 'Author' : 'Co-author'}
+          error={problem}
+          help={set ? 'Shown as who wrote the changes. You stay the committer.' : 'Adds a Co-authored-by line to the message. GitHub and GitLab show them as an author too.'}
+        >
+          {(f) => <TextInput {...f} autoFocus list="author-people" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Name <email@example.com>" />}
+        </Field>
+        <datalist id="author-people">
+          {people.map((p) => (
+            <option key={p} value={p} />
+          ))}
+        </datalist>
+        <p className="text-sm text-muted">The commits get new IDs, and the ones after them are replayed. Undo puts them back.</p>
+      </form>
+    </Dialog>
+  )
+}
+
 /**
  * Moves the commits after one (on the checked-out branch) onto another branch: git rebase --onto. For a branch
  * started from another feature branch that has since been merged or rewritten: only its own commits go.
