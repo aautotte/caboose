@@ -29,6 +29,19 @@ Double-click a branch, or choose **Check out** from its menu.
 - If your uncommitted changes are in the way, Caboose says so and offers to stash them first.
 - A branch checked out in another worktree shows **Open its worktree** instead.
 
+### Recent branches
+
+The branch name under the repository's name, in the toolbar, opens a menu of the branches you've been on lately:
+
+- **Previous** (Ctrl+Shift+B) goes back to the branch you were on before this one, as `git checkout -` does.
+  Pressed again, it comes back here. If you were on a commit rather than a branch (detached), it goes back to that
+  commit.
+- Below it, the other branches you checked out, most recent first.
+- **Another branch…** (Ctrl+P) opens the command palette, which lists every branch, the recent ones first.
+
+The list comes from git's own record of your switches (the reflog of `HEAD`), so it includes switches made in a
+terminal, and branches deleted since are left out.
+
 ### Branch menu
 
 | | |

@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, Space, UserSearch, WrapText, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, SlidersHorizontal, Space, UnfoldVertical, UserSearch, WrapText, X } from 'lucide-react'
 import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
 import { Button, DropdownMenu, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -13,7 +13,7 @@ function lfsChange({ old, new: now }: NonNullable<FileDiff['lfs']>): string {
   if (old && now && old.oid === now.oid) return `${fileSize(now.size)}, unchanged.`
   return `${fileSize(old!.size)} → ${fileSize(now!.size)} (content ${old!.oid.slice(0, 8)} → ${now!.oid.slice(0, 8)}). The content is in Git LFS, so there are no lines to compare.`
 }
-import { setPrefs, useApp, useRepo, type DiffMode } from '@/store'
+import { DIFF_CONTEXT_STEPS, setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { highlightLine, languageFor } from './highlight'
 import { SubmoduleDiff } from './SubmoduleDiff'
@@ -50,6 +50,8 @@ export function DiffView({
   const mode = useApp((s) => s.prefs.diffMode)
   const wrap = useApp((s) => s.prefs.diffWrap)
   const ignoreWs = useApp((s) => s.prefs.diffIgnoreWs)
+  // The whole file has no lines around changes to set; staging asks for the same blocks as on screen.
+  const context = useApp((s) => (s.prefs.diffMode === 'inline' ? undefined : s.prefs.diffContext))
   const wide = useApp((s) => s.diffWide)
   const status = useRepo(repoId, (r) => r.status)
   // A file can become conflicted while its diff is open (or be opened just before the status says so).
@@ -72,7 +74,7 @@ export function DiffView({
 
   // A new file, source or layout starts from a blank view; a status refresh (after staging, or a change on
   // disk) quietly reloads the same view.
-  const viewKey = `${path}|${oldPath}|${srcKey}|${force}|${mode}|${ignoreWs}`
+  const viewKey = `${path}|${oldPath}|${srcKey}|${force}|${mode}|${ignoreWs}|${context}`
   const lastView = useRef('')
   useEffect(() => {
     let live = true
@@ -82,7 +84,7 @@ export function DiffView({
       lastView.current = viewKey
     }
     setError(null)
-    call('diff.get', { repoId, path, oldPath, source, force, full: mode === 'inline', ignoreWs })
+    call('diff.get', { repoId, path, oldPath, source, force, full: mode === 'inline', ignoreWs, context })
       .then((d) => {
         if (!live) return
         setDiff(d)
@@ -120,7 +122,8 @@ export function DiffView({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu]')) {
+      // A menu closed by this Esc is gone from the page already, but it marked the event handled.
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role=dialog],[role=menu]')) {
         if (sel) setSel(null)
         else if (findOpen) setFindOpen(false)
         else if (!embedded) act.setCenter(repoId, { kind: 'graph' })
@@ -134,7 +137,7 @@ export function DiffView({
     if (!diff || source.kind === 'commit') return
     const go = async (): Promise<void> => {
       setBusy(true)
-      const ok = await act.applyPatch(repoId, { path, source: source.kind, hunk, header: diff.hunks[hunk].header, lines, action, full: mode === 'inline' })
+      const ok = await act.applyPatch(repoId, { path, source: source.kind, hunk, header: diff.hunks[hunk].header, lines, action, full: mode === 'inline', context })
       setBusy(false)
       if (ok) setSel(null)
     }
@@ -151,7 +154,7 @@ export function DiffView({
 
   const runPatch = (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage'): void => {
     if (!diff || !patchSha) return
-    act.patchOut(repoId, { sha: patchSha, path, oldPath, part: { hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline' } }, action)
+    act.patchOut(repoId, { sha: patchSha, path, oldPath, part: { hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline', context } }, action)
   }
 
   const jump = (dirn: 1 | -1): void => {
@@ -217,11 +220,30 @@ export function DiffView({
             <Space size={16} />
           </IconButton>
         </Tooltip>
-        <Tooltip content={wrap ? 'Don’t wrap long lines' : 'Wrap long lines'}>
-          <IconButton label="Wrap long lines" pressed={wrap} onClick={() => setPrefs({ diffWrap: !wrap })}>
-            <WrapText size={16} />
-          </IconButton>
-        </Tooltip>
+        <DropdownMenu
+          trigger={
+            <IconButton label="Diff options">
+              <SlidersHorizontal size={16} />
+            </IconButton>
+          }
+          items={[
+            { type: 'item', label: wrap ? 'Don’t wrap long lines' : 'Wrap long lines', icon: <WrapText size={14} />, onSelect: () => setPrefs({ diffWrap: !wrap }) },
+            { type: 'separator' },
+            context === undefined
+              ? { type: 'item', label: 'Lines around changes: the whole file is shown', icon: <UnfoldVertical size={14} />, disabled: true }
+              : {
+                  type: 'sub',
+                  label: `Lines around changes (${context})`,
+                  icon: <UnfoldVertical size={14} />,
+                  items: DIFF_CONTEXT_STEPS.map((n) => ({
+                    type: 'item' as const,
+                    label: `${plural(n, 'line')}${n === 3 ? ' (default)' : ''}`,
+                    icon: n === context ? <Check size={14} /> : undefined,
+                    onSelect: () => setPrefs({ diffContext: n })
+                  }))
+                }
+          ]}
+        />
         {embedded ? null : (
           <Tooltip content="File history">
             <IconButton label="File history" onClick={() => act.setCenter(repoId, { kind: 'history', path })}>

@@ -23,12 +23,22 @@ Right-click a file (or several):
 | --- | --- |
 | Stage / Unstage | |
 | Discard changes… | asks first, and can be [undone](undo.md) |
-| Ignore | the file only, all files with its extension, or its folder; also undoable |
+| Ignore | the file only, all files with its extension, or its folder; also undoable. **On this computer only** does the same for new files without changing `.gitignore` |
 | Track with Git LFS / Stop tracking | see [Git LFS](lfs.md) |
 | Open in editor, Open in diff tool, Show in folder | your own tools, see [Settings](settings.md#external-tools) |
 | Open in merge tool | for a conflicted file |
 | File history, Blame | see [File history and blame](history-and-blame.md) |
 | Copy path | |
+
+### Ignoring files on this computer only
+
+**Ignore** adds lines to the repository's `.gitignore`, which you commit, so everyone ignores those files. For files
+that only matter to you, like your own notes or an editor's settings, use **Ignore › On this computer only**
+instead: the same choices (the file, its extension, a folder) go to `.git/info/exclude`, which git reads like
+`.gitignore` but never commits. Undo takes them out again.
+
+It's offered for new files only. Git keeps tracking a file it already has, whatever the ignore rules say, and
+stopping that would be a change everyone gets.
 
 ## Diffs
 
@@ -40,7 +50,10 @@ The header of a diff has:
 - **Find in file** (Ctrl+F): type to highlight every match, **Enter** for the next one, **Shift+Enter** for the
   previous one, **Esc** to close;
 - **Diff layout**: inline or side by side;
-- **Hide whitespace changes** and **Wrap long lines**;
+- **Hide whitespace changes**;
+- **Diff options**: **Wrap long lines**, and **Lines around changes**, how many unchanged lines show above and
+  below each change, from 1 to 25 (3 by default). With more, changes close together join into one block. The
+  whole-file layout shows every line, so it has none to set;
 - **File history**, **Use the full width** and **Close** (Esc).
 
 Your choices are remembered. The default layout, code size and tab width are in [Settings](settings.md#diffs-and-code).
@@ -66,6 +79,7 @@ With the keyboard: focus a block, then **↑ / ↓** move between changed lines,
 picked.
 
 Lines can't be picked while whitespace changes are hidden, because the patch git applies has to match the file.
+The blocks you stage are always the ones on screen, however many lines around changes you show.
 
 When the open file is fully staged, the diff follows it to the Staged list, and back again when you unstage it.
 

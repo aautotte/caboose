@@ -80,6 +80,13 @@ export interface Refs {
   refs: Ref[]
   stashes: Stash[]
   remotes: string[]
+  /** Local branches checked out before, most recent first, from HEAD's reflog; the current one isn't among them. */
+  recent: string[]
+  /**
+   * Where "Switch to the previous branch" goes, as `git checkout -` does: the branch (or, when HEAD was detached
+   * there, the commit's full sha) last switched away from. A branch deleted since is skipped.
+   */
+  previous: string | null
 }
 
 /** One letter per side, as git status reports it. '.' = unchanged. */

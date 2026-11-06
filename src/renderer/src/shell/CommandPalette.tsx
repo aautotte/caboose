@@ -3,6 +3,7 @@ import { Command } from 'cmdk'
 import { Dialog as RDialog } from 'radix-ui'
 import { setPrefs, useApp } from '@/store'
 import * as act from '@/actions'
+import { refLabel } from '@/lib/format'
 import { Shortcut } from '@/ui'
 
 interface Cmd {
@@ -108,7 +109,12 @@ export function CommandPalette(): React.JSX.Element | null {
         { id: 'settings', group: 'View', label: 'Settings', run: () => act.setCenter(id, { kind: 'prefs' }) },
         { id: 'close', group: 'Repository', label: 'Close this repository tab', shortcut: 'Ctrl+W', run: () => void act.closeTab(id) }
       )
-      for (const r of refs?.refs ?? []) {
+      if (refs?.previous)
+        list.push({ id: 'co-previous', group: 'Check out', label: `Switch to the previous branch (${refLabel(refs.previous)})`, shortcut: 'Ctrl+Shift+B', run: () => void act.checkoutPrevious(id) })
+      // The branches checked out lately come first, most recent at the top.
+      const recent = refs?.recent ?? []
+      const rank = (r: { kind: string; short: string }): number => (r.kind === 'local' && recent.includes(r.short) ? recent.indexOf(r.short) : recent.length)
+      for (const r of [...(refs?.refs ?? [])].sort((a, b) => rank(a) - rank(b))) {
         if (r.kind === 'tag' || r.isHead) continue
         list.push({ id: `co-${r.name}`, group: 'Check out', label: `Check out ${r.short}`, run: () => void act.checkout(id, r.short) })
         if (refs?.head.branch && r.kind === 'local')

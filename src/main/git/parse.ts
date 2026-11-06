@@ -36,6 +36,14 @@ export const REF_FORMAT = [
   '%(contents:subject)'
 ].join('%1f')
 
+/** What each switch left, newest first, from `git log -g --format=%gs` of checkouts: a branch name, or a full sha. */
+export function parseCheckouts(out: string): string[] {
+  return out
+    .split('\n')
+    .map((l) => /^checkout: moving from (\S+) to /.exec(l)?.[1])
+    .filter((x): x is string => !!x)
+}
+
 export function parseRefs(out: string, remotes: string[]): Ref[] {
   const refs: Ref[] = []
   for (const line of out.split('\n')) {

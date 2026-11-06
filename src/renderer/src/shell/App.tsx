@@ -50,6 +50,7 @@ function useShortcuts(): void {
         const head = s.repos[repo]?.refs?.head
         if (head?.sha) return run(() => act.openDialog({ kind: 'createBranch', repoId: repo, at: head.sha!, atLabel: head.branch ?? head.sha!.slice(0, 7) }))
       }
+      if (ctrl && e.shiftKey && k === 'b') return run(() => void act.checkoutPrevious(repo))
       if (ctrl && e.shiftKey && k === 'h') {
         const c = s.repos[repo]?.center
         if (c && (c.kind === 'diff' || c.kind === 'blame')) return run(() => act.setCenter(repo, { kind: 'history', path: c.path }))

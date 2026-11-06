@@ -155,6 +155,8 @@ export interface Prefs {
   mergeShowBase: boolean
   /** Diffs leave out lines that only changed whitespace (git diff -w). Line staging is off while it's on. */
   diffIgnoreWs: boolean
+  /** Unchanged lines shown above and below each change (git diff -U), one of DIFF_CONTEXT_STEPS. */
+  diffContext: number
   /** List files Git doesn't track yet among the unstaged changes. */
   showUntracked: boolean
   /** Changed-file lists show their folders as a tree instead of one flat list. */
@@ -167,6 +169,8 @@ export interface Prefs {
 // Preferences live in the app database (main process). A copy in localStorage paints the right theme
 // before that answer arrives.
 const PREFS_KEY = 'caboose.prefs'
+/** The choices for Prefs.diffContext. Not 0: blocks with no lines around them can't be staged reliably. */
+export const DIFF_CONTEXT_STEPS = [1, 3, 5, 10, 25]
 const LEGACY_PREFS_KEY = 'mergatroid.prefs'
 export const defaultPrefs: Prefs = {
   pullMode: 'ff',
@@ -185,6 +189,7 @@ export const defaultPrefs: Prefs = {
   editorCommand: '',
   mergeShowBase: true,
   diffIgnoreWs: false,
+  diffContext: 3,
   showUntracked: true,
   fileTree: false,
   leftCollapsed: false,

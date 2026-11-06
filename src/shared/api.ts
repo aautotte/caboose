@@ -71,7 +71,8 @@ export interface Api {
   'commit.details': { in: R & { sha: string }; out: CommitDetails }
   /** The full messages (summary and description) of these commits, in the order asked. */
   'commit.messages': { in: R & { shas: string[] }; out: { sha: string; message: string }[] }
-  'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean }; out: FileDiff }
+  /** `context`: lines shown around each change (git's default when unset); `full` shows the whole file instead. */
+  'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean; context?: number }; out: FileDiff }
   'search.commits': { in: R & { query: string }; out: string[] }
   'lfs.state': { in: R; out: LfsState }
   'lfs.turnOn': { in: R & { opId: string }; out: null }
@@ -158,10 +159,11 @@ export interface Api {
 
   /** Stage, unstage or discard one hunk, or some of its lines. `header` must match what the user saw. */
   'index.applyPatch': {
-    in: R & { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }
+    in: R & { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean; context?: number }
     out: null
   }
-  'ignore.add': { in: R & { patterns: string[]; label: string }; out: { untracked: number } }
+  /** `local`: to .git/info/exclude, for this computer only, instead of .gitignore. */
+  'ignore.add': { in: R & { patterns: string[]; label: string; local?: boolean }; out: { untracked: number } }
 
   /** `paths`: only these files. `keepIndex`: what's staged is stashed and also stays in the folder, staged. */
   'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[]; keepIndex?: boolean }; out: OpResult }
@@ -227,7 +229,7 @@ export interface Api {
    * be placed there).
    */
   'history.patchOut': {
-    in: R & { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null; action: 'remove' | 'split' | 'stage'; message?: string }
+    in: R & { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean; context?: number } | null; action: 'remove' | 'split' | 'stage'; message?: string }
     out: OpResult & { staged?: boolean }
   }
   'history.move': { in: R & { sha: string; direction: 'up' | 'down' }; out: OpResult }
