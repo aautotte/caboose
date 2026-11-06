@@ -29,6 +29,14 @@ const ref = z.string().min(1).max(400)
 const context = z.number().int().min(1).max(1000).optional()
 /** A commit's short sha for labels; a branch or tag name as it is. */
 const shortRef = (r: string): string => (/^[0-9a-f]{40}$/.test(r) ? r.slice(0, 7) : r)
+/** Where a save dialog starts: Documents, or the home folder for an account that has none (Electron throws then). */
+function documentsFolder(): string {
+  try {
+    return app.getPath('documents')
+  } catch {
+    return app.getPath('home')
+  }
+}
 
 interface Deps {
   db: Db
@@ -523,7 +531,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     const win = BrowserWindow.fromWebContents(e.sender)
     const res = await dialog.showSaveDialog(win!, {
       title: shas.length === 1 ? 'Save the patch' : `Save ${shas.length} commits as a patch`,
-      defaultPath: join(app.getPath('documents'), name.replace(/[\\/:*?"<>|]+/g, '-')),
+      defaultPath: join(documentsFolder(), name.replace(/[\\/:*?"<>|]+/g, '-')),
       filters: [{ name: 'Patches', extensions: ['patch', 'diff'] }]
     })
     if (res.canceled || !res.filePath) return null
