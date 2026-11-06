@@ -11,6 +11,7 @@ import type {
   GitIdentity,
   GpuState,
   GraphColumn,
+  GraphFilter,
   Profile,
   RebasePreview,
   RebaseRow,
@@ -64,7 +65,7 @@ export interface Api {
   'repo.init': { in: { parentDir: string; name: string; defaultBranch: string; gitignore: string | null; license: string | null }; out: RepoSummary }
   'op.cancel': { in: { opId: string }; out: null }
 
-  'graph.load': { in: R & { skip: number; limit: number }; out: GraphPage }
+  'graph.load': { in: R & { skip: number; limit: number; filter?: GraphFilter }; out: GraphPage }
   'refs.list': { in: R; out: Refs }
   'status.get': { in: R; out: Status }
   'commit.details': { in: R & { sha: string }; out: CommitDetails }

@@ -18,6 +18,7 @@ export function MultiPanel({ repoId, shas }: { repoId: string; shas: string[] })
   const onLine = shas.every((s) => line.includes(s))
   const offLine = shas.every((s) => !line.includes(s))
   const authors = new Set(rows.map((r) => r.authorEmail)).size
+  const filtered = useRepo(repoId, (r) => !!act.graphFilter(r))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -35,6 +36,7 @@ export function MultiPanel({ repoId, shas }: { repoId: string; shas: string[] })
           {authors === 1 ? 'One author' : `${authors} authors`}
           {rows.length ? ` · ${relativeTime(rows[rows.length - 1].authorTime)} to ${relativeTime(rows[0].authorTime)}` : ''}
         </p>
+        {filtered ? <p className="text-sm text-muted">The graph is filtered: clear the filter to squash or rebase commits.</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="primary" disabled={!!squashWhy} onClick={() => void act.askSquash(repoId, shas)}>
             <Combine size={14} aria-hidden />

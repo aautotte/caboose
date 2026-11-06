@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranchPlus, Globe, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranchPlus, Globe, ListFilter, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
 import { DropdownMenu as RMenu } from 'radix-ui'
 import { Check } from 'lucide-react'
 import type { PullMode } from '../../../shared/types'
@@ -40,6 +40,7 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
   const refs = useRepo(repoId, (r) => r.refs)
   const search = useRepo(repoId, (r) => r.search)
   const hits = useRepo(repoId, (r) => r.searchHits)
+  const filterOpen = useRepo(repoId, (r) => !!r.filter)
   const progress = useRepo(repoId, (r) => r.progress)
   const dirty = useRepo(repoId, (r) => (r.status?.changes.length ?? 0) > 0)
   const pullMode = useApp((s) => s.prefs.pullMode)
@@ -210,6 +211,11 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
         />
         {hits ? <span className="shrink-0 text-xs text-muted" aria-live="polite">{hits.length} found</span> : null}
       </div>
+      <Tooltip content="Show only the commits that change a path, or by an author" shortcut="Ctrl+Shift+F">
+        <IconButton label="Filter the graph" pressed={filterOpen} onClick={() => (filterOpen ? act.setFilter(repoId, null) : act.openFilter(repoId))}>
+          <ListFilter size={16} />
+        </IconButton>
+      </Tooltip>
       <DropdownMenu
         trigger={
           <IconButton label="Open the repository in…">

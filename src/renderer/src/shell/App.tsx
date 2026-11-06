@@ -58,6 +58,7 @@ function useShortcuts(): void {
       if (ctrl && !e.shiftKey && !e.altKey && k === 'f')
         return run(() => window.dispatchEvent(new Event('gc:find-in-file', { cancelable: true })) && (document.getElementById('commit-search') as HTMLInputElement | null)?.focus())
       if (ctrl && e.altKey && k === 'f') return run(() => (document.getElementById('left-filter') as HTMLInputElement | null)?.focus())
+      if (ctrl && e.shiftKey && k === 'f') return run(() => act.openFilter(repo))
       if (ctrl && e.shiftKey && k === 's') return run(() => void act.stage(repo, 'all'))
       if (ctrl && e.shiftKey && k === 'u') return run(() => void act.unstage(repo, 'all'))
       if (ctrl && e.shiftKey && k === 'm') {

@@ -143,7 +143,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('op.cancel', z.object({ opId }), ({ opId }) => (runner.cancel(opId), null))
 
   // ---------- reads ----------
-  handle('graph.load', z.object({ ...R, skip: z.number().int().min(0), limit: z.number().int().min(1).max(5000) }), async ({ repoId, skip, limit }) => {
+  const filter = z.object({ path: z.string().min(1).max(4096).optional(), author: z.string().min(1).max(200).optional() })
+  handle('graph.load', z.object({ ...R, skip: z.number().int().min(0), limit: z.number().int().min(1).max(5000), filter: filter.optional() }), async ({ repoId, skip, limit, filter }) => {
     const o = ops(repoId)
     const refs = await o.refs()
     refView.prune(repoId, new Set(refs.refs.map((r) => r.name)))
@@ -154,7 +155,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     }
     const view = refView.get(repoId)
     if (repoPrefs.getAll(repoId)['graph.focusHead'] === true) view.soloed = [...new Set([...view.soloed, ...(await o.focusRefs(refs))])]
-    return o.graph(skip, limit, refs.stashes, view)
+    return o.graph(skip, limit, refs.stashes, view, filter)
   })
   handle('refs.list', z.object(R), ({ repoId }) => ops(repoId).refs())
   handle('status.get', z.object(R), ({ repoId }) => ops(repoId).status())

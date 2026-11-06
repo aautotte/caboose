@@ -29,6 +29,8 @@ works offline, and it doesn't phone home.
 - Focus on one branch, show only one commit's history, hide the branches and tags you don't care about, pin a
   branch to the left.
 - Search the whole history by message, SHA or author.
+- Filter it to the commits that change a file, a folder or a pattern, by an author, or both, with the lines
+  joining what's left.
 - Columns can be shown, hidden, reordered and resized, Graph and Branch / tag included. A wide graph scrolls
   sideways. The widths are saved per repository.
 - Move with J / K, or Ctrl+Home / Ctrl+End.

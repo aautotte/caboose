@@ -11,6 +11,7 @@ import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList, toStatus, type FileItem } from './FileList'
+import { filterPathEntry } from '@/graph/FilterBar'
 
 const opText = {
   merge: (o: { head?: string }) => `Merging${o.head ? ` (${o.head})` : ''}.`,
@@ -182,6 +183,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     { type: 'item' as const, label: 'Show in folder', icon: <FolderOpen size={14} />, disabled: f.status === 'deleted', onSelect: () => void act.openIn(repoId, 'folder', f.path) },
     { type: 'separator' as const },
     { type: 'item' as const, label: 'File history', icon: <History size={14} />, disabled: f.status === 'untracked' || f.status === 'added', onSelect: () => act.setCenter(repoId, { kind: 'history', path: f.path }) },
+    filterPathEntry(repoId, f.path, false, f.status === 'untracked' || f.status === 'added'),
     { type: 'item' as const, label: 'Blame', icon: <UserSearch size={14} />, disabled: f.status === 'untracked' || f.status === 'added' || f.status === 'deleted', onSelect: () => act.setCenter(repoId, { kind: 'blame', path: f.path, rev: null }) },
     { type: 'item' as const, label: 'Stash this file…', icon: <Archive size={14} />, disabled: f.status === 'conflicted', onSelect: () => act.openDialog({ kind: 'stash', repoId, paths: [f.path] }) },
     ignoreMenu([f]),
@@ -290,7 +292,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
               }
             }}
             menu={(f, picked) => fileMenu(f, 'unstaged', picked)}
-            dirMenu={(files) => manyMenu(files, 'unstaged')}
+            dirMenu={(files, path) => [...manyMenu(files, 'unstaged'), { type: 'separator' }, filterPathEntry(repoId, path, true)]}
             multi
             emptyText="Everything is staged."
             onKey={(e, _f, picked) => {
@@ -307,7 +309,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             rowAction={{ label: 'Unstage', icon: <Minus size={12} aria-hidden />, onClick: (f) => void act.unstage(repoId, [f.path]) }}
             dirAction={{ label: 'Unstage', onClick: (files) => void act.unstage(repoId, files.map((f) => f.path)) }}
             menu={(f, picked) => fileMenu(f, 'staged', picked)}
-            dirMenu={(files) => manyMenu(files, 'staged')}
+            dirMenu={(files, path) => [...manyMenu(files, 'staged'), { type: 'separator' }, filterPathEntry(repoId, path, true)]}
             multi
             emptyText="Stage files to include them in the next commit."
             onKey={(e, _f, picked) => e.key === 'u' && void act.unstage(repoId, picked.map((p) => p.path))}

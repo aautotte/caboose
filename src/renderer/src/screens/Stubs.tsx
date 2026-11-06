@@ -39,6 +39,7 @@ export const shortcutGroups: Array<{ title: string; items: Array<[string, string
       ['Search commits', 'Ctrl+F'],
       ['Find in the open file', 'Ctrl+F'],
       ['Filter branches', 'Ctrl+Alt+F'],
+      ['Filter the graph by path or author', 'Ctrl+Shift+F'],
       ['Command palette', 'Ctrl+P'],
       ['Collapse or expand the branches panel', 'Ctrl+J'],
       ['Collapse or expand the details panel', 'Ctrl+K'],

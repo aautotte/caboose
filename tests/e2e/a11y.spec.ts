@@ -47,6 +47,13 @@ test('S04 repository view', async () => {
   await commitRow(h.page, 'Print the real temperature in the CLI').click()
   await scan('S04')
 })
+test('S04 repository view, graph filtered', async () => {
+  await h.page.getByRole('button', { name: 'Filter the graph' }).click()
+  await h.page.getByRole('search', { name: 'Filter the graph' }).getByRole('textbox', { name: 'Path' }).fill('src/')
+  await h.page.getByRole('search', { name: 'Filter the graph' }).getByRole('status').filter({ hasText: /commit/ }).waitFor()
+  await scan('S04-filter')
+  await h.page.getByRole('button', { name: 'Clear the filter' }).click()
+})
 test('S05 uncommitted changes', async () => {
   await openWip(h.page)
   await scan('S05')
