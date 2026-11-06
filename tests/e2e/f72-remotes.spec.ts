@@ -77,6 +77,7 @@ test('F72-H4: Fetch github gets the branches of that remote only', async () => {
   h.git(repo, 'push', '-q', slash(up2), 'main:feature')
   await menu(h.page, header(), 'Fetch github')
   await expect(toasts().getByText('Fetched github')).toBeVisible()
-  expect(h.git(repo, 'branch', '-r', '--format=%(refname:short)')).toBe('github/feature\ngithub/main')
+  // Git 2.48+ also makes github/HEAD on fetch: only the branches count.
+  expect(h.git(repo, 'for-each-ref', '--format=%(refname:short)', '--exclude=refs/remotes/*/HEAD', 'refs/remotes')).toBe('github/feature\ngithub/main')
   await expect(h.page.getByRole('treeitem', { name: 'feature' })).toBeVisible()
 })
