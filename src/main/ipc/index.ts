@@ -873,6 +873,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     return null
   })
   handle('commit.template', z.object(R), ({ repoId }) => ops(repoId).commitTemplate())
+  handle('commit.recentMessages', z.object({ ...R, limit: z.number().int().min(1).max(100) }), ({ repoId, limit }) => ops(repoId).recentMessages(limit))
 
   // ---------- other programs ----------
   const webTarget = z.discriminatedUnion('kind', [

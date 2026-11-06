@@ -2475,6 +2475,25 @@ export class RepoOps {
   }
 
   /** The commit message template from git config (commit.template), without comment lines. */
+  /**
+   * The last messages written on this branch, newest first, each once: to start a new one from. Merges and
+   * fixup! / squash! / amend! commits are left out.
+   */
+  async recentMessages(limit: number): Promise<{ summary: string; body: string }[]> {
+    const out = (await this.tryGit(['log', '--no-merges', '-n', String(limit * 3), '--format=%B%x00', 'HEAD'])) ?? ''
+    const seen = new Set<string>()
+    const list: { summary: string; body: string }[] = []
+    for (const raw of out.split('\0')) {
+      const message = raw.trim()
+      if (!message || seen.has(message) || /^(fixup|squash|amend)! /.test(message)) continue
+      seen.add(message)
+      const [summary, ...rest] = message.split('\n')
+      list.push({ summary, body: rest.join('\n').trim() })
+      if (list.length === limit) break
+    }
+    return list
+  }
+
   async commitTemplate(): Promise<string | null> {
     const file = (await this.tryGit(['config', '--type=path', '--get', 'commit.template']))?.trim()
     if (!file) return null

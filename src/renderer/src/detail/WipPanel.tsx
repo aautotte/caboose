@@ -7,10 +7,12 @@ import { call } from '@/lib/api'
 import { plural, splitPath } from '@/lib/format'
 import { extensionRule, ruleFor } from '@/lib/lfs'
 import { ignoreChoices } from '@/lib/ignore'
+import { wrapMessage } from '@/lib/message'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList, toStatus, type FileItem } from './FileList'
+import { MessageTools } from './MessageTools'
 import { filterPathEntry } from '@/graph/FilterBar'
 
 const opText = {
@@ -28,6 +30,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
   const busy = useRepo(repoId, (r) => r.busy)
   const lfs = useRepo(repoId, (r) => r.lfs)
   const pushAfter = useApp((s) => s.prefs.pushAfterCommit)
+  const wrapOnCommit = useApp((s) => s.prefs.wrapOnCommit)
   const draft = useRepo(repoId, (r) => r.draft)
   const summary = draft.summary
   const body = draft.body
@@ -104,7 +107,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
 
   const doCommit = async (): Promise<void> => {
     if (!canCommit) return
-    const ok = await act.commit(repoId, { summary, body, amend, noVerify, push: pushAfter })
+    const ok = await act.commit(repoId, { summary, body: wrapOnCommit ? wrapMessage(body) : body, amend, noVerify, push: pushAfter })
     if (ok) {
       // act.commit already cleared the message.
       setAmend(false)
@@ -363,6 +366,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
           </span>
         </div>
         <TextArea aria-label="Commit description" placeholder="Description" value={body} onChange={(e) => setBody(e.target.value)} />
+        <MessageTools repoId={repoId} />
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           <Checkbox label="Amend last commit" checked={amend} disabled={!refs?.head.sha} onCheckedChange={(v) => void toggleAmend(v)} />
           <Checkbox label="Push after committing" checked={pushAfter} disabled={!refs?.head.branch} onCheckedChange={(v) => setPrefs({ pushAfterCommit: v })} />

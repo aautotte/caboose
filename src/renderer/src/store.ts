@@ -119,7 +119,8 @@ export type Dialog =
   /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */
   | { kind: 'rebaseFrom'; repoId: string; from: string; fromLabel: string }
   /** Set the author of commits, or add a co-author to them. */
-  | { kind: 'author'; repoId: string; shas: string[]; mode: 'set' | 'coAuthor' }
+  /** `draft`: a co-author for the commit being written (no shas), not for commits already made. */
+  | { kind: 'author'; repoId: string; shas: string[]; mode: 'set' | 'coAuthor' | 'draft' }
   | {
       kind: 'confirm'
       title: string
@@ -140,6 +141,8 @@ export interface Prefs {
   detailWidth: number
   theme: 'dark' | 'light' | 'system'
   pushAfterCommit: boolean
+  /** The description is wrapped at 72 characters as it's committed (code, quotes and trailers aside). */
+  wrapOnCommit: boolean
   /** Minutes between background fetches; 0 turns it off. */
   autoFetchMinutes: number
   diffMode: DiffMode
@@ -179,6 +182,7 @@ export const defaultPrefs: Prefs = {
   detailWidth: 380,
   theme: 'dark',
   pushAfterCommit: false,
+  wrapOnCommit: false,
   autoFetchMinutes: 1,
   diffMode: 'hunk',
   diffWrap: false,

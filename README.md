@@ -53,6 +53,7 @@ works offline, and it doesn't phone home.
 
 - Summary and description, with your commit message template. Amend the last commit, sign commits, push after
   committing.
+- Start from a recent message, add co-authors from the history, and wrap the description at 72 characters.
 - Edit any commit's message, squash several into one (every message kept, ready to edit), move a commit up or down,
   revert, cherry-pick one or several, reset (soft, mixed or hard).
 - Change who commits are by: reset the author to you, set another author, or add a co-author.

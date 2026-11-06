@@ -94,6 +94,18 @@ When the open file is fully staged, the diff follows it to the Staged list, and 
 - **Push after committing** pushes as soon as the commit is made. Its default is a setting.
 - **Skip hooks** runs `git commit --no-verify`.
 
+Under the description:
+
+- **Recent** lists the last messages on this branch (not merges or `fixup!` commits). Picking one fills in the
+  summary and the description. If it replaces a message you'd written, **Put it back** in the notification
+  undoes that.
+- **Co-author** adds a `Co-authored-by: Name <email>` line to the description, for someone who worked on it with
+  you. It lists the people in the history, most recent first; **Someone else…** takes any name and email. GitHub
+  and GitLab show co-authors as authors too.
+- **Wrap** wraps the description at 72 characters, the width `git log` shows best: paragraphs and list items are
+  rewrapped, while code (indented or between ``` lines), quotes, tables and lines like `Co-authored-by:` at the
+  end stay as typed. **Wrap the description when committing**, in [Settings](settings.md), does it every time.
+
 The line under the button says who the commit will be from (name and email), and where that comes from when it
 isn't your global git config: this repository's setting or your profile.
 
