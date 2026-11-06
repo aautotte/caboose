@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   AuthorChange,
   Blame,
@@ -51,6 +51,7 @@ import {
   parseFileHistory,
   parseLog,
   parseNameStatus,
+  parseCheckouts,
   parseRefs,
   parseStashes,
   parseStatus,
@@ -79,6 +80,9 @@ const PERSON = /^[^<>\n]+ <[^<>\s]+>$/
 
 const MAX_DIFF_BYTES = 1_000_000
 const MAX_DIFF_LINES = 20_000
+/** --unified for a diff: the whole file, or `context` lines around each change (git's own default when unset). */
+const unified = (full: boolean | undefined, context: number | undefined): string[] =>
+  full ? ['--unified=1000000'] : context === undefined ? [] : [`--unified=${context}`]
 
 /** Where undo safety refs live. Refs from before the renames (refs/mergatroid/, refs/gitclone/) are still hidden and pruned. */
 export const UNDO_REFS = 'refs/caboose/undo/'
@@ -730,20 +734,27 @@ export class RepoOps {
   }
 
   async refs(): Promise<Refs> {
-    const [remotesOut, symbolic, head, stashOut] = await Promise.all([
+    const [remotesOut, symbolic, head, stashOut, moves] = await Promise.all([
       this.git(['remote']),
       this.tryGit(['symbolic-ref', '-q', 'HEAD']),
       this.headSha(),
-      this.tryGit(['stash', 'list', `--format=${STASH_FORMAT}`])
+      this.tryGit(['stash', 'list', `--format=${STASH_FORMAT}`]),
+      // The last switches, from this worktree's HEAD reflog (none yet in a new repository).
+      this.tryGit(['log', '-g', '--format=%gs', '--grep-reflog=checkout: moving from ', '-n', '300', 'HEAD'])
     ])
     const remotes = remotesOut.split('\n').filter(Boolean)
     const refsOut = await this.git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags'])
     const branch = symbolic?.trim().replace(/^refs\/heads\//, '') || null
+    const refs = parseRefs(refsOut, remotes).map((r) => (r.worktree ? { ...r, worktree: resolve(r.worktree) } : r))
+    const local = new Set(refs.filter((r) => r.kind === 'local').map((r) => r.short))
+    const left = parseCheckouts(moves ?? '').filter((x) => x !== branch && x !== head && (local.has(x) || /^[0-9a-f]{40}$/.test(x)))
     return {
       head: { branch, sha: head, detached: !branch && !!head, unborn: !!branch && !head },
-      refs: parseRefs(refsOut, remotes).map((r) => (r.worktree ? { ...r, worktree: resolve(r.worktree) } : r)),
+      refs,
       stashes: stashOut ? parseStashes(stashOut) : [],
-      remotes
+      remotes,
+      recent: [...new Set(left.filter((x) => local.has(x)))].slice(0, 10),
+      previous: left[0] ?? null
     }
   }
 
@@ -909,12 +920,12 @@ export class RepoOps {
     }
   }
 
-  async diff(rawPath: string, rawOld: string | undefined, source: DiffSource, force = false, full = false, ignoreWs = false): Promise<FileDiff> {
+  async diff(rawPath: string, rawOld: string | undefined, source: DiffSource, force = false, full = false, ignoreWs = false, context?: number): Promise<FileDiff> {
     const path = this.safePath(rawPath)
     const old = rawOld ? this.safePath(rawOld) : undefined
     const specs = old && old !== path ? ['--', old, path] : ['--', path]
     // --submodule=short whatever diff.submodule says: a submodule's diff is then its two commits, read below.
-    const base = ['--no-color', '--no-ext-diff', '--submodule=short', '-M', '--src-prefix=a/', '--dst-prefix=b/', ...(full ? ['--unified=1000000'] : []), ...(ignoreWs ? ['-w'] : [])]
+    const base = ['--no-color', '--no-ext-diff', '--submodule=short', '-M', '--src-prefix=a/', '--dst-prefix=b/', ...unified(full, context), ...(ignoreWs ? ['-w'] : [])]
     let out: string
     if (source.kind === 'worktree') {
       const tracked = (await this.git(['ls-files', '-z', '--', path])).length > 0
@@ -1433,14 +1444,14 @@ export class RepoOps {
   // ---------- partial staging and ignore ----------
 
   /** Stages, unstages or discards one hunk or some of its lines. Returns the patch applied (for undo). */
-  async applyPartial(input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }): Promise<string> {
+  async applyPartial(input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean; context?: number }): Promise<string> {
     const path = this.safePath(input.path)
     if ((input.action === 'unstage') !== (input.source === 'index')) throw invalid('Stage and discard work on unstaged changes; unstage works on staged ones.')
     const untracked = input.source === 'worktree' && (await this.git(['ls-files', '-z', '--', path])).length === 0
     if (untracked && input.action === 'discard') throw invalid('This file is new, so there’s no earlier version to go back to. Discard the whole file instead.')
     // A new file needs an (empty) index entry before part of it can be staged.
     if (untracked) await this.mut(['add', '-N', '--', path])
-    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...(input.full ? ['--unified=1000000'] : [])]
+    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...unified(input.full, input.context)]
     const raw = await this.git(input.source === 'index' ? ['diff', '--cached', ...base, '--', path] : ['diff', ...base, '--', path])
     const undoIntent = async (): Promise<void> => {
       if (untracked) await this.mut(['rm', '--cached', '-q', '--', path])
@@ -1481,6 +1492,25 @@ export class RepoOps {
     else writeFileSync(file, text)
   }
 
+  /** .git/info/exclude: ignore rules for this copy of the repository only (shared by its worktrees), never committed. */
+  private async excludeFile(): Promise<string> {
+    return resolve(this.repo.path, (await this.git(['rev-parse', '--git-path', 'info/exclude'])).trim())
+  }
+
+  async readExclude(): Promise<string | null> {
+    const file = await this.excludeFile()
+    return existsSync(file) ? readFileSync(file, 'utf8') : null
+  }
+
+  async writeExclude(text: string | null): Promise<void> {
+    const file = await this.excludeFile()
+    if (text === null) rmSync(file, { force: true })
+    else {
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, text)
+    }
+  }
+
   /** Tracked files that the ignore rules cover (files someone added on purpose, or that are about to stop being tracked). */
   private async trackedIgnored(): Promise<Set<string>> {
     return new Set((await this.git(['ls-files', '-z', '-c', '-i', '--exclude-standard'])).split('\0').filter(Boolean))
@@ -1513,17 +1543,24 @@ export class RepoOps {
   /**
    * Adds lines to the root .gitignore, then stops tracking the tracked files they now cover: without that,
    * .gitignore doesn't apply to them. Returns what an undo needs to put both back.
+   * `local`: to .git/info/exclude instead, for this computer only. Tracked files stay tracked: untracking them
+   * would be committed, and reach everyone.
    */
-  async ignore(patterns: string[]): Promise<{ before: string | null; after: string; untracked: string[]; index: string }> {
+  async ignore(patterns: string[], local = false): Promise<{ before: string | null; after: string; untracked: string[]; index: string }> {
     const lines = patterns.map((p) => p.trim())
     if (!lines.length || lines.some((p) => !p || /[\r\n\0]/.test(p))) throw invalid('Enter one pattern per line.')
-    const before = this.readGitignore()
+    const name = local ? '.git/info/exclude' : '.gitignore'
+    const before = local ? await this.readExclude() : this.readGitignore()
     const cur = before ?? ''
     const have = new Set(cur.split(/\r?\n/))
     const add = [...new Set(lines)].filter((p) => !have.has(p))
-    if (!add.length) throw invalid(lines.length === 1 ? `.gitignore already has “${lines[0]}”.` : '.gitignore already has those lines.')
+    if (!add.length) throw invalid(lines.length === 1 ? `${name} already has “${lines[0]}”.` : `${name} already has those lines.`)
     const eol = cur.includes('\r\n') ? '\r\n' : '\n'
     const after = cur + (cur && !cur.endsWith('\n') ? eol : '') + add.map((p) => p + eol).join('')
+    if (local) {
+      await this.writeExclude(after)
+      return { before, after, untracked: [], index: '' }
+    }
     const already = await this.trackedIgnored()
     this.writeGitignore(after)
     const untracked = [...(await this.trackedIgnored())].filter((p) => !already.has(p))
@@ -1888,7 +1925,7 @@ export class RepoOps {
    * it out of the commit and `git apply` puts it back on top of what's left. Needs a clean working copy.
    */
   async patchOut(
-    input: { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null; action: 'remove' | 'split' | 'stage'; message?: string },
+    input: { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean; context?: number } | null; action: 'remove' | 'split' | 'stage'; message?: string },
     tmpDir: string
   ): Promise<OpResult & { staged?: boolean }> {
     const { full, onto } = await this.rewritable(input.sha)
@@ -1904,7 +1941,7 @@ export class RepoOps {
       patch = await this.git(['diff', ...base, '--binary', onto, full, ...specs])
       if (!patch.trim()) throw invalid(`This commit doesn’t change ${path}.`)
     } else {
-      const raw = await this.git(['diff', ...base, ...(input.part.full ? ['--unified=1000000'] : []), onto, full, ...specs])
+      const raw = await this.git(['diff', ...base, ...unified(input.part.full, input.part.context), onto, full, ...specs])
       if (/^(rename from|Binary files|GIT binary patch)/m.test(raw)) throw invalid('Renamed and binary files can only be taken out as a whole.')
       const built = buildPartialPatch(raw, input.part.hunk, input.part.lines, true)
       if (!built || built.header !== input.part.header) throw new GcFail('changed_outside', 'This commit changed since it was shown. Look at it again, then retry.')

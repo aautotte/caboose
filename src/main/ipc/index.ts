@@ -25,6 +25,8 @@ const R = { repoId }
 const paths = z.union([z.literal('all'), z.array(z.string().min(1)).min(1).max(5000)])
 const opId = z.string().min(8).max(64)
 const ref = z.string().min(1).max(400)
+/** Lines of context around each change in a diff; 0 would need `git apply --unidiff-zero` to stage from. */
+const context = z.number().int().min(1).max(1000).optional()
 /** A commit's short sha for labels; a branch or tag name as it is. */
 const shortRef = (r: string): string => (/^[0-9a-f]{40}$/.test(r) ? r.slice(0, 7) : r)
 
@@ -271,13 +273,14 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       force: z.boolean().optional(),
       full: z.boolean().optional(),
       ignoreWs: z.boolean().optional(),
+      context,
       source: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('worktree') }),
         z.object({ kind: z.literal('index') }),
         z.object({ kind: z.literal('commit'), sha: ref, parent: ref.optional() })
       ])
     }),
-    ({ repoId, path, oldPath, source, force, full, ignoreWs }) => ops(repoId).diff(path, oldPath, source, force, full, ignoreWs)
+    ({ repoId, path, oldPath, source, force, full, ignoreWs, context }) => ops(repoId).diff(path, oldPath, source, force, full, ignoreWs, context)
   )
   handle('search.commits', z.object({ ...R, query: z.string().max(400) }), ({ repoId, query }) => ops(repoId).searchCommits(query))
 
@@ -340,7 +343,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     exclusive(repoId, async () => (await ops(repoId).bisectRun(command, id, output(id)), null))
   )
   handle('branch.checkout', z.object({ ...R, ref, opId: opId.optional() }), async ({ repoId, ref, opId: id }) => {
-    await undoable(repoId, 'checkout', `Switch to ${ref}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
+    await undoable(repoId, 'checkout', `Switch to ${shortRef(ref)}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
     return null
   })
   handle('branch.rename', z.object({ ...R, name: ref, newName: z.string().min(1).max(255) }), ({ repoId, name, newName }) => exclusive(repoId, async () => (await ops(repoId).renameBranch(name, newName), null)))
@@ -475,7 +478,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       header: z.string().max(10_000),
       lines: z.array(z.number().int().min(0)).max(1_000_000).nullable(),
       action: z.enum(['stage', 'unstage', 'discard']),
-      full: z.boolean()
+      full: z.boolean(),
+      context
     }),
     (input) =>
       exclusive(input.repoId, async () => {
@@ -488,14 +492,18 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
         return null
       })
   )
-  handle('ignore.add', z.object({ ...R, patterns: z.array(z.string().min(1).max(4096)).min(1).max(5000), label: z.string().min(1).max(300) }), ({ repoId, patterns, label }) =>
-    exclusive(repoId, async () => {
-      const o = ops(repoId)
-      const head = await undo.snapshot(o)
-      const r = await o.ignore(patterns)
-      undo.record(repoId, 'ignore', `Ignore ${label}`, { ...head, gitignore: r.before, index: r.index }, { ...head, gitignore: r.after, paths: r.untracked })
-      return { untracked: r.untracked.length }
-    })
+  handle(
+    'ignore.add',
+    z.object({ ...R, patterns: z.array(z.string().min(1).max(4096)).min(1).max(5000), label: z.string().min(1).max(300), local: z.boolean().optional() }),
+    ({ repoId, patterns, label, local }) =>
+      exclusive(repoId, async () => {
+        const o = ops(repoId)
+        const head = await undo.snapshot(o)
+        const r = await o.ignore(patterns, local)
+        if (local) undo.record(repoId, 'ignore', `Ignore ${label} on this computer`, { ...head, exclude: r.before }, { ...head, exclude: r.after })
+        else undo.record(repoId, 'ignore', `Ignore ${label}`, { ...head, gitignore: r.before, index: r.index }, { ...head, gitignore: r.after, paths: r.untracked })
+        return { untracked: r.untracked.length }
+      })
   )
 
   // ---------- stash ----------
@@ -894,7 +902,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       sha,
       path: filePath,
       oldPath: filePath.optional(),
-      part: z.object({ hunk: z.number().int().min(0), header: z.string().max(1000), lines: z.array(z.number().int().min(0)).max(100_000).nullable(), full: z.boolean() }).nullable(),
+      part: z.object({ hunk: z.number().int().min(0), header: z.string().max(1000), lines: z.array(z.number().int().min(0)).max(100_000).nullable(), full: z.boolean(), context }).nullable(),
       action: z.enum(['remove', 'split', 'stage']),
       message: z.string().max(100_000).optional()
     }),

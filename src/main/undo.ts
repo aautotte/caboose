@@ -41,6 +41,7 @@ export interface Snapshot {
   mode?: ResetMode // reset
   remote?: Remote // remote_remove; remote_edit: the remote on this side
   gitignore?: string | null // ignore: the root .gitignore on this side (null: none)
+  exclude?: string | null // ignore, on this computer only: .git/info/exclude on this side (null: none)
   index?: string // ignore: the index entries of the files it stopped tracking
   tips?: { name: string; sha: string }[] // rebase: other branches it moved along (stacked ones), where each is on this side
 }
@@ -281,6 +282,11 @@ export class UndoStack {
         return after
       }
       case 'ignore': {
+        if (from.exclude !== undefined) {
+          if ((await ops.readExclude()) !== from.exclude) throw moved()
+          await ops.writeExclude(to.exclude ?? null)
+          return after
+        }
         if (ops.readGitignore() !== from.gitignore) throw moved()
         ops.writeGitignore(to.gitignore ?? null)
         if (dir === 'back') await ops.restoreIndex(before.index ?? '')

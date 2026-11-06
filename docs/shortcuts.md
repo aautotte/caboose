@@ -12,6 +12,7 @@
 | Unstage all | Ctrl+Shift+U |
 | Focus the commit summary | Ctrl+Shift+M |
 | New branch | Ctrl+B |
+| Switch to the previous branch | Ctrl+Shift+B |
 | Fetch all | Ctrl+L |
 | Undo | Ctrl+Z |
 | Redo | Ctrl+Y |

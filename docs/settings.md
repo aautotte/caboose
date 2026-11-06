@@ -47,6 +47,7 @@ section) adds, renames and deletes them, and sets each one's:
 | | |
 | --- | --- |
 | Layout | Inline or Side by side. You can switch from any diff |
+| Lines around changes | unchanged lines shown above and below each change, 1 to 25 (3 by default). **Diff options**, on a diff, changes it too |
 | Hide whitespace changes | leaves out lines where only spaces, tabs or line endings changed. Lines can't be staged from the diff while it's on |
 | Wrap long lines | otherwise long lines scroll sideways |
 | Code size | text size in diffs, blame and the merge tool |

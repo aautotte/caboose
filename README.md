@@ -41,10 +41,12 @@ works offline, and it doesn't phone home.
 - Stage or unstage files, blocks or single lines, with the mouse or the keyboard. Discard them too, with undo.
 - Clean up the working tree: remove untracked files, ignored ones, or everything back to the last commit, with
   undo.
-- Inline or side by side, with whitespace hidden or not, long lines wrapped or not, your code size and tab width.
+- Inline or side by side, with as many lines around each change as you like, whitespace hidden or not, long lines
+  wrapped or not, your code size and tab width.
 - Find in the open file (Ctrl+F), with every match highlighted.
 - Binary files, Git LFS files and submodule pointers each get a diff that says what changed.
-- Ignore files from their menu, one or several at once: the file, its extension or its folder.
+- Ignore files from their menu, one or several at once: the file, its extension or its folder. For everyone
+  (`.gitignore`) or on this computer only (`.git/info/exclude`).
 - After a commit leaves nothing to commit, you're back on the commit list.
 
 ### Commits
@@ -62,7 +64,8 @@ works offline, and it doesn't phone home.
 
 ### Branches and tags
 
-- Create a branch from any commit, rename, check out, delete. Pick several branches or tags and push or delete
+- Create a branch from any commit, rename, check out, delete. Go back to the previous branch (Ctrl+Shift+B, like
+  `git checkout -`) or a recent one from the branch name in the toolbar. Pick several branches or tags and push or delete
   them at once, on the remote too. The dialog says that undo only brings back the local side.
 - Merge or rebase by dragging one branch onto another. Merge with a merge commit every time (`--no-ff`), or squash
   a branch into one commit.

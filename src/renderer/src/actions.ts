@@ -2,7 +2,7 @@
 import type { AuthorChange, CommitRow, DiffSource, GraphColumn, GraphFilter, OpResult, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
-import { plural } from './lib/format'
+import { plural, refLabel } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
 import { layoutInWorker } from './graph/layoutClient'
 import type { Layout } from './graph/lanes'
@@ -798,7 +798,7 @@ export function moveCommit(repoId: string, sha: string, direction: 'up' | 'down'
 
 // ---------- custom patches: taking changes out of a commit ----------
 
-export type PatchInput = { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null }
+export type PatchInput = { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean; context?: number } | null }
 
 /** Why changes can't be taken out of this commit (not on the branch's own line, a merge, the first commit), or null. */
 export function patchProblem(repoId: string, sha: string): string | null {
@@ -1125,21 +1125,30 @@ function checkedOutElsewhere(repoId: string, branch: string, w: Pick<Worktree, '
   })
 }
 
+/** Back to the branch (or detached commit) checked out before this one, as `git checkout -` does. */
+export async function checkoutPrevious(repoId: string): Promise<void> {
+  // Asked again: a switch made a moment ago may not be on screen yet, and this would go back to the wrong branch.
+  const fresh = await call('refs.list', { repoId }).catch(() => null)
+  const prev = fresh ? fresh.previous : useApp.getState().repos[repoId]?.refs?.previous
+  if (prev) await checkout(repoId, prev)
+  else toast({ tone: 'info', title: 'No previous branch', body: 'Switch to another branch first. This goes back to the one you left.' })
+}
+
 async function runCheckout(repoId: string, ref: string): Promise<void> {
   // A far jump can take a while: say so, with git's progress, until it's done.
-  patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: `Switching to ${ref}…` }, progress: null }))
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: `Switching to ${refLabel(ref)}…` }, progress: null }))
   const done = (): void => patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: undefined }, progress: null }))
   try {
     await call('branch.checkout', { repoId, ref, opId: newOpId() })
     done()
-    toast({ tone: 'success', title: `Switched to ${ref}` })
+    toast({ tone: 'success', title: `Switched to ${refLabel(ref)}` })
   } catch (err) {
     done()
     // A worktree made a moment ago (in a terminal, say) that the list here doesn't show yet.
     const m = err instanceof ApiError ? /'([^']+)' is already (?:used|checked out) by worktree at '([^']+)'/.exec(`${err.message}\n${err.detail ?? ''}`) : null
     await loadRepo(repoId, { keepSelection: true })
     if (m) return checkedOutElsewhere(repoId, m[1], { path: m[2], missing: !(await call('worktrees.list', { repoId }).catch(() => [])).some((w) => w.branch === m[1] && !w.missing) })
-    fail(err, `Couldn’t switch to ${ref}`)
+    fail(err, `Couldn’t switch to ${refLabel(ref)}`)
     return
   }
   await loadRepo(repoId, { keepSelection: true })
@@ -1676,23 +1685,31 @@ const patchTitles = { stage: 'Couldn’t stage those lines', unstage: 'Couldn’
 
 export async function applyPatch(
   repoId: string,
-  input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }
+  input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean; context?: number }
 ): Promise<boolean> {
   const ok = await attempt(() => call('index.applyPatch', { repoId, ...input }), patchTitles[input.action])
   await loadStatus(repoId)
   return ok !== undefined
 }
 
-/** Adds lines to the root .gitignore; tracked files they cover stop being tracked and stay on disk. Undoable. */
-export async function ignore(repoId: string, choice: IgnoreChoice): Promise<boolean> {
-  const res = await attempt(() => call('ignore.add', { repoId, patterns: choice.patterns, label: choice.what }), 'Couldn’t update .gitignore')
+/**
+ * Adds lines to the root .gitignore; tracked files they cover stop being tracked and stay on disk. `local`: to
+ * .git/info/exclude instead, which isn't committed, so only this computer ignores them. Undoable.
+ */
+export async function ignore(repoId: string, choice: IgnoreChoice, local = false): Promise<boolean> {
+  const res = await attempt(
+    () => call('ignore.add', { repoId, patterns: choice.patterns, label: choice.what, local }),
+    local ? 'Couldn’t update .git/info/exclude' : 'Couldn’t update .gitignore'
+  )
   if (res) {
     toast({
       tone: 'success',
-      title: `Ignoring ${choice.what}`,
-      body: res.untracked
-        ? `Git stopped tracking ${plural(res.untracked, 'file')}; ${res.untracked === 1 ? 'it stays' : 'they stay'} on disk. Commit to record it.`
-        : 'Commit .gitignore to share it.'
+      title: local ? `Ignoring ${choice.what} on this computer` : `Ignoring ${choice.what}`,
+      body: local
+        ? 'Added to .git/info/exclude, which isn’t committed: nobody else is affected.'
+        : res.untracked
+          ? `Git stopped tracking ${plural(res.untracked, 'file')}; ${res.untracked === 1 ? 'it stays' : 'they stay'} on disk. Commit to record it.`
+          : 'Commit .gitignore to share it.'
     })
   }
   await loadStatus(repoId)

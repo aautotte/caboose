@@ -135,15 +135,25 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     }
   }
 
-  // Ignore › this file (or these files) / all files of their kind / a folder that holds them all.
-  const ignoreMenu = (files: FileItem[]): MenuEntry => ({
-    type: 'sub',
-    label: 'Ignore',
-    icon: <EyeOff size={14} />,
-    items: files.some((f) => f.status === 'conflicted')
-      ? [{ type: 'item', label: 'Resolve the conflict first', disabled: true }]
-      : ignoreChoices(files.map((f) => f.path)).map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c) }))
-  })
+  // Ignore › this file (or these files) / all files of their kind / a folder that holds them all, and the same
+  // for this computer only (.git/info/exclude). That one can't stop Git tracking a file, so it's for new files.
+  const ignoreMenu = (files: FileItem[]): MenuEntry => {
+    const choices = ignoreChoices(files.map((f) => f.path))
+    return {
+      type: 'sub',
+      label: 'Ignore',
+      icon: <EyeOff size={14} />,
+      items: files.some((f) => f.status === 'conflicted')
+        ? [{ type: 'item', label: 'Resolve the conflict first', disabled: true }]
+        : [
+            ...choices.map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c) })),
+            { type: 'separator' },
+            files.every((f) => f.status === 'untracked')
+              ? { type: 'sub', label: 'On this computer only', items: choices.map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c, true) })) }
+              : { type: 'item', label: 'On this computer only (new files)', disabled: true }
+          ]
+    }
+  }
 
   // Several files picked: only what makes sense for all of them at once.
   const manyMenu = (files: FileItem[], side: 'staged' | 'unstaged'): MenuEntry[] => {

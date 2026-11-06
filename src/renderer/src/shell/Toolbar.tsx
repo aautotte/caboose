@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranchPlus, Globe, ListFilter, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranch, GitBranchPlus, Globe, History, ListFilter, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
 import { DropdownMenu as RMenu } from 'radix-ui'
 import { Check } from 'lucide-react'
 import type { PullMode } from '../../../shared/types'
@@ -6,7 +6,7 @@ import { DropdownMenu, IconButton, Spinner, TextInput, Tooltip, Shortcut } from 
 import { cn } from '@/ui/cn'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
-import { progressAmount } from '@/lib/format'
+import { progressAmount, refLabel } from '@/lib/format'
 
 const pullModes: Array<{ mode: PullMode; label: string }> = [
   { mode: 'ff', label: 'Pull (fast-forward when possible)' },
@@ -51,12 +51,34 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
   const upstream = refs?.refs.find((r) => r.kind === 'local' && r.isHead)?.upstream
   const tracked = upstream ? remotes.find((r) => upstream.startsWith(`refs/remotes/${r}/`)) : undefined
   const branchLabel = head?.branch ?? (head?.sha ? `Detached at ${head.sha.slice(0, 7)}` : '…')
+  // The branches switched to lately, after the previous one (which the menu offers first).
+  const recent = (refs?.recent ?? []).filter((b) => b !== refs?.previous)
 
   return (
     <div role="toolbar" aria-label="Repository actions" className="flex h-(--gc-toolbar-h) shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
       <div className="flex min-w-0 flex-col leading-tight">
         <h1 className="truncate text-md text-text">{tab?.alias ?? tab?.name}</h1>
-        <span className={cn('truncate text-sm', head?.detached ? 'text-warning' : 'text-muted')}>{branchLabel}</span>
+        <DropdownMenu
+          trigger={
+            <button
+              type="button"
+              aria-label={`Switch branch: ${branchLabel}`}
+              className={cn('-mx-1 flex min-w-0 items-center gap-0.5 rounded-sm px-1 text-sm hover:bg-row-hover hover:text-text', head?.detached ? 'text-warning' : 'text-muted')}
+            >
+              <span className="truncate">{branchLabel}</span>
+              <ChevronDown size={12} className="shrink-0" />
+            </button>
+          }
+          items={[
+            ...(refs?.previous
+              ? [{ type: 'item' as const, label: `Previous: ${refLabel(refs.previous)}`, icon: <History size={14} />, shortcut: 'Ctrl+Shift+B', onSelect: () => void act.checkoutPrevious(repoId) }]
+              : [{ type: 'item' as const, label: 'No previous branch yet', disabled: true }]),
+            ...(recent.length ? [{ type: 'separator' as const }] : []),
+            ...recent.map((b) => ({ type: 'item' as const, label: b, icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, b) })),
+            { type: 'separator' as const },
+            { type: 'item' as const, label: 'Another branch…', shortcut: 'Ctrl+P', onSelect: () => useApp.setState({ paletteOpen: true }) }
+          ]}
+        />
       </div>
       <div className="mx-auto flex items-center gap-1">
         <ToolButton

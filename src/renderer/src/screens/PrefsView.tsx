@@ -4,7 +4,7 @@ import type { GitConfigKey, GitIdentity, GpuState, PullMode, SshKey, SubmoduleMo
 import { Button, Field, IconButton, Select, Switch, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { setPrefs, useApp, type DiffMode } from '@/store'
+import { DIFF_CONTEXT_STEPS, setPrefs, useApp, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { toast } from '@/ui/toastBus'
 
@@ -146,6 +146,14 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
                     { value: 'inline', label: 'Whole file' },
                     { value: 'split', label: 'Side by side' }
                   ]}
+                />
+              </Row>
+              <Row label="Lines around changes" help="Unchanged lines shown above and below each change. With more, changes close together join into one block. Diff options, on a diff, changes it too.">
+                <Select
+                  label="Lines around changes"
+                  value={String(prefs.diffContext)}
+                  onValueChange={(v) => setPrefs({ diffContext: Number(v) })}
+                  options={DIFF_CONTEXT_STEPS.map((n) => ({ value: String(n), label: `${n}${n === 3 ? ' (default)' : ''}` }))}
                 />
               </Row>
               <Row label="Hide whitespace changes" help="Leaves out lines where only spaces, tabs or line endings changed. Lines can’t be staged from the diff while it’s on.">
