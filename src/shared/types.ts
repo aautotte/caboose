@@ -35,6 +35,14 @@ export interface CommitRow {
   authorTime: number // unix seconds
   summary: string
   kind: RowKind
+  /** With a filter on: the parents as the graph draws them, the nearest commits it shows (the real ones stay in `parents`). */
+  drawn?: string[]
+}
+
+/** Narrows the graph to commits that change this path (a file, a folder or a pattern like *.md) and whose author matches this text. */
+export interface GraphFilter {
+  path?: string
+  author?: string
 }
 
 export interface GraphPage {

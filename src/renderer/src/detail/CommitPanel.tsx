@@ -9,6 +9,7 @@ import * as act from '@/actions'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList } from './FileList'
 import { toStatus } from './FileList'
+import { filterPathEntry } from '@/graph/FilterBar'
 
 /** S06: one commit (or stash): who, when, message, and the files it changed. */
 export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): React.JSX.Element {
@@ -25,6 +26,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   const busy = useRepo(repoId, (r) => !!r.busy.op || !!r.busy.commit)
   const commitCount = useRepo(repoId, (r) => r.commits.length)
   const status = useRepo(repoId, (r) => r.status) // re-checks what blocks a rewrite
+  const filtered = useRepo(repoId, (r) => !!act.graphFilter(r))
 
   useEffect(() => {
     let live = true
@@ -65,7 +67,8 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   void commitCount
   void status
   const onLine = act.headLine(repoId).includes(d.sha)
-  const canEdit = !stash && d.parents.length <= 1 && (d.isHead || (onLine && d.parents.length === 1))
+  // Not while the graph is filtered: the commits it hides would be rewritten unseen.
+  const canEdit = !stash && !filtered && d.parents.length <= 1 && (d.isHead || (onLine && d.parents.length === 1))
   const pushed = canEdit && act.alreadyPushed(repoId, [d.sha])
   // Older commits are reworded by a rebase: not past a merge (it would be flattened), and not with work in the way.
   const behindMerge = canEdit && !d.isHead && act.mergeAbove(repoId, d.sha)
@@ -183,6 +186,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
           onOpen={(f) => act.openDiff(repoId, f.path, { kind: 'commit', sha: d.sha, parent: d.parents[0] }, f.origPath)}
           menu={(f) => [
             { type: 'item', label: 'File history', icon: <History size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'history', path: f.path }) },
+            filterPathEntry(repoId, f.path),
             {
               type: 'item',
               label: 'Blame at this commit',
@@ -201,6 +205,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
             { type: 'separator' },
             { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(f.path) }
           ]}
+          dirMenu={(_, path) => [filterPathEntry(repoId, path, true)]}
           emptyText={`No file changes (${plural(d.parents.length, 'parent')}).`}
         />
       </div>

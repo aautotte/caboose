@@ -1,12 +1,13 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, GraphColumn, GraphFilter, OpResult, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
 import { layoutInWorker } from './graph/layoutClient'
+import type { Layout } from './graph/lanes'
 import { toast } from './ui/toastBus'
-import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog } from './store'
+import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog, type RepoState } from './store'
 
 const PAGE = 2000
 
@@ -198,7 +199,7 @@ export async function loadStatus(repoId: string): Promise<void> {
     // The graph's top row comes and goes with uncommitted changes; the lanes have to move with it.
     if (r && r.layout && dirty !== (r.status?.changes.length ?? 0) > 0) {
       const commits = r.commits
-      const layout = await layoutInWorker(withWip(commits, dirty, r.refs?.head.sha ?? null), pinnedLine(commits, r.refs, r.refView.pinned))
+      const layout = await layoutFor(commits, dirty, r.refs, r.refView.pinned, !!graphFilter(r))
       if (!isLatest(statusSeq, repoId, seq) || useApp.getState().repos[repoId]?.commits !== commits) return
       patchRepo(repoId, { status, undo, layout })
     } else patchRepo(repoId, { status, undo })
@@ -501,8 +502,10 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       call('repoPrefs.get', { repoId })
     ])
     const already = useApp.getState().repos[repoId]?.commits.length ?? 0
-    const page = await call('graph.load', { repoId, skip: 0, limit: Math.max(PAGE, already) })
-    const layout = await layoutInWorker(withWip(page.commits, status.changes.length > 0, refs.head.sha), pinnedLine(page.commits, refs, refView.pinned))
+    const filter = graphFilter(useApp.getState().repos[repoId])
+    loadedFilter.set(repoId, JSON.stringify(filter ?? null))
+    const page = await call('graph.load', { repoId, skip: 0, limit: Math.max(PAGE, already), filter })
+    const layout = await layoutFor(page.commits, status.changes.length > 0, refs, refView.pinned, !!filter)
     if (!isLatest(repoSeq, repoId, seq)) return // a newer full load is on its way
     const freshStatus = isLatest(statusSeq, repoId, sseq)
     // HEAD as the screen last showed it: if it moved (a checkout, pull, reset, or a terminal), submodules may follow.
@@ -536,11 +539,20 @@ export async function loadMore(repoId: string): Promise<void> {
   if (!r || !r.hasMore || r.loading) return
   patchRepo(repoId, { loading: true })
   const skip = r.commits.filter((c) => c.kind === 'commit').length
-  const page = await attempt(() => call('graph.load', { repoId, skip, limit: PAGE }))
+  const filter = graphFilter(r)
+  const page = await attempt(() => call('graph.load', { repoId, skip, limit: PAGE, filter }))
   if (!page) return patchRepo(repoId, { loading: false })
   const commits = [...r.commits, ...page.commits]
-  const layout = await layoutInWorker(withWip(commits, (r.status?.changes.length ?? 0) > 0, r.refs?.head.sha ?? null), pinnedLine(commits, r.refs, r.refView.pinned))
+  const layout = await layoutFor(commits, (r.status?.changes.length ?? 0) > 0, r.refs, r.refView.pinned, !!filter)
   patchRepo(repoId, { commits, hasMore: page.hasMore, layout, loading: false })
+}
+
+/** The lanes for these rows, drawn along `drawn` parents when the graph is filtered. */
+function layoutFor(commits: CommitRow[], dirty: boolean, refs: Refs | null, pinned: string | null, filtered: boolean): Promise<Layout> {
+  const rows = commits.map((c) => ({ sha: c.sha, parents: c.drawn ?? c.parents }))
+  // Filtered, HEAD may not be shown: then the uncommitted changes have no line to join.
+  const head = refs?.head.sha ?? null
+  return layoutInWorker(withWip(rows, dirty, filtered && !commits.some((c) => c.sha === head) ? null : head), pinnedLine(rows, refs, pinned))
 }
 
 /** The pinned branch's first-parent line among the loaded rows (what lane 0 shows). */
@@ -554,8 +566,45 @@ function pinnedLine(rows: Array<{ sha: string; parents: string[] }>, refs: { ref
 }
 
 /** The graph rows as drawn: an extra "uncommitted changes" row on top when the tree is dirty. */
-export function withWip<T extends { sha: string; parents: string[] }>(rows: T[], dirty: boolean, head: string | null): Array<{ sha: string; parents: string[] }> {
+function withWip<T extends { sha: string; parents: string[] }>(rows: T[], dirty: boolean, head: string | null): Array<{ sha: string; parents: string[] }> {
   return dirty ? [{ sha: 'wip', parents: head ? [head] : [] }, ...rows] : rows
+}
+
+// ---------- filtering the graph ----------
+
+/** The filter the graph loads with: the bar's fields that have something in them, or undefined. */
+export function graphFilter(r: RepoState | undefined): GraphFilter | undefined {
+  const path = r?.filter?.path.trim()
+  const author = r?.filter?.author.trim()
+  return path || author ? { ...(path ? { path } : {}), ...(author ? { author } : {}) } : undefined
+}
+
+/** Opens the filter bar (the fields as they were) with the keyboard in its path field. */
+export function openFilter(repoId: string): void {
+  setFilter(repoId, {})
+  setTimeout(() => window.dispatchEvent(new Event('gc:focus-filter')), 0)
+}
+
+/** What each repository's graph was last loaded with, so a change in the bar that filters nothing new doesn't reload. */
+const loadedFilter = new Map<string, string>()
+const filterTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/**
+ * Opens the filter bar with these fields (the others stay as they were) or, with null, closes it and shows every
+ * commit again. `wait`: while typing, the graph reloads once you stop.
+ */
+export function setFilter(repoId: string, next: { path?: string; author?: string } | null, wait = 0): void {
+  const r = useApp.getState().repos[repoId]
+  if (!r) return
+  patchRepo(repoId, { filter: next ? { path: next.path ?? r.filter?.path ?? '', author: next.author ?? r.filter?.author ?? '' } : null })
+  if (r.center.kind !== 'graph') setCenter(repoId, { kind: 'graph' })
+  clearTimeout(filterTimers.get(repoId))
+  filterTimers.set(
+    repoId,
+    setTimeout(() => {
+      if (JSON.stringify(graphFilter(useApp.getState().repos[repoId]) ?? null) !== (loadedFilter.get(repoId) ?? 'null')) void loadRepo(repoId, { keepSelection: true })
+    }, wait)
+  )
 }
 
 // ---------- selection and views ----------
@@ -595,6 +644,8 @@ export function extendSelect(repoId: string, sha: string, order: string[]): void
 /** The current branch's first-parent line among the loaded commits, newest first. */
 export function headLine(repoId: string): string[] {
   const r = useApp.getState().repos[repoId]
+  // A filtered graph skips commits, so the line can't be followed: nothing on it is offered for rewriting.
+  if (graphFilter(r)) return []
   const bySha = new Map((r?.commits ?? []).map((c) => [c.sha, c]))
   const line: string[] = []
   for (let sha = r?.refs?.head.sha ?? null; sha && bySha.has(sha); sha = bySha.get(sha)!.parents[0] ?? null) line.push(sha)

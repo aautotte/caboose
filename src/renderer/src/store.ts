@@ -42,6 +42,8 @@ export interface RepoState {
   fetchFailed: boolean
   search: string
   searchHits: string[] | null
+  /** The filter bar above the graph, while it’s open: the graph shows only commits that change `path` by authors matching `author` (empty: any). */
+  filter: { path: string; author: string } | null
   refView: RefViewState
   /** Auto-fetch stops after an auth failure until the next manual fetch. */
   autoFetchPaused: boolean
@@ -216,6 +218,7 @@ export const emptyRepo = (): RepoState => ({
   fetchFailed: false,
   search: '',
   searchHits: null,
+  filter: null,
   refView: { hidden: [], soloed: [], pinned: null },
   autoFetchPaused: false,
   openedAt: Date.now(),

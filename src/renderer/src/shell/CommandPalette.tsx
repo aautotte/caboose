@@ -93,6 +93,8 @@ export function CommandPalette(): React.JSX.Element | null {
           label: 'Focus on this branch (or show all)',
           run: () => void act.setFocusHead(id, !useApp.getState().repos[id]?.focusHead)
         },
+        { id: 'filter', group: 'View', label: 'Filter the graph by path or author…', shortcut: 'Ctrl+Shift+F', run: () => act.openFilter(id) },
+        ...(useApp.getState().repos[id]?.filter ? [{ id: 'filter-clear', group: 'View', label: 'Clear the graph filter', run: () => act.setFilter(id, null) }] : []),
         { id: 'open-folder', group: 'Repository', label: 'Open in file manager', run: () => void act.openIn(id, 'folder') },
         { id: 'open-terminal', group: 'Repository', label: 'Open in terminal', run: () => void act.openIn(id, 'terminal') },
         { id: 'open-editor', group: 'Repository', label: 'Open in editor', run: () => void act.openIn(id, 'editor') },

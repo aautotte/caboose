@@ -26,6 +26,7 @@
 | Search commits | Ctrl+F (when no file is open) |
 | Find in the open file | Ctrl+F (in a diff) |
 | Filter branches | Ctrl+Alt+F |
+| Filter the graph by path or author | Ctrl+Shift+F |
 | Command palette | Ctrl+P |
 | Collapse or expand the branches panel | Ctrl+J |
 | Collapse or expand the details panel | Ctrl+K |

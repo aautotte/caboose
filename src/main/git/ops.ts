@@ -18,6 +18,7 @@ import type {
   ConflictFile,
   DiffSource,
   FileDiff,
+  GraphFilter,
   GraphPage,
   LfsState,
   Submodule,
@@ -83,6 +84,9 @@ const MAX_DIFF_LINES = 20_000
 export const UNDO_REFS = 'refs/caboose/undo/'
 const OWN_REFS = ['refs/caboose/', 'refs/mergatroid/', 'refs/gitclone/']
 const EXCLUDE_OWN = OWN_REFS.map((r) => `--exclude=${r}*`)
+
+/** The author filter's map of the history, per repository: rebuilt when a branch moves or the filter changes. */
+const nearestCache = new Map<string, { key: string; nearest: Map<string, string[]> }>()
 
 /** Git operations for one repository. Mutating calls go through the runner's per-repo queue. */
 export class RepoOps {
@@ -619,7 +623,7 @@ export class RepoOps {
     return (await this.tryGit(['rev-parse', '-q', '--verify', 'HEAD^{commit}']))?.trim() || null
   }
 
-  async graph(skip: number, limit: number, stashes: Refs['stashes'], view: RefViewState = { hidden: [], soloed: [], pinned: null }): Promise<GraphPage> {
+  async graph(skip: number, limit: number, stashes: Refs['stashes'], view: RefViewState = { hidden: [], soloed: [], pinned: null }, filter: GraphFilter = {}): Promise<GraphPage> {
     // Soloed branches replace "everything"; hidden ones are left out of it. HEAD always shows.
     // A remote's HEAD (origin/HEAD) is only an alias for one of its branches, so it never brings commits in itself:
     // otherwise hiding that branch would leave all its commits on screen. Likewise, while anything is hidden, tags
@@ -628,13 +632,32 @@ export class RepoOps {
     // 32,000 characters per command line, and git wouldn't start at all (an empty graph).
     const revs = view.soloed.length ? [...view.soloed, 'HEAD'] : view.hidden.length ? [...(await this.shownRefs(view.hidden)), 'HEAD'] : null
     const which = revs ? ['--stdin'] : [...EXCLUDE_OWN, '--exclude=refs/stash', '--exclude=refs/remotes/*/HEAD', '--all']
-    const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--'], {
-      stdin: revs ? `${revs.join('\n')}\n` : undefined
+    const stdin = revs ? `${revs.join('\n')}\n` : undefined
+    // Typed in the filter bar: "." is the whole repository, and a path outside it changes in none of its commits.
+    const rel = filter.path ? relative(this.repo.path, resolve(this.repo.path, filter.path)) : ''
+    if (rel.startsWith('..') || isAbsolute(rel)) return { commits: [], hasMore: false }
+    const path = rel ? [this.safePath(rel)] : []
+    const author = filter.author ? ['-i', '--fixed-strings', `--author=${filter.author}`] : []
+    const filtered = path.length > 0 || author.length > 0
+    // --parents: with a path, git rewrites each commit's parents to the nearest commits that change it too.
+    const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...(filtered ? ['--parents'] : []), ...author, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--', ...path], {
+      stdin
     })
     if (out === null) return { commits: [], hasMore: false } // unborn repo
     const commits = parseLog(out)
     const hasMore = commits.length > limit
     if (hasMore) commits.pop()
+    if (filtered) {
+      // Git doesn't rewrite parents for an author: those come from the whole history, nearest shown commits first.
+      // The graph draws these; everything else (menus, revert, the details) keeps the real parents.
+      const nearest = author.length ? await this.nearestShown(which, stdin, path, author) : null
+      const real = await this.realParents(commits.map((c) => c.sha))
+      for (const c of commits) {
+        c.drawn = nearest ? [...new Set(c.parents.flatMap((p) => nearest.get(p) ?? []))] : c.parents
+        c.parents = real.get(c.sha) ?? []
+      }
+      return { commits, hasMore } // stashes sit on commits the filter may leave out
+    }
     // Stashes are drawn as their own rows, right above the commit they were made on.
     const byBase = new Map<string, CommitRow[]>()
     for (const s of stashes) {
@@ -667,6 +690,43 @@ export class RepoOps {
       .map((line) => line.split(' '))
       .filter(([name, symref]) => name && !symref && !skip.has(name))
       .map(([name]) => name)
+  }
+
+  /**
+   * For every commit of the history (with a path, of the commits that change it), the nearest commits at or below it
+   * that the author matches. Read whole once, then kept until a branch moves or the filter changes.
+   */
+  private async nearestShown(which: string[], stdin: string | undefined, path: string[], author: string[]): Promise<Map<string, string[]>> {
+    const tips = await this.git(['for-each-ref', '--format=%(objectname)'])
+    const key = JSON.stringify([which, stdin, path, author, tips, await this.headSha()])
+    const cached = nearestCache.get(this.repo.path)
+    if (cached?.key === key) return cached.nearest
+    const [topo, matched] = await Promise.all([
+      this.git(['rev-list', '--topo-order', '--parents', ...which, '--', ...path], { stdin }),
+      this.git(['rev-list', ...author, ...which, '--', ...path], { stdin })
+    ])
+    const shown = new Set(matched.split('\n').filter(Boolean))
+    const rows = topo.split('\n').filter(Boolean)
+    const nearest = new Map<string, string[]>()
+    // Oldest first, so each commit's parents are already done; a commit with one parent shares its list.
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const [sha, ...parents] = rows[i].split(' ')
+      if (shown.has(sha)) nearest.set(sha, [sha])
+      else if (parents.length === 1) nearest.set(sha, nearest.get(parents[0]) ?? [])
+      else nearest.set(sha, [...new Set(parents.flatMap((p) => nearest.get(p) ?? []))])
+    }
+    nearestCache.set(this.repo.path, { key, nearest })
+    return nearest
+  }
+
+  /** The parents of these commits as they really are. */
+  private async realParents(shas: string[]): Promise<Map<string, string[]>> {
+    if (!shas.length) return new Map()
+    const out = await this.git(['log', '--no-walk=unsorted', '--format=%H %P', '--stdin'], { stdin: `${shas.join('\n')}\n` })
+    return new Map(out.split('\n').filter(Boolean).map((line) => {
+      const [sha, ...parents] = line.trim().split(' ')
+      return [sha, parents.filter(Boolean)]
+    }))
   }
 
   async refs(): Promise<Refs> {
