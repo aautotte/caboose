@@ -11,7 +11,7 @@ Caboose runs the git installed on your computer. Whatever it does, you can see t
 1. [Getting started](getting-started.md): open, clone or create a repository, tabs, your name and email.
 2. [The commit graph](graph.md): reading it, focusing, hiding branches, filtering by path or author, columns, search.
 3. [Staging and committing](staging-and-committing.md): files, blocks and lines, diffs, find in file, amend,
-   signing, ignoring files.
+   signing, ignoring files, patches.
 
 ## Day to day
 

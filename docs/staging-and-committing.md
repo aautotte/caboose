@@ -29,6 +29,7 @@ Right-click a file (or several):
 | Open in merge tool | for a conflicted file |
 | File history, Blame | see [File history and blame](history-and-blame.md) |
 | Copy path | |
+| Copy as patch | the file's changes (or the picked files') as a diff, see [Patches](#patches) |
 
 ### Ignoring files on this computer only
 
@@ -123,3 +124,39 @@ for undo too, which takes a while for a big folder like `node_modules`.
 
 **Remove untracked files…** (in the command palette, or the menu of the **Uncommitted changes** row in the graph)
 opens it with only the untracked files ticked. With conflicts, resolve them or abort first.
+
+## Patches
+
+A patch is a set of changes as text, to send to someone or to move between repositories.
+
+### Copying and saving
+
+- **Patch › Copy as patch**, in a commit's menu, copies it as `git format-patch` would: the changes with the
+  commit's author, date and message. Pick several commits (Ctrl+click) for one patch of them all, oldest first.
+- **Patch › Save as patch file…** saves the same to a file.
+- **Copy as patch**, in a changed file's menu (or several picked files'), copies those changes as a plain diff:
+  the staged ones from the Staged list, the others from Not staged, new files included.
+- **Copy all changes as patch**, in the menu of **Uncommitted changes** in the graph or the command palette, copies
+  everything not yet committed.
+
+Merge commits can't be made into patches: `git format-patch` leaves them out.
+
+### Applying
+
+**Apply a patch…** (the menu of **Uncommitted changes**, or the command palette) opens with what's on the
+clipboard if it's a patch. **Paste from the clipboard** fills it in again, and **Open a patch file…** reads a file.
+As you go, it lists the commits in the patch and the files it changes, and says whether it applies.
+
+Choose where it goes:
+
+- **As commits**, for a patch from `git format-patch` or **Copy as patch** on commits: each becomes a commit with
+  its author, date and message, on top of the checked-out branch (`git am`). Nothing can be staged for this.
+- **To your working files**: the changes show up unstaged, to look over before you commit.
+- **To your working files, staged**: the same, and staged (`git apply --index`).
+
+If a part doesn't fit (the file has changed since the patch was made), it says which file and line, and nothing is
+applied. **Undo** takes an applied patch back out, or the commits off the branch.
+
+Line endings: Windows line endings (CRLF) in a patch are kept, so patches to files that use them work. Use **Paste
+from the clipboard** rather than Ctrl+V into the box, which turns them into plain line ends. A patch that something
+turned to CRLF throughout (an editor, a browser) is read as git wrote it.

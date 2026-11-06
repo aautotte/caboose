@@ -19,6 +19,9 @@ import type {
   DiffSource,
   FileDiff,
   GraphFilter,
+  PatchPreview,
+  PatchSource,
+  PatchTarget,
   GraphPage,
   LfsState,
   Submodule,
@@ -35,7 +38,7 @@ import type {
   Worktree
 } from '../../shared/types'
 import { GcFail, invalid } from '../errors'
-import type { GitRunner, RunOptions } from './runner'
+import type { GitRunner, RunOptions, RunResult } from './runner'
 import { buildPartialPatch } from './patch'
 import { HOST_NAMES, webRepo, webUrl, type HostKind, type WebTarget } from './hosting'
 import {
@@ -52,6 +55,7 @@ import {
   parseLog,
   parseNameStatus,
   parseCheckouts,
+  parseMailbox,
   parseRefs,
   parseStashes,
   parseStatus,
@@ -83,6 +87,20 @@ const MAX_DIFF_LINES = 20_000
 /** --unified for a diff: the whole file, or `context` lines around each change (git's own default when unset). */
 const unified = (full: boolean | undefined, context: number | undefined): string[] =>
   full ? ['--unified=1000000'] : context === undefined ? [] : [`--unified=${context}`]
+const MAX_PATCH_BYTES = 50_000_000
+/** git's empty tree: what "all changes" are diffed against before the first commit. */
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+/** git apply's or git am's complaint, without the noise: which file, and why. */
+function patchProblem(out: string): string {
+  const own = /^error: (.+): does not match index$/m.exec(out)
+  if (own) return `${own[1]} has changes of its own. Commit or stash them first.`
+  const lines = out
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^(error|fatal): /, '').trim())
+    .filter((l) => l && !/^(hint:|Patch failed at|Use 'git am|When you have resolved|If you prefer|To restore the original|The copy of the patch)/.test(l))
+  return lines.length ? `It doesn’t apply: ${lines.slice(0, 2).join('. ')}.`.replace(/\.\./g, '.') : 'It doesn’t apply here.'
+}
 
 /** Where undo safety refs live. Refs from before the renames (refs/mergatroid/, refs/gitclone/) are still hidden and pruned. */
 export const UNDO_REFS = 'refs/caboose/undo/'
@@ -116,6 +134,11 @@ export class RepoOps {
 
   mut(args: string[], opts: Partial<RunOptions> = {}): Promise<string> {
     return this.git(args, { mutating: true, ...opts })
+  }
+
+  /** Runs git and hands back its output and exit code whatever they are, for reading git's own messages. */
+  private raw(args: string[], opts: Partial<RunOptions> = {}): Promise<RunResult> {
+    return this.runner.run({ cwd: this.repo.path, repoId: this.repo.id, args, okCodes: Array.from({ length: 128 }, (_, i) => i + 1), ...opts })
   }
 
   // ---------- validation ----------
@@ -1567,6 +1590,105 @@ export class RepoOps {
     const index = await this.indexEntries(untracked)
     await this.untrack(untracked)
     return { before, after, untracked, index }
+  }
+
+  // ---------- patches ----------
+
+  /** These commits as one mailbox of patches (git format-patch), oldest first, each with its author and message. */
+  async formatPatch(shas: string[]): Promise<string> {
+    const revs = shas.map((s) => this.safeRev(s))
+    if ((await this.git(['rev-list', '--no-walk', '--merges', ...revs])).trim()) throw invalid('Merge commits can’t be made into patches.')
+    // One commit alone would mean "everything since it": -1 says just it.
+    return this.git(['format-patch', '--stdout', '--binary', ...(revs.length === 1 ? ['-1'] : ['--no-walk']), ...revs])
+  }
+
+  /** Uncommitted changes as a plain diff: the staged ones, the rest (new files included), or all of them. */
+  async changesPatch(scope: 'staged' | 'unstaged' | 'all', paths?: string[]): Promise<string> {
+    const spec = paths ? ['--', ...this.safePaths(paths).map((p) => `:(literal)${p}`)] : []
+    const base = ['--no-color', '--no-ext-diff', '--binary', '-M', '--src-prefix=a/', '--dst-prefix=b/']
+    // Before the first commit, "all" is everything against an empty tree.
+    const head = (await this.headSha()) ?? EMPTY_TREE
+    let out = await this.git(scope === 'staged' ? ['diff', '--cached', ...base, ...spec] : scope === 'all' ? ['diff', ...base, head, ...spec] : ['diff', ...base, ...spec])
+    if (scope !== 'staged') {
+      const untracked = (await this.git(['ls-files', '-z', '--others', '--exclude-standard', ...spec])).split('\0').filter(Boolean)
+      for (const p of untracked) out += await this.git(['diff', ...base, '--no-index', '--', '/dev/null', p], { okCodes: [1] })
+    }
+    if (!out.trim()) throw invalid('There are no changes there to make a patch of.')
+    return out
+  }
+
+  /**
+   * The patch's text. git writes its own lines (diff --git, From <sha>) with LF; when those end in CRLF, something
+   * on the way (a browser, an editor, the Windows clipboard) turned every line into CRLF, and it's turned back.
+   */
+  private patchText(source: PatchSource): string {
+    const text = source.kind === 'text' ? source.text : this.readPatchFile(source.path)
+    return /^(diff --git |From [0-9a-f]{40} )[^\n]*\r\n/m.test(text) ? text.replace(/\r\n/g, '\n') : text
+  }
+
+  private readPatchFile(path: string): string {
+    let size: number
+    try {
+      size = statSync(path).size
+    } catch {
+      throw invalid(`Couldn’t read ${path}.`)
+    }
+    if (size > MAX_PATCH_BYTES) throw invalid('That file is too big for a patch (over 50 MB).')
+    return readFileSync(path, 'utf8')
+  }
+
+  /** What a patch changes, and whether it applies to `target` as things are now. */
+  async patchCheck(source: PatchSource, target: PatchTarget): Promise<PatchPreview> {
+    const text = this.patchText(source)
+    const commits = parseMailbox(text)
+    const stat = await this.raw(['apply', '--numstat', '-'], { stdin: text })
+    const files = stat.code
+      ? []
+      : stat.stdout
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => {
+            const [a, r, ...p] = l.split('\t')
+            return { path: p.join('\t'), added: a === '-' ? null : Number(a), removed: r === '-' ? null : Number(r) }
+          })
+    if (!files.length) return { files, commits, problem: 'This isn’t a patch git can read.' }
+    if (target === 'commits') {
+      if (!commits.length) return { files, commits, problem: 'This patch has no commits in it, only changes. Apply it to your working files instead.' }
+      const op = await this.opState()
+      if (op.kind !== 'none') return { files, commits, problem: `Finish or abort the ${op.kind.replace('_', '-')} first.` }
+      if (await this.headSha()) {
+        const staged = await this.raw(['diff', '--cached', '--quiet'])
+        if (staged.code) return { files, commits, problem: 'Commit or unstage your staged changes first: the patch’s commits are made from a clean index.' }
+      }
+    }
+    const check = await this.raw(['apply', '--check', ...(target === 'worktree' ? [] : ['--index']), '-'], { stdin: text })
+    return { files, commits, problem: check.code ? patchProblem(check.stderr) : null }
+  }
+
+  /**
+   * Applies a patch: to the working files, to the staged changes and the files, or as new commits with their
+   * authors and messages (git am; stopped and undone if one doesn't apply). Returns the text applied, for undo.
+   */
+  async applyPatchSource(source: PatchSource, target: PatchTarget): Promise<{ text: string; commits: number }> {
+    const text = this.patchText(source)
+    const pre = await this.patchCheck({ kind: 'text', text }, target)
+    if (pre.problem) throw invalid(pre.problem)
+    if (target !== 'commits') {
+      await this.mut(['apply', ...(target === 'index' ? ['--index'] : []), '--whitespace=nowarn', '-'], { stdin: text })
+      return { text, commits: 0 }
+    }
+    // Without --keep-cr, git am drops every line's CR, which breaks patches to CRLF files (patchText fixed any CRLF mailbox).
+    const r = await this.raw(['am', '--quiet', '--whitespace=nowarn', '--keep-cr'], { stdin: text, mutating: true })
+    if (r.code) {
+      await this.tryGit(['am', '--abort'], { mutating: true })
+      throw invalid(patchProblem(`${r.stderr}\n${r.stdout}`))
+    }
+    return { text, commits: pre.commits.length }
+  }
+
+  /** Takes an applied patch back out (undo), or puts it in again (redo). */
+  async reapplyPatch(text: string, cached: boolean, reverse: boolean): Promise<void> {
+    await this.mut(['apply', ...(cached ? ['--index'] : []), ...(reverse ? ['--reverse'] : []), '--whitespace=nowarn', '-'], { stdin: text })
   }
 
   // ---------- stash ----------

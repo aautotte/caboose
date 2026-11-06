@@ -23,6 +23,7 @@ export type UndoType =
   | 'ignore'
   | 'branch_move'
   | 'staged_rewrite'
+  | 'patch_apply'
 
 /** What each undo entry needs to move the repo back (before) and forward again (after). */
 export interface Snapshot {
@@ -36,7 +37,8 @@ export interface Snapshot {
   stash?: string // discard: snapshot commit; staged_rewrite: a commit on top of `sha` whose tree is what's staged on this side
   paths?: string[] | 'all' // discard: what was discarded (for redo)
   ignored?: boolean // discard: ignored files went too
-  patch?: string // discard_lines: the patch that was reversed out of the working files
+  patch?: string // discard_lines: the patch that was reversed out of the working files; patch_apply: the patch applied
+  cached?: boolean // patch_apply: it went to the staged changes too (git apply --index)
   message?: string // stash_drop: the stash's message
   mode?: ResetMode // reset
   remote?: Remote // remote_remove; remote_edit: the remote on this side
@@ -226,6 +228,11 @@ export class UndoStack {
         this.db
           .prepare('UPDATE undo_entries SET before_state = ? WHERE id = ?')
           .run(JSON.stringify({ ...before, stash: stash ?? before.stash }), row.id)
+        return after
+      }
+      case 'patch_apply': {
+        if (cur.sha !== before.sha) throw moved()
+        await ops.reapplyPatch(before.patch!, !!before.cached, dir === 'back')
         return after
       }
       case 'discard_lines': {

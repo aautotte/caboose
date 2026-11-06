@@ -110,6 +110,16 @@ test('S15 reset dialog', async () => {
   await scan('S15')
   await h.page.keyboard.press('Escape')
 })
+test('S17 apply a patch dialog, with a patch checked', async () => {
+  await toGraph(h.page)
+  await h.page.keyboard.press('Control+p')
+  await h.page.keyboard.type('Apply a patch')
+  await h.page.keyboard.press('Enter')
+  await dialog(h.page).getByRole('textbox', { name: 'Patch' }).fill('diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-nothing like this\n+x\n')
+  await dialog(h.page).getByRole('alert').waitFor()
+  await scan('S17')
+  await h.page.keyboard.press('Escape')
+})
 test('S16 activity log', async () => {
   await h.page.getByRole('button', { name: 'Git log' }).click()
   await h.page.getByRole('region', { name: /activity|log/i }).first().waitFor()

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { z, type ZodType } from 'zod'
 import type { Api, Channel } from '../../shared/api'
 import type { ActivityEntry, ProgressEvent, Result, SubmoduleSettings } from '../../shared/types'
@@ -17,7 +17,7 @@ import type { Askpass } from '../askpass'
 import type { Profiles } from '../profiles'
 import { gpuState, setGpu } from '../gpu'
 import { homedir } from 'node:os'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const repoId = z.string().uuid()
@@ -504,6 +504,59 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
         else undo.record(repoId, 'ignore', `Ignore ${label}`, { ...head, gitignore: r.before, index: r.index }, { ...head, gitignore: r.after, paths: r.untracked })
         return { untracked: r.untracked.length }
       })
+  )
+
+  // ---------- patches ----------
+  const patchSource = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('text'), text: z.string().min(1).max(50_000_000) }),
+    z.object({ kind: z.literal('file'), path: z.string().min(1).max(4096) })
+  ])
+  const patchTarget = z.enum(['worktree', 'index', 'commits'])
+  const commitShas = z.array(z.string().regex(/^[0-9a-f]{40}$/)).min(1).max(1000)
+  // Copied here, not in the page: Chromium turns every LF into CRLF on the Windows clipboard, which breaks patches.
+  handle('patch.copyCommits', z.object({ ...R, shas: commitShas }), async ({ repoId, shas }) => (clipboard.writeText(await ops(repoId).formatPatch(shas)), null))
+  handle('patch.copyChanges', z.object({ ...R, scope: z.enum(['staged', 'unstaged', 'all']), paths: z.array(filePath).min(1).max(100_000).optional() }), async ({ repoId, scope, paths }) =>
+    (clipboard.writeText(await ops(repoId).changesPatch(scope, paths)), null)
+  )
+  handle('patch.save', z.object({ ...R, shas: commitShas, name: z.string().min(1).max(200) }), async ({ repoId, shas, name }, e) => {
+    const text = await ops(repoId).formatPatch(shas)
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const res = await dialog.showSaveDialog(win!, {
+      title: shas.length === 1 ? 'Save the patch' : `Save ${shas.length} commits as a patch`,
+      defaultPath: join(app.getPath('documents'), name.replace(/[\\/:*?"<>|]+/g, '-')),
+      filters: [{ name: 'Patches', extensions: ['patch', 'diff'] }]
+    })
+    if (res.canceled || !res.filePath) return null
+    try {
+      writeFileSync(res.filePath, text)
+    } catch (err) {
+      throw invalid(`Couldn’t write ${res.filePath}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'that folder doesn’t exist' : (err as Error).message}.`)
+    }
+    return res.filePath
+  })
+  handle('patch.pickFile', z.object({}), async (_, e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const res = await dialog.showOpenDialog(win!, { title: 'Open a patch', properties: ['openFile'], filters: [{ name: 'Patches', extensions: ['patch', 'diff', 'eml', 'mbox'] }, { name: 'All files', extensions: ['*'] }] })
+    return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
+  // Read here rather than pasted into a text box, which would turn CRLF line endings into LF.
+  handle('patch.clipboard', z.object({}), async () => {
+    const text = await clipboard.readText()
+    return text.length <= 50_000_000 && /^(diff --git |From [0-9a-f]{40} |--- )/m.test(text) ? text : null
+  })
+  handle('patch.check', z.object({ ...R, source: patchSource, target: patchTarget }), ({ repoId, source, target }) => ops(repoId).patchCheck(source, target))
+  handle('patch.apply', z.object({ ...R, source: patchSource, target: patchTarget }), ({ repoId, source, target }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const before = await undo.snapshot(o)
+      const r = await o.applyPatchSource(source, target)
+      if (target === 'commits') undo.record(repoId, 'cherry_pick', r.commits === 1 ? 'Apply a commit from a patch' : `Apply ${r.commits} commits from a patch`, ...(await undo.settle(o, before)))
+      else {
+        const side = { ...before, patch: r.text, cached: target === 'index' }
+        undo.record(repoId, 'patch_apply', target === 'index' ? 'Apply a patch to the staged changes' : 'Apply a patch', side, side)
+      }
+      return { commits: r.commits }
+    })
   )
 
   // ---------- stash ----------

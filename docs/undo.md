@@ -26,6 +26,7 @@ Each repository keeps its own list of the last 100 actions, and the list survive
 | Remove a remote | the remote, with its URLs |
 | Rename a remote, change its URLs | its name and URLs |
 | Ignore files | `.gitignore` as it was, and the files tracked again; `.git/info/exclude` as it was, for files ignored on this computer only |
+| Apply a patch | the patch taken back out of the files (and the staged changes); for commits, the branch where it was |
 
 A merge, rebase or pull that stopped on conflicts is recorded once you finish it.
 
