@@ -487,6 +487,20 @@ export interface GitIdentity {
   email: string | null
 }
 
+/** A patch to apply: text pasted in, or a file picked (read as is, so CRLF lines survive). */
+export type PatchSource = { kind: 'text'; text: string } | { kind: 'file'; path: string }
+/** Where a patch goes: the working files, the staged changes (and the files with them), or new commits (git am). */
+export type PatchTarget = 'worktree' | 'index' | 'commits'
+
+export interface PatchPreview {
+  /** The files it changes; added / removed are null for a binary file. */
+  files: { path: string; added: number | null; removed: number | null }[]
+  /** One per commit, oldest first, when it's a mailbox from git format-patch. Empty for a plain diff. */
+  commits: { subject: string; author: string }[]
+  /** Why it can't be applied there, in git's words; null when it applies. */
+  problem: string | null
+}
+
 export interface RefViewState {
   hidden: string[]
   soloed: string[]

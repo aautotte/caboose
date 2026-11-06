@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, Eraser, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListFilter, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload, UserPen } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ClipboardPaste, Combine, Copy, Eraser, FileDiff, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListFilter, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload, UserPen } from 'lucide-react'
 import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -711,9 +711,25 @@ function multiMenu(repoId: string, shas: string[], line: string[], headBranch: s
     ...(shas.length === 2 ? [{ type: 'item' as const, label: 'Compare these two commits', icon: <GitCompare size={14} />, onSelect: () => act.compareCommits(repoId, shas) }] : []),
     ...(onLine ? [authorMenu(repoId, shas, authorProblem(shas, line, parentsOf))] : []),
     { type: 'separator' },
+    patchMenu(repoId, shas, shas.some((s) => (parentsOf(s)?.length ?? 0) > 1)),
     { type: 'item', label: 'Copy commit SHAs', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(shas.join('\n')) },
     { type: 'item', label: 'Clear the selection', shortcut: 'Esc', onSelect: () => act.select(repoId, shas[0]) }
   ]
+}
+
+/** Patch › Copy as patch / Save as patch file…: not for merge commits, which git format-patch leaves out. */
+function patchMenu(repoId: string, shas: string[], merge: boolean): MenuEntry {
+  return {
+    type: 'sub',
+    label: 'Patch',
+    icon: <FileDiff size={14} />,
+    items: merge
+      ? [{ type: 'item', label: 'Merge commits can’t be made into patches', disabled: true }]
+      : [
+          { type: 'item', label: shas.length === 1 ? 'Copy as patch' : `Copy ${shas.length} commits as patch`, onSelect: () => void act.copyCommitsPatch(repoId, shas) },
+          { type: 'item', label: 'Save as patch file…', onSelect: () => void act.saveCommitsPatch(repoId, shas) }
+        ]
+  }
 }
 
 function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch: string | null, headSha: string | null, line: string[], bySha: Map<string, CommitRow>, filtered: boolean): MenuEntry[] {
@@ -722,6 +738,8 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: 'Stage all changes', onSelect: () => void act.stage(repoId, 'all') },
       { type: 'item', label: 'Find the commit these changes belong to', icon: <Search size={14} />, onSelect: () => void act.findFixupTarget(repoId) },
       { type: 'item', label: 'Stash changes…', icon: <Archive size={14} />, onSelect: () => act.openDialog({ kind: 'stash', repoId }) },
+      { type: 'item', label: 'Copy all changes as patch', icon: <FileDiff size={14} />, onSelect: () => void act.copyChangesPatch(repoId, 'all') },
+      { type: 'item', label: 'Apply a patch…', icon: <ClipboardPaste size={14} />, onSelect: () => act.openDialog({ kind: 'applyPatch', repoId }) },
       { type: 'item', label: 'Remove untracked files…', icon: <Eraser size={14} />, onSelect: () => act.openDialog({ kind: 'clean', repoId, untrackedOnly: true }) },
       { type: 'item', label: 'Clean up the working tree…', icon: <Eraser size={14} />, onSelect: () => act.openDialog({ kind: 'clean', repoId }) },
       { type: 'item', label: 'Discard all changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, 'all') }
@@ -825,6 +843,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     { type: 'item', label: `Show only commits by ${row.authorName}`, icon: <ListFilter size={14} />, onSelect: () => act.setFilter(repoId, { author: row.authorName }) },
     { type: 'separator' },
     ...(remotes.length ? [webEntry(repoId, { sha: row.sha })] : []),
+    patchMenu(repoId, [row.sha], row.parents.length > 1),
     { type: 'item', label: 'Copy commit SHA', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(row.sha) }
   )
   return entries

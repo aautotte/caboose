@@ -9,9 +9,10 @@ import undoIgnore004 from './004_undo_ignore.sql?raw'
 import undoBranchMove005 from './005_undo_branch_move.sql?raw'
 import undoStagedRewrite006 from './006_undo_staged_rewrite.sql?raw'
 import undoRemoteEdit007 from './007_undo_remote_edit.sql?raw'
+import undoPatchApply008 from './008_undo_patch_apply.sql?raw'
 
 // Migrations run in order; each one ends by setting PRAGMA user_version to its number.
-const migrations: string[] = [init001, undoTypes002, profileKeys003, undoIgnore004, undoBranchMove005, undoStagedRewrite006, undoRemoteEdit007]
+const migrations: string[] = [init001, undoTypes002, profileKeys003, undoIgnore004, undoBranchMove005, undoStagedRewrite006, undoRemoteEdit007, undoPatchApply008]
 
 export type Db = DatabaseSync
 

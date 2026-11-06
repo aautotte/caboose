@@ -12,6 +12,9 @@ import type {
   GpuState,
   GraphColumn,
   GraphFilter,
+  PatchPreview,
+  PatchSource,
+  PatchTarget,
   Profile,
   RebasePreview,
   RebaseRow,
@@ -164,6 +167,18 @@ export interface Api {
   }
   /** `local`: to .git/info/exclude, for this computer only, instead of .gitignore. */
   'ignore.add': { in: R & { patterns: string[]; label: string; local?: boolean }; out: { untracked: number } }
+  /** Copies these commits as one mailbox of patches (git format-patch), oldest first. Not for merge commits. */
+  'patch.copyCommits': { in: R & { shas: string[] }; out: null }
+  /** Copies uncommitted changes as a plain diff; `paths` limits it to those files. New files come with the unstaged ones. */
+  'patch.copyChanges': { in: R & { scope: 'staged' | 'unstaged' | 'all'; paths?: string[] }; out: null }
+  /** Asks where, then saves the commits' patch there. `name` is the suggested file name. Null when cancelled. */
+  'patch.save': { in: R & { shas: string[]; name: string }; out: string | null }
+  'patch.pickFile': { in: Record<string, never>; out: string | null }
+  /** The clipboard's text if it looks like a patch, CRLF line endings kept; otherwise null. */
+  'patch.clipboard': { in: Record<string, never>; out: string | null }
+  'patch.check': { in: R & { source: PatchSource; target: PatchTarget }; out: PatchPreview }
+  /** Undoable: a patch to the files or the staged changes goes back out; commits are taken off the branch. */
+  'patch.apply': { in: R & { source: PatchSource; target: PatchTarget }; out: { commits: number } }
 
   /** `paths`: only these files. `keepIndex`: what's staged is stashed and also stays in the folder, staged. */
   'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[]; keepIndex?: boolean }; out: OpResult }

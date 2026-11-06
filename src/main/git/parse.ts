@@ -25,6 +25,33 @@ export function parseLog(out: string): CommitRow[] {
   return rows
 }
 
+/** Decodes RFC 2047 words (=?UTF-8?q?...?= and =?UTF-8?b?...?=), as format-patch writes non-ASCII headers. */
+function decodeHeader(s: string): string {
+  return s.replace(/=\?([^?]+)\?([qQbB])\?([^?]*)\?=(\s+(?==\?))?/g, (_, charset: string, enc: string, text: string) => {
+    const bytes =
+      enc.toLowerCase() === 'b'
+        ? Buffer.from(text, 'base64')
+        : Buffer.from(text.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16))), 'latin1')
+    return new TextDecoder(/^utf-?8$/i.test(charset) ? 'utf-8' : 'latin1').decode(bytes)
+  })
+}
+
+/** The commits in a mailbox from git format-patch: each one's subject (without "[PATCH n/m]") and author. */
+export function parseMailbox(text: string): { subject: string; author: string }[] {
+  return text
+    .split(/^From [0-9a-f]{40} /m)
+    .slice(1)
+    .map((mail) => {
+      const head = mail.split(/\r?\n\r?\n/)[0]
+      // A header can go on over lines that start with a space.
+      const field = (name: string): string => {
+        const m = new RegExp(`^${name}: (.*(?:\\r?\\n[ \\t].*)*)`, 'm').exec(head)
+        return m ? decodeHeader(m[1].replace(/\r?\n[ \t]/g, ' ')).trim() : ''
+      }
+      return { subject: field('Subject').replace(/^\[PATCH[^\]]*\]\s*/, ''), author: field('From').replace(/\s*<[^>]*>$/, '').replace(/^"(.*)"$/, '$1') }
+    })
+}
+
 export const REF_FORMAT = [
   '%(refname)',
   '%(objectname)',

@@ -164,6 +164,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         ? { type: 'item', label: `Stage ${n}`, onSelect: () => void act.stage(repoId, paths) }
         : { type: 'item', label: `Unstage ${n}`, onSelect: () => void act.unstage(repoId, paths) },
       { type: 'item', label: 'Copy paths', onSelect: () => void navigator.clipboard.writeText(paths.join('\n')) },
+      { type: 'item', label: 'Copy as patch', disabled: files.some((f) => f.status === 'conflicted'), onSelect: () => void act.copyChangesPatch(repoId, side, paths) },
       { type: 'separator' },
       { type: 'item', label: `Stash ${n}…`, icon: <Archive size={14} />, disabled: files.some((f) => f.status === 'conflicted'), onSelect: () => act.openDialog({ kind: 'stash', repoId, paths }) },
       ignoreMenu(files),
@@ -179,6 +180,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
       ? { type: 'item' as const, label: 'Stage', onSelect: () => void act.stage(repoId, [f.path]) }
       : { type: 'item' as const, label: 'Unstage', onSelect: () => void act.unstage(repoId, [f.path]) },
     { type: 'item' as const, label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(f.path) },
+    { type: 'item' as const, label: 'Copy as patch', disabled: f.status === 'conflicted', onSelect: () => void act.copyChangesPatch(repoId, side, [f.path]) },
     { type: 'separator' as const },
     f.status === 'conflicted'
       ? { type: 'item' as const, label: 'Open in merge tool', icon: <GitCompare size={14} />, onSelect: () => act.externalTool(repoId, 'merge', f.path) }

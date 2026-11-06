@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, CommitRow, DiffSource, GraphColumn, GraphFilter, OpResult, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, GraphColumn, GraphFilter, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural, refLabel } from './lib/format'
@@ -1713,6 +1713,43 @@ export async function ignore(repoId: string, choice: IgnoreChoice, local = false
     })
   }
   await loadStatus(repoId)
+  return res !== undefined
+}
+
+// ---------- patches ----------
+
+/** Copies these commits as a patch (git format-patch): each with its author and message, ready for git am. */
+export async function copyCommitsPatch(repoId: string, shas: string[]): Promise<void> {
+  if ((await attempt(() => call('patch.copyCommits', { repoId, shas }), 'Couldn’t make the patch')) === undefined) return
+  toast({ tone: 'success', title: shas.length === 1 ? 'Copied the commit as a patch' : `Copied ${shas.length} commits as a patch` })
+}
+
+/** Saves these commits' patch to a file, named after the commit as git format-patch would. */
+export async function saveCommitsPatch(repoId: string, shas: string[]): Promise<void> {
+  const summary = useApp.getState().repos[repoId]?.commits.find((c) => c.sha === shas[0])?.summary ?? 'commit'
+  const slug = summary.replace(/[^\w.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 52) || 'commit'
+  const name = shas.length === 1 ? `0001-${slug}.patch` : `${shas.length}-commits.patch`
+  const path = await attempt(() => call('patch.save', { repoId, shas, name }), 'Couldn’t save the patch')
+  if (path) toast({ tone: 'success', title: 'Saved the patch', body: path })
+}
+
+/** Copies uncommitted changes as a plain diff: the staged ones, the unstaged ones (new files too), or all. */
+export async function copyChangesPatch(repoId: string, scope: 'staged' | 'unstaged' | 'all', paths?: string[]): Promise<void> {
+  if ((await attempt(() => call('patch.copyChanges', { repoId, scope, paths }), 'Couldn’t make the patch')) === undefined) return
+  toast({ tone: 'success', title: paths?.length === 1 ? 'Copied the changes to the file as a patch' : 'Copied the changes as a patch' })
+}
+
+/** Applies a patch the dialog checked. Undoable. Returns whether it applied. */
+export async function applyPatchSource(repoId: string, source: PatchSource, target: PatchTarget): Promise<boolean> {
+  const res = await attempt(() => call('patch.apply', { repoId, source, target }), 'Couldn’t apply the patch')
+  if (res) {
+    toast({
+      tone: 'success',
+      title: target === 'commits' ? `Applied ${plural(res.commits, 'commit')}` : 'Applied the patch',
+      body: target === 'commits' ? undefined : target === 'index' ? 'The changes are staged.' : 'The changes are in your working files, unstaged.'
+    })
+  }
+  await loadRepo(repoId, { keepSelection: true })
   return res !== undefined
 }
 

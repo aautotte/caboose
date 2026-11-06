@@ -61,6 +61,8 @@ works offline, and it doesn't phone home.
 - Fix up older commits: amend the staged changes into any commit on the branch (your other changes stay put), or
   make `fixup!` commits and squash them in later. Caboose can find the commit your changes belong to.
 - Git hooks run when history is rewritten, unless you tick Skip hooks.
+- Copy or save commits as a patch (`git format-patch`), or your changes as a diff. Apply a patch, pasted or from a
+  file, to your files, staged, or as commits with their authors. It's checked first, and undo takes it back.
 
 ### Branches and tags
 
