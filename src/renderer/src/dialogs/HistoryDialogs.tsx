@@ -3,6 +3,7 @@ import type { RebasePreview, RebaseRow } from '../../../shared/types'
 import { Button, Checkbox, Dialog, Field, TextArea, TextInput } from '@/ui'
 import { call } from '@/lib/api'
 import { plural } from '@/lib/format'
+import { addCoAuthor } from '@/lib/message'
 import { useApp, type Dialog as D } from '@/store'
 import { stackedLabel } from '@/history/RebaseView'
 import * as act from '@/actions'
@@ -19,17 +20,19 @@ export function AuthorDialog({ d }: { d: Extract<D, { kind: 'author' }> }): Reac
   const ready = !!value && !problem
   const what = d.shas.length === 1 ? d.shas[0].slice(0, 7) : plural(d.shas.length, 'commit')
   const set = d.mode === 'set'
+  const draft = d.mode === 'draft'
   const submit = (): void => {
     if (!ready) return
     // Closed first: the toast shows once the dialog is gone.
     close()
-    act.setAuthorship(d.repoId, d.shas, { kind: d.mode, author: value })
+    if (d.mode === 'draft') act.setDraft(d.repoId, { body: addCoAuthor(useApp.getState().repos[d.repoId]?.draft.body ?? '', value) })
+    else act.setAuthorship(d.repoId, d.shas, { kind: d.mode, author: value })
   }
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && close()}
-      title={set ? `Set the author of ${what}` : `Add a co-author to ${what}`}
+      title={set ? `Set the author of ${what}` : draft ? 'Add a co-author to your commit' : `Add a co-author to ${what}`}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -58,7 +61,7 @@ export function AuthorDialog({ d }: { d: Extract<D, { kind: 'author' }> }): Reac
             <option key={p} value={p} />
           ))}
         </datalist>
-        <p className="text-sm text-muted">The commits get new IDs, and the ones after them are replayed. Undo puts them back.</p>
+        {draft ? null : <p className="text-sm text-muted">The commits get new IDs, and the ones after them are replayed. Undo puts them back.</p>}
       </form>
     </Dialog>
   )

@@ -39,6 +39,7 @@ section) adds, renames and deletes them, and sets each one's:
 | | |
 | --- | --- |
 | Push after committing | ticks **Push after committing** under the commit message by default |
+| Wrap the description when committing | at 72 characters; code, quotes, tables and trailers stay as typed |
 | Stash new files | include untracked files when you stash |
 | Show untracked files | list files git isn't tracking yet among your changes (the eye on the list does the same) |
 

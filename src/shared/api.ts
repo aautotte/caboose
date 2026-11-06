@@ -73,6 +73,8 @@ export interface Api {
   'status.get': { in: R; out: Status }
   'commit.details': { in: R & { sha: string }; out: CommitDetails }
   /** The full messages (summary and description) of these commits, in the order asked. */
+  /** The last messages on the checked-out branch, newest first, each once; no merges or fixup! commits. */
+  'commit.recentMessages': { in: R & { limit: number }; out: { summary: string; body: string }[] }
   'commit.messages': { in: R & { shas: string[] }; out: { sha: string; message: string }[] }
   /** `context`: lines shown around each change (git's default when unset); `full` shows the whole file instead. */
   'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean; context?: number }; out: FileDiff }

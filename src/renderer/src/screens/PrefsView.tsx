@@ -127,6 +127,9 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
               <Row label="Push after committing" help="Ticks the box under the commit message by default.">
                 <Switch hideLabel label="Push after committing" checked={prefs.pushAfterCommit} onCheckedChange={(v) => setPrefs({ pushAfterCommit: v })} />
               </Row>
+              <Row label="Wrap the description when committing" help="At 72 characters, as git log shows best. Code, quotes, tables and lines like Co-authored-by stay as typed. Wrap, under the message, does it on the spot.">
+                <Switch hideLabel label="Wrap the description when committing" checked={prefs.wrapOnCommit} onCheckedChange={(v) => setPrefs({ wrapOnCommit: v })} />
+              </Row>
               <Row label="Stash new files" help="Include files Git isn’t tracking yet when you stash.">
                 <Switch hideLabel label="Stash new files" checked={prefs.stashUntracked} onCheckedChange={(v) => setPrefs({ stashUntracked: v })} />
               </Row>
