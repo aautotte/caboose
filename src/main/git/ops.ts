@@ -1100,7 +1100,19 @@ export class RepoOps {
     await this.safeBranchName(name)
     this.safeRev(at)
     await this.mut(['branch', name, at])
-    if (checkout) await this.mut(['switch', name])
+    if (checkout) {
+      try {
+        await this.mut(['switch', name])
+      } catch (e) {
+        if (e instanceof GcFail && /would be overwritten by checkout|commit your changes or stash them|You have unstaged changes/i.test(e.detail ?? '')) {
+          // Branch was created but checkout failed due to local changes
+          const files = [...(e.detail ?? '').matchAll(/^\t(.+)$/gm)].map((m) => m[1].trim())
+          const what = files.length ? (files.length > 5 ? `${files.slice(0, 5).join(', ')} and ${files.length - 5} more` : files.join(', ')) : 'Some files'
+          throw new GcFail('git', `Created branch ${name}, but couldn't switch to it: ${what} ${files.length === 1 ? 'has' : 'have'} uncommitted changes.`, e.detail)
+        }
+        throw e
+      }
+    }
   }
 
   /** Accepts a local branch, a remote branch (creates a tracking branch), a tag or a sha (detached). */

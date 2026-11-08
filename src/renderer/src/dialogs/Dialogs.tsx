@@ -111,10 +111,21 @@ function CreateBranchDialog({ d }: { d: Extract<D, { kind: 'createBranch' }> }):
   const problem = branchNameProblem(name.trim(), existing)
   const submit = async (): Promise<void> => {
     if (!name.trim() || problem) return
+    const branchName = name.trim()
     setBusy(true)
-    const ok = await act.createBranch(d.repoId, name.trim(), d.at, checkout)
+    const ok = await act.createBranch(d.repoId, branchName, d.at, checkout)
     setBusy(false)
-    if (ok) act.closeDialog()
+    if (ok) {
+      act.closeDialog()
+    } else if (checkout) {
+      // Branch creation failed but checkout was requested.
+      // Check if the branch was actually created (checkout failed due to local changes).
+      const currentRefs = useApp.getState().repos[d.repoId]?.refs
+      const branchExists = currentRefs?.refs.some((r) => r.kind === 'local' && r.short === branchName)
+      if (branchExists) {
+        act.closeDialog()
+      }
+    }
   }
   return (
     <Dialog
