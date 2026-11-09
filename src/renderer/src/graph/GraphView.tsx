@@ -351,7 +351,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   useEffect(() => {
     if (viewIndex < 0 || viewKey === scrolledTo.current) return
     scrolledTo.current = viewKey
-    v.scrollToIndex(viewIndex, { align: 'auto' })
+    v.scrollToIndex(viewIndex, { align: 'center' })
   }, [viewIndex, viewKey, v])
 
   const clickRow = (e: React.MouseEvent, sha: string): void => {
