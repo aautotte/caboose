@@ -17,7 +17,9 @@ Next to a local branch, `↑2 ↓1` means it's 2 commits ahead of the branch it 
 
 **Branch** in the toolbar (Ctrl+B) creates a branch at the current commit. **Create branch here…** in a commit's
 menu, or **New branch from here…** in a branch's or tag's menu, starts it somewhere else. Tick **Switch to it now**
-to check it out straight away.
+to check it out straight away. If your changes are in the way of the switch, the branch is still made, and the
+notification says which files are in the way: commit or stash changed ones, move or delete untracked ones, then
+switch to it.
 
 ### Check out
 

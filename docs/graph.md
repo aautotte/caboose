@@ -17,6 +17,8 @@ to see them, click for their menus.
 - **Ctrl+click** adds or removes commits; **Shift+click** picks a range. With several commits picked, the details
   panel offers **Squash into one…**, **Rebase these…**, cherry-pick and copying their SHAs.
 - **Esc** clears the pick.
+- Clicking and the keys keep the list where it is, scrolling only as far as needed. A commit picked from
+  elsewhere (a branch in the panel, search, a link to a commit) that's off screen comes to the middle of the list.
 
 ![Three commits picked, with Squash into one and Rebase these in the details panel](images/guide/pick-commits.png)
 

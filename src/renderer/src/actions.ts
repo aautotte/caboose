@@ -1170,10 +1170,12 @@ async function runCheckout(repoId: string, ref: string): Promise<void> {
 }
 
 export async function createBranch(repoId: string, name: string, at: string, checkoutAfter: boolean): Promise<boolean> {
-  const ok = await attempt(() => call('branch.create', { repoId, name, at, checkout: checkoutAfter }), 'Couldn’t create the branch')
+  const r = await attempt(() => call('branch.create', { repoId, name, at, checkout: checkoutAfter }), 'Couldn’t create the branch')
   await loadRepo(repoId, { keepSelection: true })
-  if (ok === undefined) return false
-  toast({ tone: 'success', title: checkoutAfter ? `Created and switched to ${name}` : `Created ${name}` })
+  if (r === undefined) return false
+  // Made, but the switch was refused: the branch is there, so the dialog is done; this says what's in the way.
+  if (checkoutAfter && !r.switched) toast({ tone: 'info', title: `Created ${name}, but didn’t switch to it`, body: r.reason ?? undefined })
+  else toast({ tone: 'success', title: checkoutAfter ? `Created and switched to ${name}` : `Created ${name}` })
   return true
 }
 

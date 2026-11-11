@@ -1110,11 +1110,10 @@ export class RepoOps {
 
   // ---------- branches ----------
 
-  async createBranch(name: string, at: string, checkout: boolean): Promise<void> {
+  async createBranch(name: string, at: string): Promise<void> {
     await this.safeBranchName(name)
     this.safeRev(at)
     await this.mut(['branch', name, at])
-    if (checkout) await this.mut(['switch', name])
   }
 
   /** Accepts a local branch, a remote branch (creates a tracking branch), a tag or a sha (detached). */
@@ -1264,12 +1263,8 @@ export class RepoOps {
       if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
       return { result: 'ok' }
     } catch (e) {
-      if (e instanceof GcFail && /would be overwritten by (merge|checkout)|cannot pull with rebase|commit your changes or stash them|You have unstaged changes/i.test(e.detail ?? '')) {
-        // git lists the files it would overwrite, one per line, indented with a tab.
-        const files = [...(e.detail ?? '').matchAll(/^\t(.+)$/gm)].map((m) => m[1].trim())
-        const what = files.length ? (files.length > 5 ? `${files.slice(0, 5).join(', ')} and ${files.length - 5} more` : files.join(', ')) : 'Some files'
-        return { result: 'dirty', message: `${what} ${files.length === 1 ? 'has' : 'have'} uncommitted changes the pull would overwrite.` }
-      }
+      const blocked = e instanceof GcFail ? blockingFiles(e.detail ?? '') : null
+      if (blocked) return { result: 'dirty', message: inTheWay(blocked, 'the pull') }
       const op = await this.opState()
       if (op.kind === 'merge' || op.kind === 'rebase') return { result: 'conflicts' }
       if (e instanceof GcFail && /no tracking information/i.test(e.detail ?? '')) {
@@ -2618,6 +2613,25 @@ export class RepoOps {
     const st = await this.status()
     return st.changes.some((c) => c.worktree !== '?' || c.index !== '.')
   }
+}
+
+/**
+ * The files git says are in the way of a checkout, merge or pull: it lists them one per line, indented with a tab.
+ * `untracked` when they're files git doesn't track (git's "untracked working tree files would be overwritten").
+ */
+export function blockingFiles(detail: string): { what: string; count: number; untracked: boolean } | null {
+  if (!/would be overwritten by (merge|checkout)|cannot pull with rebase|commit your changes or stash them|You have unstaged changes/i.test(detail)) return null
+  const files = [...detail.matchAll(/^\t(.+)$/gm)].map((m) => m[1].trim())
+  const what = files.length ? (files.length > 5 ? `${files.slice(0, 5).join(', ')} and ${files.length - 5} more` : files.join(', ')) : 'Some files'
+  return { what, count: files.length, untracked: /untracked working tree files? would be/i.test(detail) }
+}
+
+/** "a.txt has uncommitted changes the pull would overwrite." or, for files git doesn't track, what to do with them. */
+export function inTheWay(b: { what: string; count: number; untracked: boolean }, by: string): string {
+  const one = b.count === 1
+  return b.untracked
+    ? `${b.what} ${one ? 'isn’t' : 'aren’t'} tracked, and ${by} would overwrite ${one ? 'it' : 'them'}. Move or delete ${one ? 'it' : 'them'} first.`
+    : `${b.what} ${one ? 'has' : 'have'} uncommitted changes ${by} would overwrite.`
 }
 
 const SIG: Record<string, CommitSignature['status']> = { G: 'good', U: 'untrusted', B: 'bad', E: 'unknown', X: 'expired', Y: 'expired', R: 'revoked' }
