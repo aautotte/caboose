@@ -1,6 +1,6 @@
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp, Workflow, Flag } from 'lucide-react'
-import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp, Workflow, Flag, GitPullRequest, CircleCheck, CircleX, CircleDot, ExternalLink } from 'lucide-react'
+import type { PullRequest, Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
@@ -93,6 +93,82 @@ function Section({
  * Git Flow, once it's set up: start a feature, release or hotfix, and finish the one checked out. Starting from the
  * branches the flow names, and finishing, merges it where it belongs (see the finish dialog).
  */
+/** The repository's open pull requests on GitHub: double-click (or Enter) checks one out. */
+function PullsSection({ repoId }: { repoId: string }): React.JSX.Element | null {
+  const pulls = useRepo(repoId, (r) => r.pulls)
+  const loading = useRepo(repoId, (r) => r.pullsLoading)
+  const selected = useRepo(repoId, (r) => r.selected)
+  if (!pulls || pulls.state === 'none') return null
+  const list = pulls.state === 'ok' ? pulls.pulls : []
+  const note =
+    pulls.state === 'signedOut' ? (
+      <div className="px-7 pb-2">
+        <Button size="sm" onClick={() => act.openDialog({ kind: 'githubSignIn' })}>
+          Sign in to GitHub
+        </Button>
+      </div>
+    ) : pulls.state === 'error' ? (
+      <p className="px-7 pb-2 text-sm text-danger">{pulls.message}</p>
+    ) : null
+  const checks = { success: 'checks passed', failure: 'checks failed', pending: 'checks running' } as const
+  const review = { approved: 'approved', changes: 'changes requested', required: 'review required' } as const
+  return (
+    <Section
+      title="Pull requests"
+      count={list.length}
+      empty={pulls.state === 'ok' ? 'No open pull requests' : pulls.state === 'signedOut' ? `Sign in to see ${pulls.repo}’s.` : 'Couldn’t list them.'}
+      note={note}
+      action={{ label: 'Refresh pull requests', icon: loading ? <Spinner size={14} /> : <RefreshCw size={14} />, disabled: loading, onClick: () => void act.loadPulls(repoId) }}
+    >
+      {list.map((pr) => (
+        <LeafRow
+          key={pr.number}
+          icon={<GitPullRequest size={14} />}
+          label={`#${pr.number} ${pr.title}`}
+          // What it shows, as it reads (the title, then the draft and review badges), then the rest.
+          name={[[`#${pr.number} ${pr.title}`, pr.draft ? 'draft' : '', pr.review && pr.review !== 'required' ? review[pr.review] : ''].filter(Boolean).join(' '), `by ${pr.author}`, pr.checks ? checks[pr.checks] : ''].filter(Boolean).join(', ')}
+          level={1}
+          selected={selected === pr.headSha}
+          title={`${pr.title}\n${pr.fromFork ? `${pr.author}:${pr.head}` : pr.head} → ${pr.base}, by ${pr.author}`}
+          onSelect={() => act.selectPull(repoId, pr)}
+          onActivate={() => void act.checkoutPull(repoId, pr)}
+          menu={() => pullMenu(repoId, pr)}
+          badges={
+            <>
+              {/* Read with the title: "#12 Add login approved", not "loginapproved". */}{' '}
+              {pr.draft ? <Badge label="draft">draft</Badge> : null}
+              {pr.review === 'approved' ? (
+                <Badge tone="success" label="approved">
+                  approved
+                </Badge>
+              ) : pr.review === 'changes' ? (
+                <Badge tone="warning" label="changes requested">
+                  changes
+                </Badge>
+              ) : null}
+              {pr.checks === 'success' ? (
+                <CircleCheck size={12} aria-hidden className="shrink-0 text-success" />
+              ) : pr.checks === 'failure' ? (
+                <CircleX size={12} aria-hidden className="shrink-0 text-danger" />
+              ) : pr.checks === 'pending' ? (
+                <CircleDot size={12} aria-hidden className="shrink-0 text-warning" />
+              ) : null}
+            </>
+          }
+        />
+      ))}
+    </Section>
+  )
+}
+
+function pullMenu(repoId: string, pr: PullRequest): MenuEntry[] {
+  return [
+    { type: 'item', label: pr.fromFork ? `Check out as pr/${pr.number}` : `Check out ${pr.head}`, icon: <GitBranch size={14} />, onSelect: () => void act.checkoutPull(repoId, pr) },
+    { type: 'item', label: 'Open on GitHub', icon: <ExternalLink size={14} />, onSelect: () => void window.open(pr.url, '_blank') },
+    { type: 'item', label: 'Copy link', onSelect: () => void navigator.clipboard.writeText(pr.url) }
+  ]
+}
+
 function FlowBar({ repoId }: { repoId: string }): React.JSX.Element | null {
   const flow = useRepo(repoId, (r) => r.flow)
   const head = useRepo(repoId, (r) => r.refs?.head.branch ?? null)
@@ -778,6 +854,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               ))}
             </Section>
             <FlowBar repoId={repoId} />
+            <PullsSection repoId={repoId} />
             <Section
               title="Remotes"
               // With one remote, its row is left out: the section stands for it, and counts its branches.

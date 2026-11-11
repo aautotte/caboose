@@ -17,7 +17,8 @@ Caboose runs the git installed on your computer. Whatever it does, you can see t
 
 4. [Branches, tags and stashes](branches-tags-stashes.md): recent branches, merge and rebase, Git Flow, tags,
    stashes, remotes.
-5. [Syncing with remotes](syncing.md): fetch, pull, push, several remotes, background fetch.
+5. [Syncing with remotes](syncing.md): fetch, pull, push, several remotes, background fetch, pull requests on
+   GitHub.
 6. [Undo](undo.md): what can be undone, and what can't.
 7. [File history, blame, compare and the reflog](history-and-blame.md)
 

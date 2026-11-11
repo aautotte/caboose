@@ -41,6 +41,7 @@ import { GcFail, invalid } from '../errors'
 import type { GitRunner, RunOptions, RunResult } from './runner'
 import { buildPartialPatch } from './patch'
 import { HOST_NAMES, webRepo, webUrl, type HostKind, type WebTarget } from './hosting'
+import { githubRepo } from '../github'
 import {
   HISTORY_FORMAT,
   LOG_FORMAT,
@@ -2331,6 +2332,36 @@ export class RepoOps {
   }
 
   // ---------- remotes ----------
+
+  /** The remote on github.com that pull requests come from: origin if it's there, else the first; its fetch or push URL. */
+  async githubRemote(): Promise<{ remote: string; repo: string } | null> {
+    const found = (await this.remotes()).map((r) => ({ remote: r.name, repo: githubRepo(r.fetchUrl) ?? githubRepo(r.pushUrl) })).filter((r): r is { remote: string; repo: string } => !!r.repo)
+    return found.find((r) => r.remote === 'origin') ?? found[0] ?? null
+  }
+
+  /**
+   * A pull request's branch, fetched: from this repository, its remote branch (remote/head); from a fork, GitHub's
+   * refs/pull/<n>/head into a local pr/<n>. That one only moves forward: commits made on it here are never dropped.
+   */
+  async fetchPull(remote: string, n: number, head: string, fork: boolean): Promise<{ ref: string; fork: boolean }> {
+    this.safeRev(remote)
+    if (!fork) {
+      await this.safeBranchName(head)
+      await this.mut(['fetch', '--no-tags', remote, `+refs/heads/${head}:refs/remotes/${remote}/${head}`], { timeoutMs: 300_000 })
+      return { ref: `${remote}/${head}`, fork: false }
+    }
+    const local = `pr/${n}`
+    try {
+      if ((await this.status()).branch === local) {
+        await this.mut(['fetch', '--no-tags', remote, `refs/pull/${n}/head`], { timeoutMs: 300_000 })
+        await this.mut(['merge', '--ff-only', '-q', 'FETCH_HEAD'])
+      } else await this.mut(['fetch', '--no-tags', remote, `refs/pull/${n}/head:refs/heads/${local}`], { timeoutMs: 300_000 })
+    } catch (e) {
+      if (e instanceof GcFail && /non-fast-forward|rejected|Not possible to fast-forward/i.test(e.detail ?? '')) throw invalid(`${local} has commits of its own that the pull request doesn’t. Rename or delete ${local} to check the pull request out fresh.`)
+      throw e
+    }
+    return { ref: local, fork: true }
+  }
 
   async remotes(): Promise<Remote[]> {
     const out = await this.git(['remote', '-v'])

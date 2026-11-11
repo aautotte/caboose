@@ -1,6 +1,10 @@
 // The IPC contract. Every channel: input and output types. Main validates inputs with zod (main/ipc/schemas.ts).
 import type {
   ActivityEntry,
+  DeviceCode,
+  GitHubUser,
+  PullRequest,
+  PullsResult,
   AgentState,
   AuthorChange,
   AuthPromptEvent,
@@ -295,6 +299,19 @@ export interface Api {
   'shell.open': { in: R & { target: 'folder' | 'terminal' | 'editor'; path?: string; worktree?: string }; out: null }
   'file.externalDiff': { in: R & { path: string; staged: boolean }; out: null }
   'file.externalMerge': { in: R & { path: string }; out: null }
+  /** Who's signed in to GitHub in this profile; canKeep false when the system can't encrypt the sign-in. */
+  'github.status': { in: Record<string, never>; out: { user: GitHubUser | null; canKeep: boolean } }
+  'github.startSignIn': { in: Record<string, never>; out: DeviceCode }
+  /** Copies the code and opens GitHub's page for it. */
+  'github.openDevicePage': { in: { userCode: string; verificationUri: string }; out: null }
+  /** Waits until the code is approved at GitHub (or refused, or cancelled). */
+  'github.waitSignIn': { in: Record<string, never>; out: GitHubUser }
+  'github.cancelSignIn': { in: Record<string, never>; out: null }
+  'github.useGhCli': { in: Record<string, never>; out: GitHubUser }
+  'github.signOut': { in: Record<string, never>; out: null }
+  'github.pulls': { in: R; out: PullsResult }
+  /** Brings a pull request's branch here: the remote branch (same repository), or pr/<number> for a fork's. */
+  'github.fetchPull': { in: R & { number: number; head: string; fromFork: boolean }; out: { ref: string; fork: boolean } }
   'ssh.keys': { in: Record<string, never>; out: SshKey[] }
   'ssh.generate': { in: { name: string; comment: string; passphrase: string }; out: SshKey }
   'ssh.agent': { in: Record<string, never>; out: AgentState }

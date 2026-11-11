@@ -15,6 +15,7 @@ import { defaultCommand, launch } from '../tools'
 import { KEY_PAGES, addToAgent, agentState, generateKey, listKeys, testConnection } from '../ssh'
 import { shell } from 'electron'
 import type { Askpass } from '../askpass'
+import type { GitHub } from '../github'
 import type { Profiles } from '../profiles'
 import { gpuState, setGpu } from '../gpu'
 import { homedir } from 'node:os'
@@ -56,9 +57,10 @@ interface Deps {
   forgetRepoConfig: () => void
   tmpDir: string
   isTrustedSender: (e: IpcMainInvokeEvent) => boolean
+  github: GitHub
 }
 
-export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig, tmpDir, isTrustedSender }: Deps): void {
+export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig, tmpDir, isTrustedSender, github }: Deps): void {
   const progress = (id: string) => (phase: string, percent?: number, done?: number, total?: number) => {
     const ev: ProgressEvent = { opId: id, phase, percent, done, total }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('op:progress', ev)
@@ -938,6 +940,45 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   })
   handle('file.externalDiff', z.object({ ...R, path: z.string().min(1).max(4096), staged: z.boolean() }), async ({ repoId, path, staged }) => (await ops(repoId).externalTool('diff', path, staged), null))
   handle('file.externalMerge', z.object({ ...R, path: z.string().min(1).max(4096) }), async ({ repoId, path }) => (await ops(repoId).externalTool('merge', path, false), null))
+
+  // ---------- GitHub ----------
+  const none = z.object({})
+  handle('github.status', none, async () => {
+    // A token GitHub turned down is forgotten; without a network, the sign-in stays as it was.
+    let user = null
+    try {
+      user = await github.user()
+    } catch {
+      user = github.token() ? { login: '…', name: null } : null
+    }
+    return { user, canKeep: github.canKeep() }
+  })
+  handle('github.startSignIn', none, () => github.startSignIn())
+  handle('github.openDevicePage', z.object({ userCode: z.string().min(1).max(40), verificationUri: z.string().url().max(500) }), async ({ userCode, verificationUri }) => {
+    if (!/^https:\/\/github\.com\//.test(verificationUri) && process.env.GC_TEST !== '1') throw invalid('That isn’t GitHub’s page.')
+    clipboard.writeText(userCode)
+    await shell.openExternal(verificationUri)
+    return null
+  })
+  handle('github.waitSignIn', none, () => github.waitForApproval())
+  handle('github.cancelSignIn', none, () => (github.cancelSignIn(), null))
+  handle('github.useGhCli', none, () => github.useGhCli())
+  handle('github.signOut', none, () => (github.signOut(), null))
+  handle('github.pulls', z.object(R), async ({ repoId }) => {
+    const gh = await ops(repoId).githubRemote()
+    if (!gh) return { state: 'none' as const }
+    if (!github.token()) return { state: 'signedOut' as const, repo: gh.repo }
+    try {
+      return { state: 'ok' as const, repo: gh.repo, remote: gh.remote, pulls: await github.pulls(gh.repo) }
+    } catch (e) {
+      return { state: 'error' as const, repo: gh.repo, message: (e as Error).message }
+    }
+  })
+  handle('github.fetchPull', z.object({ ...R, number: z.number().int().min(1), head: z.string().min(1).max(255), fromFork: z.boolean() }), async ({ repoId, number, head, fromFork }) => {
+    const gh = await ops(repoId).githubRemote()
+    if (!gh) throw invalid('This repository has no remote on GitHub.')
+    return exclusive(repoId, () => ops(repoId).fetchPull(gh.remote, number, head, fromFork))
+  })
 
   // ---------- SSH keys (Settings) ----------
   handle('ssh.keys', z.object({}), () => listKeys())

@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ClipboardPaste, Combine, Copy, Eraser, FileDiff, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListFilter, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload, UserPen } from 'lucide-react'
-import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
+import type { CommitRow, GraphColumn, GraphColumnKey, PullRequest, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
 import { fullDate, relativeTime, shortSha } from '@/lib/format'
@@ -234,6 +234,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const layout = useRepo(repoId, (r) => r.layout)
   const refs = useRepo(repoId, (r) => r.refs)
   const status = useRepo(repoId, (r) => r.status)
+  const pulls = useRepo(repoId, (r) => r.pulls)
   const selected = useRepo(repoId, (r) => r.selected)
   const multi = useRepo(repoId, (r) => r.multi)
   const hits = useRepo(repoId, (r) => r.searchHits)
@@ -536,7 +537,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
                     onMouseLeave={() => setHoverSha(null)}
                   >
                     {rowRefs.slice(0, 1).map((r) => (
-                      <DraggableRef key={r.key} r={r} lane={lay?.color ?? 0} onDrop={(t) => setDrop(t)} repoId={repoId} />
+                      <DraggableRef key={r.key} r={r} lane={lay?.color ?? 0} onDrop={(t) => setDrop(t)} repoId={repoId} pr={pulls?.state === 'ok' ? act.pullFor(repoId, r.name) : undefined} />
                     ))}
                     {rowRefs.length > 1 ? (
                       // Only the first branch gets a pill; the rest are one click away, with the same actions as the row menu.
@@ -633,7 +634,7 @@ function GraphSkeleton(): React.JSX.Element {
   )
 }
 
-function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number; onDrop: (t: DropTarget) => void; repoId: string }): React.JSX.Element {
+function DraggableRef({ r, lane, onDrop, repoId, pr }: { r: DisplayRef; lane: number; onDrop: (t: DropTarget) => void; repoId: string; /** The pull request this branch is for. */ pr?: PullRequest }): React.JSX.Element {
   const [over, setOver] = useState(false)
   const canDrag = r.kind !== 'tag'
   return (
@@ -662,9 +663,14 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
         if (src.repoId !== repoId || src.name === r.name) return
         onDrop({ source: src.name, sourceKind: src.kind, target: r.name, targetKind: r.kind, x: e.clientX, y: e.clientY })
       }}
-      className={cn('min-w-0 rounded-sm', r.kind === 'remote' && 'cursor-pointer', over && 'outline-2 outline-dashed outline-accent')}
+      className={cn('inline-flex min-w-0 items-center rounded-sm', r.kind === 'remote' && 'cursor-pointer', over && 'outline-2 outline-dashed outline-accent')}
     >
       <RefPill name={r.label} kind={r.kind} remote={r.remote} lane={lane} current={r.isHead} />
+      {pr ? (
+        <span title={`Pull request #${pr.number}: ${pr.title}`} className="ml-1 shrink-0 text-xs text-muted">
+          #{pr.number}
+        </span>
+      ) : null}
     </span>
   )
 }
