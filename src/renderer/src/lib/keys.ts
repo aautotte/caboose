@@ -63,6 +63,8 @@ const RESERVED: Record<string, string> = {
   'Ctrl+Enter': 'committing',
   'Ctrl+Tab': 'the next tab',
   'Ctrl+Shift+Tab': 'the previous tab',
+  'Ctrl+Shift+←': 'moving a tab left',
+  'Ctrl+Shift+→': 'moving a tab right',
   'Ctrl+Home': 'the first commit',
   'Ctrl+End': 'the last commit',
   'Alt+F4': 'closing the window',
