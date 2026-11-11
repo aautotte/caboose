@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowKind, GraphColumn, GraphFilter, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowFinished, FlowKind, GraphColumn, GraphFilter, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural, refLabel } from './lib/format'
@@ -2335,36 +2335,53 @@ export function flowBranch(repoId: string, branch: string | null | undefined): {
   return null
 }
 
-export async function flowInit(repoId: string, config: FlowConfig): Promise<boolean> {
-  const ok = await attempt(() => call('flow.init', { repoId, config }), 'Couldn’t set up Git Flow')
-  await loadRepo(repoId, { keepSelection: true })
-  if (ok === undefined) return false
+// The Git Flow dialogs show what went wrong themselves, so these return it (null when it worked) rather than a toast.
+const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+export async function flowInit(repoId: string, config: FlowConfig): Promise<string | null> {
+  try {
+    await call('flow.init', { repoId, config })
+  } catch (err) {
+    return reason(err)
+  } finally {
+    await loadRepo(repoId, { keepSelection: true })
+  }
   toast({ tone: 'success', title: 'Git Flow is set up', body: `Features start from ${config.develop}, releases go to ${config.production}.` })
-  return true
+  return null
 }
 
-export async function flowStart(repoId: string, kind: FlowKind, name: string): Promise<boolean> {
-  const branch = await attempt(() => call('flow.start', { repoId, kind, name }), `Couldn’t start the ${kind}`)
-  await loadRepo(repoId, { keepSelection: true })
-  if (branch === undefined) return false
+export async function flowStart(repoId: string, kind: FlowKind, name: string): Promise<string | null> {
+  let branch: string
+  try {
+    branch = await call('flow.start', { repoId, kind, name })
+  } catch (err) {
+    return reason(err)
+  } finally {
+    await loadRepo(repoId, { keepSelection: true })
+  }
   toast({ tone: 'success', title: `Started ${branch}`, body: 'It’s checked out. Finish it from the Git Flow buttons when it’s done.' })
-  return true
+  return null
 }
 
-export async function flowFinish(repoId: string, kind: FlowKind, name: string, keep: boolean, tagMessage: string): Promise<boolean> {
+export async function flowFinish(repoId: string, kind: FlowKind, name: string, keep: boolean, tagMessage: string): Promise<string | null> {
   const branch = `${useApp.getState().repos[repoId]?.flow?.prefix[kind] ?? ''}${name}`
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: `Finishing ${branch}…` } }))
-  const done = await attempt(() => call('flow.finish', { repoId, kind, name, keep, tagMessage }), `Couldn’t finish ${branch}`)
-  patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: undefined } }))
-  await loadRepo(repoId, { keepSelection: true })
-  if (done === undefined) return false
+  let done: FlowFinished
+  try {
+    done = await call('flow.finish', { repoId, kind, name, keep, tagMessage })
+  } catch (err) {
+    return reason(err)
+  } finally {
+    patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: undefined } }))
+    await loadRepo(repoId, { keepSelection: true })
+  }
   const what = [
     done.merged.length ? `Merged into ${done.merged.join(' and ')}` : 'It was already merged',
     done.tag ? `tagged ${done.tag}` : '',
     done.deleted ? `${branch} deleted` : keep ? '' : `${branch} kept: it isn’t merged into the remote branch it tracks`
   ].filter(Boolean)
   toast({ tone: 'success', title: `Finished ${branch}`, body: `${what.join(', ')}.` })
-  return true
+  return null
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {
