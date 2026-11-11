@@ -91,6 +91,31 @@ To move only some of a branch's commits onto another branch, see
 default. [Undo](undo.md) brings back the local branch only: what's deleted on the remote stays deleted, and
 everyone who uses that remote loses it too. The dialog says so under the checkbox.
 
+### Git Flow
+
+Git Flow keeps two long-lived branches, production (`main`) and `develop`, and short ones for each piece of work:
+
+| | starts from | finishes into |
+| --- | --- | --- |
+| Feature (`feature/…`) | develop | develop |
+| Release (`release/1.2.0`) | develop | production, tagged with its version, then develop |
+| Hotfix (`hotfix/1.2.1`) | production | production, tagged, then develop |
+
+**Set up Git Flow…**, in the **Local branches** header's right-click menu, names the production and develop
+branches (develop is made from production if it isn't there), the prefixes, and a prefix for version tags (`v`
+makes `v1.2.0`). It writes the same `gitflow.*` settings as the `git-flow` tool, so a repository set up with either
+works with both, and nothing needs installing.
+
+Once it's set up, a **Git Flow** block under the local branches has **Feature**, **Release** and **Hotfix** to
+start one: it's made from the right branch and checked out. There's one release and one hotfix at a time.
+**Finish…** (in that block when one is checked out, or on the branch's menu) lists what it will do, then merges
+with a merge commit, tags a release or hotfix, deletes the branch unless you tick **Keep**, and checks out develop.
+Commit or stash your changes first. The [command palette](everything-else.md#command-palette) has them all too: type `git flow`.
+
+If a merge stops on [conflicts](conflicts.md), resolve them and commit the merge, then finish again: the steps
+already done are skipped. [Undo](undo.md) doesn't cover a finish; each step is an ordinary merge or tag you can
+undo by hand.
+
 ## Several at once
 
 Ctrl+click or Shift+click branches, tags, remote branches or stashes in the panel to pick several, then right-click:

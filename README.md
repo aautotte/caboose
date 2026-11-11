@@ -74,6 +74,8 @@ works offline, and it doesn't phone home.
   them at once, on the remote too. The dialog says that undo only brings back the local side.
 - Merge or rebase by dragging one branch onto another. Merge with a merge commit every time (`--no-ff`), or squash
   a branch into one commit.
+- Git Flow without installing anything: start and finish features, releases and hotfixes. Releases are tagged, and
+  a finish that stops on conflicts carries on once they're resolved.
 - Pull or fast-forward a branch without switching to it. Double-click a remote branch to fast-forward the local one
   and check it out, or reset it when it can't fast-forward.
 - Reset a local branch to a remote branch from its menu.

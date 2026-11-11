@@ -7,6 +7,7 @@ import { uuid } from '../db'
 import { GcFail, invalid } from '../errors'
 import type { GitRunner } from '../git/runner'
 import { UNDO_REFS, samePath } from '../git/ops'
+import { flowConfig, flowFinish, flowInit, flowStart } from '../git/flow'
 import type { Repos } from '../repos'
 import type { UndoStack } from '../undo'
 import type { GraphLayouts, Prefs, RefView, RepoPrefs } from '../settings'
@@ -342,6 +343,21 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     else await ops(repoId).createBranch(name, at, false)
     return null
   })
+  // ---------- Git Flow ----------
+  const flowKind = z.enum(['feature', 'release', 'hotfix'])
+  const branchPart = z.string().min(1).max(200)
+  const flowSettings = z.object({
+    production: branchPart,
+    develop: branchPart,
+    prefix: z.object({ feature: branchPart, release: branchPart, hotfix: branchPart }),
+    tagPrefix: z.string().max(100)
+  })
+  handle('flow.config', z.object(R), ({ repoId }) => flowConfig(ops(repoId)))
+  handle('flow.init', z.object({ ...R, config: flowSettings }), ({ repoId, config }) => exclusive(repoId, async () => (await flowInit(ops(repoId), config), null)))
+  handle('flow.start', z.object({ ...R, kind: flowKind, name: branchPart }), ({ repoId, kind, name }) => exclusive(repoId, () => flowStart(ops(repoId), kind, name)))
+  handle('flow.finish', z.object({ ...R, kind: flowKind, name: branchPart, keep: z.boolean(), tagMessage: z.string().max(100_000) }), ({ repoId, kind, name, keep, tagMessage }) =>
+    exclusive(repoId, () => flowFinish(ops(repoId), kind, name, { keep, tagMessage }))
+  )
   handle('bisect.start', z.object({ ...R, bad: ref, good: ref }), ({ repoId, bad, good }) => exclusive(repoId, async () => (await ops(repoId).bisectStart(bad, good), null)))
   handle('bisect.mark', z.object({ ...R, verdict: z.enum(['good', 'bad', 'skip']), sha: ref.optional() }), ({ repoId, verdict, sha }) =>
     exclusive(repoId, async () => (await ops(repoId).bisectMark(verdict, sha), null))
