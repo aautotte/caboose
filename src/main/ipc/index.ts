@@ -11,7 +11,7 @@ import type { Repos } from '../repos'
 import type { UndoStack } from '../undo'
 import type { GraphLayouts, Prefs, RefView, RepoPrefs } from '../settings'
 import { defaultCommand, launch } from '../tools'
-import { generateKey, listKeys } from '../ssh'
+import { KEY_PAGES, addToAgent, agentState, generateKey, listKeys, testConnection } from '../ssh'
 import { shell } from 'electron'
 import type { Askpass } from '../askpass'
 import type { Profiles } from '../profiles'
@@ -919,6 +919,18 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('ssh.generate', z.object({ name: z.string().min(1).max(64), comment: z.string().max(200), passphrase: z.string().max(200) }), ({ name, comment, passphrase }) =>
     generateKey(name, comment, passphrase)
   )
+  const keyName = z.string().min(1).max(64)
+  handle('ssh.agent', z.object({}), () => agentState())
+  handle('ssh.addToAgent', z.object({ name: keyName }), async ({ name }) => (await addToAgent(name, askpass.env()), null))
+  handle('ssh.test', z.object({ target: z.string().min(1).max(300), key: keyName.nullable() }), ({ target, key }) => testConnection(target, key))
+  // Copies the public key and opens the host's page for a new key, where it's pasted.
+  handle('ssh.addToHost', z.object({ name: keyName, host: z.enum(['github', 'gitlab', 'bitbucket', 'azure']) }), async ({ name, host }) => {
+    const key = listKeys().find((k) => k.name === name)
+    if (!key) throw invalid('That key isn’t in your .ssh folder any more.')
+    clipboard.writeText(key.publicKey)
+    await shell.openExternal(KEY_PAGES[host])
+    return KEY_PAGES[host]
+  })
 
   // ---------- hide / show many; rewriting the current branch ----------
   handle(

@@ -13,7 +13,8 @@ restart Caboose. Check that `git --version` prints 2.30 or newer.
 
 Caboose passes sign-in to git, so set up a credential manager (Git Credential Manager comes with Git for Windows)
 or use SSH. For SSH, add your public key to your git host: [Settings → SSH keys](settings.md#ssh-keys) lists your
-keys and can make one.
+keys, can make one, open your host's page to add it, and test that the host accepts it. A key with a passphrase
+asks for it on every fetch unless it's in ssh-agent: **Add to ssh-agent**, on the key's menu there.
 
 Background fetch never asks for a password. If signing in fails, it waits for you to fetch by hand.
 

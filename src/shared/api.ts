@@ -1,6 +1,7 @@
 // The IPC contract. Every channel: input and output types. Main validates inputs with zod (main/ipc/schemas.ts).
 import type {
   ActivityEntry,
+  AgentState,
   AuthorChange,
   AuthPromptEvent,
   Blame,
@@ -20,7 +21,9 @@ import type {
   RebaseRow,
   RebaseStep,
   RefViewState,
+  SshHost,
   SshKey,
+  SshTest,
   Remote,
   ResetMode,
   CommitDetails,
@@ -285,6 +288,12 @@ export interface Api {
   'file.externalMerge': { in: R & { path: string }; out: null }
   'ssh.keys': { in: Record<string, never>; out: SshKey[] }
   'ssh.generate': { in: { name: string; comment: string; passphrase: string }; out: SshKey }
+  'ssh.agent': { in: Record<string, never>; out: AgentState }
+  'ssh.addToAgent': { in: { name: string }; out: null }
+  /** target: a host, or user@host:port. key: one from ~/.ssh, or null for whatever ssh picks. */
+  'ssh.test': { in: { target: string; key: string | null }; out: SshTest }
+  /** Copies the public key and opens the host's page for adding one; returns that page. */
+  'ssh.addToHost': { in: { name: string; host: SshHost }; out: string }
 }
 
 export type Channel = keyof Api

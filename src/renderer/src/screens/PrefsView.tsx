@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Copy, KeyRound, X } from 'lucide-react'
-import type { GitConfigKey, GitIdentity, GpuState, PullMode, SshKey, SubmoduleMode, SubmoduleSettings } from '../../../shared/types'
-import { Button, Field, IconButton, Select, Switch, TextInput } from '@/ui'
+import { Copy, KeyRound, MoreHorizontal, X } from 'lucide-react'
+import type { AgentState, GitConfigKey, GitIdentity, GpuState, PullMode, SshHost, SshKey, SshTest, SubmoduleMode, SubmoduleSettings } from '../../../shared/types'
+import { Badge, Button, DropdownMenu, Field, IconButton, Select, Switch, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { DIFF_CONTEXT_STEPS, setPrefs, useApp, type DiffMode } from '@/store'
@@ -632,7 +632,12 @@ function SshKeys(): React.JSX.Element {
   const [label, setLabel] = useState('')
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
-  const load = useCallback(() => void call('ssh.keys', {}).then(setKeys).catch((e) => act.fail(e, 'Couldn’t read your SSH keys')), [])
+  const [agent, setAgent] = useState<AgentState | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)
+  const load = useCallback(() => {
+    void call('ssh.keys', {}).then(setKeys).catch((e) => act.fail(e, 'Couldn’t read your SSH keys'))
+    void call('ssh.agent', {}).then(setAgent).catch(() => setAgent({ running: false, keys: [] }))
+  }, [])
   useEffect(load, [load])
   const create = async (): Promise<void> => {
     setBusy(true)
@@ -648,8 +653,36 @@ function SshKeys(): React.JSX.Element {
       setBusy(false)
     }
   }
+  const addToAgent = async (name: string): Promise<void> => {
+    setAdding(name)
+    try {
+      await call('ssh.addToAgent', { name })
+      toast({ tone: 'success', title: `Added ${name} to ssh-agent`, body: 'Git can use it without asking for its passphrase until you sign out.' })
+      load()
+    } catch (err) {
+      act.fail(err, `Couldn’t add ${name} to ssh-agent`)
+    } finally {
+      setAdding(null)
+    }
+  }
+  const toHost = async (name: string, host: SshHost): Promise<void> => {
+    try {
+      await call('ssh.addToHost', { name, host })
+      toast({ tone: 'success', title: `Opened ${HOSTS[host].label}’s page for a new SSH key`, body: 'The public key is on your clipboard: paste it there and save.' })
+    } catch (err) {
+      act.fail(err, 'Couldn’t open the page')
+    }
+  }
+  const inAgent = (k: SshKey): boolean => !!agent?.keys.includes(k.publicKey.trim().split(/\s+/).slice(0, 2).join(' '))
   return (
     <div className="flex flex-col gap-3 py-3">
+      {agent ? (
+        <p role="status" aria-label="ssh-agent" className={cn('text-sm', agent.running ? 'text-muted' : 'text-warning')}>
+          {agent.running
+            ? `ssh-agent is running, with ${agent.keys.length === 1 ? '1 key' : `${agent.keys.length} keys`}. A key with a passphrase asks for it once there, not on every fetch.`
+            : 'ssh-agent isn’t running, so a key with a passphrase asks for it every time. Start the agent to add keys to it.'}
+        </p>
+      ) : null}
       {keys === null ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : keys.length === 0 ? (
@@ -665,12 +698,30 @@ function SshKeys(): React.JSX.Element {
                   {k.type} {k.comment}
                 </p>
               </div>
+              {inAgent(k) ? <Badge tone="success">In ssh-agent</Badge> : null}
               <Button
                 size="sm"
                 onClick={() => void navigator.clipboard.writeText(k.publicKey).then(() => toast({ tone: 'success', title: 'Public key copied' }))}
               >
                 <Copy size={14} aria-hidden /> Copy public key
               </Button>
+              <DropdownMenu
+                trigger={
+                  <IconButton size="sm" label={`More for ${k.name}`}>
+                    <MoreHorizontal size={14} />
+                  </IconButton>
+                }
+                items={[
+                  {
+                    type: 'item',
+                    label: inAgent(k) ? 'Already in ssh-agent' : adding === k.name ? 'Adding to ssh-agent…' : 'Add to ssh-agent',
+                    disabled: inAgent(k) || !agent?.running || adding !== null,
+                    onSelect: () => void addToAgent(k.name)
+                  },
+                  { type: 'separator' },
+                  ...(Object.keys(HOSTS) as SshHost[]).map((h) => ({ type: 'item' as const, label: `Add to ${HOSTS[h].label}…`, onSelect: () => void toHost(k.name, h) }))
+                ]}
+              />
             </li>
           ))}
         </ul>
@@ -691,6 +742,78 @@ function SshKeys(): React.JSX.Element {
           </Button>
         </div>
       </form>
+      <SshTestForm keys={keys ?? []} />
     </div>
+  )
+}
+
+const HOSTS: Record<SshHost, { label: string; host: string }> = {
+  github: { label: 'GitHub', host: 'github.com' },
+  gitlab: { label: 'GitLab', host: 'gitlab.com' },
+  bitbucket: { label: 'Bitbucket', host: 'bitbucket.org' },
+  azure: { label: 'Azure DevOps', host: 'ssh.dev.azure.com' }
+}
+
+/** ssh -T to a host: does it know one of your keys, and as whom. */
+function SshTestForm({ keys }: { keys: SshKey[] }): React.JSX.Element {
+  const [host, setHost] = useState<string>('github.com')
+  const [other, setOther] = useState('')
+  const [key, setKey] = useState('any')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<SshTest | null>(null)
+  const target = host === 'other' ? other.trim() : host
+  const test = async (): Promise<void> => {
+    if (!target || busy) return
+    setBusy(true)
+    setResult(null)
+    try {
+      setResult(await call('ssh.test', { target, key: key === 'any' ? null : key }))
+    } catch (err) {
+      act.fail(err, 'Couldn’t test the connection')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form
+      aria-label="Test an SSH connection"
+      className="flex flex-col gap-2 border-t border-border pt-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void test()
+      }}
+    >
+      <p className="text-base font-medium text-text">Test a connection</p>
+      <p className="text-sm text-muted">Signs in to a Git host over SSH, the way a fetch does, and says whose key it is. It never asks for anything: add a key with a passphrase to ssh-agent first.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-text">Host</span>
+          <Select label="Host" value={host} onValueChange={setHost} options={[...Object.values(HOSTS).map((h) => ({ value: h.host, label: h.host })), { value: 'other', label: 'Another host…' }]} />
+        </div>
+        {host === 'other' ? (
+          <div className="w-56">
+            <Field label="Other host">{(p) => <TextInput {...p} value={other} placeholder="git@git.example.com:2222" onChange={(e) => setOther(e.target.value)} />}</Field>
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-text">Key</span>
+          <Select label="Key" value={key} onValueChange={setKey} options={[{ value: 'any', label: 'Whichever ssh picks' }, ...keys.map((k) => ({ value: k.name, label: k.name }))]} />
+        </div>
+        <Button type="submit" loading={busy} disabled={!target}>
+          Test the connection
+        </Button>
+      </div>
+      {result ? (
+        <div role="status" aria-label="Connection test" className={cn('flex flex-col gap-1 text-sm', result.ok ? 'text-success' : 'text-danger')}>
+          <p>{result.message}</p>
+          {result.output ? (
+            <details className="text-muted">
+              <summary className="cursor-default">What ssh said</summary>
+              <pre className="mt-1 font-mono text-xs whitespace-pre-wrap">{result.output}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+    </form>
   )
 }
