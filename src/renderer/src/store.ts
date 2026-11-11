@@ -3,6 +3,7 @@ import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, Pull
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 import type { CommandContext, CustomCommand } from './lib/custom'
+import type { CommitRules } from './lib/commitRules'
 
 export type Center =
   | { kind: 'graph' }
@@ -57,6 +58,8 @@ export interface RepoState {
   graphWidth: number | null
   /** The Branch / tag column's width, if the user dragged it; null follows the window. */
   refsWidth: number | null
+  /** This repository's commit message rules (Settings › This repository); null for none. */
+  commitRules: CommitRules | null
   /** The commit message being written. Kept here, not in the panel, so it survives looking at other commits. */
   draft: { summary: string; body: string }
   /** Read when the repository opens and after "Check again"; null until then. */
@@ -247,6 +250,7 @@ export const emptyRepo = (): RepoState => ({
   focusHead: false,
   graphWidth: null,
   refsWidth: null,
+  commitRules: null,
   draft: { summary: '', body: '' },
   lfs: null,
   lfsDismissed: false,

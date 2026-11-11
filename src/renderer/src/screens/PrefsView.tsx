@@ -8,6 +8,7 @@ import { DIFF_CONTEXT_STEPS, setPrefs, useApp, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { toast } from '@/ui/toastBus'
 import { CommandsGroup, ShortcutsGroup } from './KeysPrefs'
+import { DEFAULT_RULES, ISSUE_KEY, hasRules, patternProblem, type CommitRules } from '@/lib/commitRules'
 
 const sections = [
   { id: 'general', label: 'General' },
@@ -21,6 +22,7 @@ const sections = [
   { id: 'shortcuts', label: 'Keyboard shortcuts' },
   { id: 'ssh', label: 'SSH keys' },
   { id: 'repo', label: 'This repository' },
+  { id: 'commit-rules', label: 'Commit rules' },
   { id: 'submodules', label: 'Submodules' }
 ] as const
 
@@ -207,6 +209,10 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
             <Group id="repo" title={`This repository: ${tab?.alias ?? tab?.name ?? ''}`} note="Overrides your global name and email for commits in this repository only, for example a work address. Leave both empty to use the global ones.">
               <IdentityForm repoId={repoId} />
               <SigningForm repoId={repoId} />
+            </Group>
+
+            <Group id="commit-rules" title="Commit rules" note="For this repository, on this computer. The commit box checks your message as you type. Merge, revert and fixup! messages aren’t checked.">
+              <CommitRulesForm repoId={repoId} />
             </Group>
 
             {hasSubmodules ? <SubmoduleGroup repoId={repoId} /> : null}
@@ -514,6 +520,81 @@ function SigningForm({ repoId }: { repoId: string | undefined }): React.JSX.Elem
       {!repoId ? (
         <Row label="Commit message template" help="A file whose text pre-fills the commit message (commit.template).">
           <TextSetting label="Commit message template" mono value={values['commit.template'] ?? ''} placeholder="~/.gitmessage" onSave={(v) => save('commit.template', v || null)} />
+        </Row>
+      ) : null}
+    </>
+  )
+}
+
+/** This repository's commit message rules, which the commit box checks as you type. */
+function CommitRulesForm({ repoId }: { repoId: string }): React.JSX.Element {
+  const saved = useApp((s) => s.repos[repoId]?.commitRules ?? null)
+  const rules = saved ?? DEFAULT_RULES
+  const change = (patch: Partial<CommitRules>): void => void act.setCommitRules(repoId, { ...rules, ...patch })
+  return (
+    <>
+      <Row label="Summary length" help="The longest summary allowed. The count next to the summary turns red past it.">
+        <Select
+          label="Summary length"
+          value={String(rules.summaryMax ?? 0)}
+          onValueChange={(v) => change({ summaryMax: Number(v) || null })}
+          options={[0, 50, 72, 100].map((n) => ({ value: String(n), label: n ? `${n} characters` : 'No limit' }))}
+        />
+      </Row>
+      <Row label="Conventional Commits" help="The summary starts with a type, then a colon: “feat: add search”, “fix(api): time out after 5 s”, “feat!: …” for a breaking change.">
+        <Switch hideLabel label="Conventional Commits" checked={rules.conventional} onCheckedChange={(v) => change({ conventional: v })} />
+      </Row>
+      {rules.conventional ? (
+        <Row label="Types" help="The ones this repository uses, separated by commas.">
+          <TextSetting
+            label="Types"
+            mono
+            value={rules.types.join(', ')}
+            onSave={(v) => {
+              const types = v.split(/[\s,]+/).filter(Boolean)
+              if (!types.length || types.some((t) => !/^[a-z][a-z0-9-]*$/.test(t))) return toast({ tone: 'error', title: 'Types are lowercase words', body: 'Like feat, fix, docs, separated by commas.' })
+              change({ types: [...new Set(types)] })
+            }}
+          />
+        </Row>
+      ) : null}
+      <Row label="Mention an issue" help="The message has to name one, like ABC-123.">
+        <Select
+          label="Mention an issue"
+          value={rules.issue?.where ?? 'off'}
+          onValueChange={(v) => change({ issue: v === 'off' ? null : { pattern: rules.issue?.pattern ?? ISSUE_KEY, where: v as 'summary' | 'anywhere' } })}
+          options={[
+            { value: 'off', label: 'Not needed' },
+            { value: 'summary', label: 'In the summary' },
+            { value: 'anywhere', label: 'Anywhere in the message' }
+          ]}
+        />
+      </Row>
+      {rules.issue ? (
+        <Row label="Issue pattern" help="A regular expression. The usual one matches keys like ABC-123; #\d+ matches GitHub’s #42.">
+          <TextSetting
+            label="Issue pattern"
+            mono
+            value={rules.issue.pattern}
+            onSave={(v) => {
+              const problem = v ? patternProblem(v) : 'Write a pattern, or choose Not needed above.'
+              if (problem) return toast({ tone: 'error', title: 'Couldn’t use that pattern', body: problem })
+              change({ issue: { ...rules.issue!, pattern: v } })
+            }}
+          />
+        </Row>
+      ) : null}
+      {hasRules(saved) ? (
+        <Row label="When a message doesn’t fit" help="Warn says what’s wrong under the message. Hold back the commit also keeps the Commit button off until it fits.">
+          <Select
+            label="When a message doesn’t fit"
+            value={rules.enforce}
+            onValueChange={(v) => change({ enforce: v as CommitRules['enforce'] })}
+            options={[
+              { value: 'warn', label: 'Warn' },
+              { value: 'block', label: 'Hold back the commit' }
+            ]}
+          />
         </Row>
       ) : null}
     </>

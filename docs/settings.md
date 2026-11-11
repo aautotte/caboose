@@ -107,6 +107,13 @@ Settings for the repository in the current tab only:
 - **Sign commits here**: use the global setting, or turn signing on or off for this repository.
 - **Signing key**: empty uses your global key.
 
+## Commit rules
+
+Rules for this repository's commit messages, kept on this computer: a summary length, Conventional Commits (with
+the types to accept), and an issue to mention (in the summary or anywhere, with the pattern to look for). Once one
+is on, **When a message doesn't fit** chooses between **Warn** and **Hold back the commit**. See
+[Commit rules](staging-and-committing.md#commit-rules).
+
 ## Submodules
 
 Shown when the repository has submodules. See [Submodules](submodules.md#other-settings).

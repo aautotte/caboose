@@ -8,6 +8,7 @@ import { plural, splitPath } from '@/lib/format'
 import { extensionRule, ruleFor } from '@/lib/lfs'
 import { ignoreChoices } from '@/lib/ignore'
 import { wrapMessage } from '@/lib/message'
+import { checkMessage } from '@/lib/commitRules'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
 import { customMenu } from '@/shell/customMenu'
@@ -33,6 +34,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
   const pushAfter = useApp((s) => s.prefs.pushAfterCommit)
   const wrapOnCommit = useApp((s) => s.prefs.wrapOnCommit)
   const draft = useRepo(repoId, (r) => r.draft)
+  const rules = useRepo(repoId, (r) => r.commitRules)
   const summary = draft.summary
   const body = draft.body
   type Up = string | ((cur: string) => string)
@@ -97,14 +99,19 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     return () => window.removeEventListener('gc:focus-summary', onFocus)
   }, [])
 
-  const canCommit = (staged.length > 0 || amend) && summary.trim().length > 0 && !busy.commit && conflicted.length === 0
+  // This repository's commit rules (Settings › Commit rules): what the message is missing, and whether that holds it back.
+  const problems = useMemo(() => checkMessage(rules, summary, body), [rules, summary, body])
+  const held = rules?.enforce === 'block' && problems.length > 0
+  const max = rules?.summaryMax ?? null
+  const canCommit = (staged.length > 0 || amend) && summary.trim().length > 0 && !busy.commit && conflicted.length === 0 && !held
   const buttonLabel = useMemo(() => {
     if (conflicted.length) return 'Resolve conflicts first'
     if (!staged.length && !amend) return 'Stage files to commit'
     if (!summary.trim()) return 'Add a summary to commit'
+    if (held) return 'Fix the message to commit'
     if (amend) return pushAfter ? 'Amend last commit and push' : 'Amend last commit'
     return `Commit ${plural(staged.length, 'file')}${pushAfter ? ' and push' : ''}`
-  }, [conflicted.length, staged.length, amend, summary, pushAfter])
+  }, [conflicted.length, staged.length, amend, summary, pushAfter, held])
 
   const doCommit = async (): Promise<void> => {
     if (!canCommit) return
@@ -358,16 +365,31 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             className="pr-10"
           />
           <span
-            aria-label={`${summary.length} characters`}
+            aria-label={max ? `${summary.length} of ${max} characters` : `${summary.length} characters`}
             className={cn(
               'absolute top-1/2 right-2 -translate-y-1/2 text-xs tabular-nums',
-              summary.length > 72 ? 'text-danger' : summary.length > 50 ? 'text-warning' : 'text-muted'
+              max ? (summary.length > max ? 'text-danger' : 'text-muted') : summary.length > 72 ? 'text-danger' : summary.length > 50 ? 'text-warning' : 'text-muted'
             )}
           >
-            {summary.length}
+            {max ? `${summary.length}/${max}` : summary.length}
           </span>
         </div>
         <TextArea aria-label="Commit description" placeholder="Description" value={body} onChange={(e) => setBody(e.target.value)} />
+        {problems.length ? (
+          <div role="status" aria-label="Commit rules" className={cn('flex flex-col gap-1 text-sm', held ? 'text-danger' : 'text-warning')}>
+            <ul className="flex flex-col gap-0.5">
+              {problems.map((p) => (
+                <li key={p} className="flex items-start gap-1.5">
+                  <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />
+                  <span>{p}</span>
+                </li>
+              ))}
+            </ul>
+            <Button size="sm" variant="ghost" className="-ml-2 self-start text-accent-text" onClick={() => openRules(repoId)}>
+              This repository’s rules
+            </Button>
+          </div>
+        ) : null}
         <MessageTools repoId={repoId} />
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           <Checkbox label="Amend last commit" checked={amend} disabled={!refs?.head.sha} onCheckedChange={(v) => void toggleAmend(v)} />
@@ -381,6 +403,12 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
       </form>
     </div>
   )
+}
+
+/** Settings, at this repository's commit rules. */
+function openRules(repoId: string): void {
+  act.setCenter(repoId, { kind: 'prefs' })
+  requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('prefs-commit-rules')?.scrollIntoView({ block: 'start' })))
 }
 
 /** Who the commit will be by. With several profiles, this is the line that saves a commit under the wrong email. */
