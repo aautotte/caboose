@@ -54,10 +54,12 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu],[data-radix-popper-content-wrapper]')) act.setCenter(repoId, { kind: 'graph' })
+      // Not while a menu is open, or while a shortcut is being recorded: there, Esc is for them.
+      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu],[data-radix-popper-content-wrapper],#prefs-shortcuts [aria-pressed=true]')) act.setCenter(repoId, { kind: 'graph' })
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Ahead of the menus (capture): by the time Esc reaches the window, a menu it closed is already gone.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [repoId])
 
   return (
