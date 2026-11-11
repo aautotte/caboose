@@ -98,6 +98,22 @@ Lists the public keys in your `.ssh` folder, with a button to copy each one. Add
 To make a new key, give it a file name, a label (like `laptop`) and an optional passphrase. Caboose runs
 `ssh-keygen` and creates an ed25519 key in `~/.ssh`.
 
+The **⋯** menu next to a key has:
+
+- **Add to ssh-agent**: the agent keeps the key unlocked until you sign out, so a key with a passphrase asks for
+  it once instead of on every fetch. Caboose asks for the passphrase itself on macOS and Linux. On Windows, ssh
+  can't use Caboose's prompt, so for a key with a passphrase it gives you the `ssh-add` command to run once in a
+  terminal. Keys already in the agent say **In ssh-agent**. The line above the list says whether an agent is
+  running; on Windows that's the **OpenSSH Authentication Agent** service.
+- **Add to GitHub…**, **GitLab…**, **Bitbucket…** or **Azure DevOps…**: copies the public key and opens that
+  host's page for a new SSH key, where you paste it.
+
+**Test a connection** signs in to a host over SSH (`ssh -T`), the way a fetch does, and says whose account the
+key belongs to, or why the host said no. Pick github.com, gitlab.com, bitbucket.org, ssh.dev.azure.com or another
+host (`git@git.example.com:2222`), and which key to try, or whichever ssh picks. It never asks for anything: add a
+key with a passphrase to ssh-agent first. A host seen for the first time is added to `known_hosts`; one whose key
+has changed is refused, and the result says so. **What ssh said** shows its own words.
+
 ## This repository
 
 Settings for the repository in the current tab only:

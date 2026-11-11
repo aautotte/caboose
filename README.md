@@ -147,7 +147,8 @@ works offline, and it doesn't phone home.
 ### Profiles
 
 - Separate tabs, settings and identity for work and personal projects: name, email, signing key and the SSH key
-  used to fetch and push. Caboose can create an SSH key for you and copy its public half.
+  used to fetch and push. Caboose can create an SSH key, add it to ssh-agent, open your host's page for it, and
+  test that the host accepts it.
 - Repository settings can override your global ones (signing, for example).
 
 ### Everything else

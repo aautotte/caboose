@@ -550,6 +550,21 @@ export interface SshKey {
   publicKey: string
 }
 
+/** What ssh-agent holds: whether one answers at all, and the public keys it has ("type base64", no comment). */
+export interface AgentState {
+  running: boolean
+  keys: string[]
+}
+
+export interface SshTest {
+  ok: boolean
+  /** What the host said, in a sentence: who you're signed in as, or why not. */
+  message: string
+  output: string
+}
+
+export type SshHost = 'github' | 'gitlab' | 'bitbucket' | 'azure'
+
 export type GraphColumnKey = 'author' | 'date' | 'sha'
 
 export interface GraphColumn {
