@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AuthPromptEvent, CommitRow, DiffSource, FlowConfig, FlowKind, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
+import type { AuthPromptEvent, CommitRow, DiffSource, GitHubUser, PullsResult, FlowConfig, FlowKind, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 import type { CommandContext, CustomCommand } from './lib/custom'
@@ -66,6 +66,9 @@ export interface RepoState {
   draft: { summary: string; body: string }
   /** Read when the repository opens and after "Check again"; null until then. */
   lfs: LfsState | null
+  /** Its pull requests on GitHub (or why there are none to show); null until asked. */
+  pulls: PullsResult | null
+  pullsLoading: boolean
   /** "Not now" on the LFS notice, for this session. */
   lfsDismissed: boolean
   /** The checked-out commit's submodules and this repository's submodule settings; null until read. */
@@ -120,6 +123,7 @@ export type Dialog =
   /** Clean up the working tree: changes, untracked files, ignored files. `untrackedOnly`: only untracked ticked to start. */
   | { kind: 'clean'; repoId: string; untrackedOnly?: boolean }
   | { kind: 'applyPatch'; repoId: string }
+  | { kind: 'githubSignIn' }
   | { kind: 'flowInit'; repoId: string }
   | { kind: 'flowStart'; repoId: string; flowKind: FlowKind }
   | { kind: 'flowFinish'; repoId: string; flowKind: FlowKind; name: string }
@@ -259,6 +263,8 @@ export const emptyRepo = (): RepoState => ({
   flow: null,
   draft: { summary: '', body: '' },
   lfs: null,
+  pulls: null,
+  pullsLoading: false,
   lfsDismissed: false,
   submodules: null,
   subOp: null,
@@ -281,6 +287,8 @@ export interface AppState {
   profiles: Profile[]
   /** Goes up whenever a name or email is saved, so whatever shows "who commits" reads it again. */
   identityVersion: number
+  /** Who's signed in to GitHub in this profile; null until asked. canKeep: the system can encrypt the sign-in. */
+  github: { user: GitHubUser | null; canKeep: boolean } | null
 }
 
 export const useApp = create<AppState>(() => ({
@@ -294,7 +302,8 @@ export const useApp = create<AppState>(() => ({
   prefs: loadPrefs(),
   authPrompt: null,
   profiles: [],
-  identityVersion: 0
+  identityVersion: 0,
+  github: null
 }))
 
 function cachePrefs(prefs: Prefs): void {

@@ -11,6 +11,7 @@ import { Askpass } from './askpass'
 import { GraphLayouts, Prefs, RefView, RepoPrefs } from './settings'
 import { Profiles, PROFILE_KEYS } from './profiles'
 import { applyGpuSetting } from './gpu'
+import { GitHub } from './github'
 
 // Flags:
 //   --view=design            the primitives page
@@ -94,6 +95,7 @@ const askpass = new Askpass(
 )
 const runner = new GitRunner(db, askpass)
 const profiles = new Profiles(db)
+const github = new GitHub(join(app.getPath('userData'), 'accounts'), () => profiles.active().id)
 
 // The profile's name, email and keys go in front of every git command, except the ones a repository sets in its
 // own config. Which ones it sets is remembered for a short while per folder; Settings clears it on a change.
@@ -251,7 +253,7 @@ app.whenReady().then(async () => {
   for (const p of (openAtStart ?? '').split('|').filter(Boolean)) await repos.open(p).catch((e) => console.error('open failed', e))
   for (const r of repos.list().open) if (!r.missing) watcher.start(r.id, r.path)
 
-  registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig: () => localKeys.clear(), tmpDir: join(app.getPath('userData'), 'tmp'), isTrustedSender })
+  registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig: () => localKeys.clear(), tmpDir: join(app.getPath('userData'), 'tmp'), isTrustedSender, github })
   const win = createWindow()
 
   if (screenshotDir) {

@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowFinished, FlowKind, GraphColumn, GraphFilter, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowFinished, FlowKind, GitHubUser, GraphColumn, GraphFilter, PullRequest, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural, refLabel } from './lib/format'
@@ -54,6 +54,9 @@ export async function boot(): Promise<void> {
   const tabs = list?.open ?? []
   useApp.setState({ tabs, active: tabs[0]?.id ?? 'home', ready: true })
   for (const t of tabs) void loadRepo(t.id)
+  void loadGitHub().then(() => {
+    for (const t of tabs) void loadPulls(t.id)
+  })
   on('repo:changed', (e) => {
     if (!useApp.getState().repos[e.repoId]) return
     if (e.what.includes('refs')) void loadRepo(e.repoId, { keepSelection: true })
@@ -90,6 +93,7 @@ export async function openRepo(path: string): Promise<boolean> {
     active: repo.id
   }))
   void loadRepo(repo.id)
+  void loadPulls(repo.id)
   return true
 }
 
@@ -1450,6 +1454,7 @@ export async function fetchAll(repoId: string, quiet = false): Promise<void> {
     if (!quiet) toast({ tone: 'success', title: 'Fetched all remotes' })
   }
   await loadRepo(repoId, { keepSelection: true })
+  void loadPulls(repoId)
 }
 
 /**
@@ -2384,6 +2389,69 @@ export async function flowFinish(repoId: string, kind: FlowKind, name: string, k
   ].filter(Boolean)
   toast({ tone: 'success', title: `Finished ${branch}`, body: `${what.join(', ')}.` })
   return null
+}
+
+// ---------- GitHub ----------
+
+export async function loadGitHub(): Promise<void> {
+  const s = await call('github.status', {}).catch(() => null)
+  if (s) useApp.setState({ github: s })
+}
+
+/** The repository's pull requests: when it opens, after a fetch, after signing in or out, and on Refresh. */
+export async function loadPulls(repoId: string): Promise<void> {
+  if (!useApp.getState().repos[repoId]) return
+  patchRepo(repoId, { pullsLoading: true })
+  const pulls = await call('github.pulls', { repoId }).catch((e: Error) => ({ state: 'error' as const, repo: '', message: e.message }))
+  if (useApp.getState().repos[repoId]) patchRepo(repoId, { pulls, pullsLoading: false })
+}
+
+function reloadAllPulls(): void {
+  for (const t of useApp.getState().tabs) void loadPulls(t.id)
+}
+
+export function signedInToGitHub(user: GitHubUser): void {
+  useApp.setState((s) => ({ github: { canKeep: s.github?.canKeep ?? true, user } }))
+  toast({ tone: 'success', title: `Signed in to GitHub as ${user.login}` })
+  reloadAllPulls()
+}
+
+export async function useGhCliSignIn(): Promise<void> {
+  const user = await attempt(() => call('github.useGhCli', {}), 'Couldn’t use the gh CLI’s sign-in')
+  if (user) signedInToGitHub(user)
+}
+
+export async function signOutOfGitHub(): Promise<void> {
+  await attempt(() => call('github.signOut', {}))
+  useApp.setState((s) => ({ github: { canKeep: s.github?.canKeep ?? true, user: null } }))
+  toast({ tone: 'info', title: 'Signed out of GitHub', body: 'To take back Caboose’s access too, revoke it in GitHub’s Settings › Applications.' })
+  reloadAllPulls()
+}
+
+/** The pull request a branch in the graph or the panel is for: by its branch here, or pr/<number> for a fork's. */
+export function pullFor(repoId: string, branch: string): PullRequest | undefined {
+  const p = useApp.getState().repos[repoId]?.pulls
+  if (p?.state !== 'ok') return undefined
+  return p.pulls.find((pr) => (pr.fromFork ? branch === `pr/${pr.number}` : branch === pr.head || branch === `${p.remote}/${pr.head}`))
+}
+
+/** Its newest commit in the graph, if it's loaded there. */
+export function selectPull(repoId: string, pr: PullRequest): void {
+  const r = useApp.getState().repos[repoId]
+  if (r?.commits.some((c) => c.sha === pr.headSha)) select(repoId, pr.headSha)
+}
+
+/**
+ * Checks a pull request out: one from this repository through its branch (made, or brought up to the remote one,
+ * as a remote branch's double-click does); one from a fork as pr/<number>.
+ */
+export async function checkoutPull(repoId: string, pr: PullRequest): Promise<void> {
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, fetch: `Fetching #${pr.number}…` } }))
+  const res = await attempt(() => call('github.fetchPull', { repoId, number: pr.number, head: pr.head, fromFork: pr.fromFork }), `Couldn’t fetch #${pr.number}`)
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, fetch: undefined } }))
+  if (!res) return
+  if (res.fork) await checkout(repoId, res.ref)
+  else await fastForwardTo(repoId, res.ref, { checkout: true })
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {

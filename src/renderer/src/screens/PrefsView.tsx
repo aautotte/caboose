@@ -21,6 +21,7 @@ const sections = [
   { id: 'commands', label: 'Your commands' },
   { id: 'shortcuts', label: 'Keyboard shortcuts' },
   { id: 'ssh', label: 'SSH keys' },
+  { id: 'github', label: 'GitHub' },
   { id: 'repo', label: 'This repository' },
   { id: 'commit-rules', label: 'Commit rules' },
   { id: 'submodules', label: 'Submodules' }
@@ -206,6 +207,10 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
 
             <Group id="ssh" title="SSH keys" note="Public keys in your .ssh folder. Add one to your Git host to push and pull over SSH.">
               <SshKeys />
+            </Group>
+
+            <Group id="github" title="GitHub" note="Signed in, Caboose lists each repository’s pull requests with their checks and reviews. The sign-in is this profile’s, kept encrypted on this computer. Pushing and fetching still use your git sign-in.">
+              <GitHubAccount />
             </Group>
 
             <Group id="repo" title={`This repository: ${tab?.alias ?? tab?.name ?? ''}`} note="Overrides your global name and email for commits in this repository only, for example a work address. Leave both empty to use the global ones.">
@@ -625,6 +630,42 @@ function ConfigRow({ label, configKey, help }: { label: string; configKey: GitCo
     <Row label={label} help={help}>
       <TextSetting label={label} mono value={values?.[configKey] ?? ''} placeholder="not set" onSave={(v) => save(configKey, v || null)} />
     </Row>
+  )
+}
+
+function GitHubAccount(): React.JSX.Element {
+  const gh = useApp((s) => s.github)
+  useEffect(() => void act.loadGitHub(), [])
+  if (!gh) return <p className="py-3 text-sm text-muted">Loading…</p>
+  return (
+    <div className="flex flex-col gap-2 py-3">
+      {gh.user ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status" aria-label="GitHub account" className="min-w-0 flex-1 text-base text-text">
+            Signed in as <span className="font-medium">{gh.user.login}</span>
+            {gh.user.name ? <span className="text-muted"> ({gh.user.name})</span> : null}
+          </p>
+          <Button size="sm" onClick={() => void act.signOutOfGitHub()}>
+            Sign out
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p role="status" aria-label="GitHub account" className="text-sm text-muted">
+            Not signed in. Signing in opens GitHub in your browser, where you authorize Caboose: no password or token to copy.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="primary" onClick={() => act.openDialog({ kind: 'githubSignIn' })}>
+              Sign in to GitHub…
+            </Button>
+            <Button size="sm" onClick={() => void act.useGhCliSignIn()}>
+              Use the gh CLI’s sign-in
+            </Button>
+          </div>
+        </>
+      )}
+      {!gh.canKeep ? <p className="text-sm text-warning">This computer can’t encrypt the sign-in, so it lasts until Caboose quits.</p> : null}
+    </div>
   )
 }
 

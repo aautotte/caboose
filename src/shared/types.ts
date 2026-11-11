@@ -565,6 +565,44 @@ export interface SshTest {
 
 export type SshHost = 'github' | 'gitlab' | 'bitbucket' | 'azure'
 
+export interface GitHubUser {
+  login: string
+  name: string | null
+}
+
+/** Step one of signing in to GitHub: the code to type at its page. */
+export interface DeviceCode {
+  userCode: string
+  verificationUri: string
+  /** Seconds before the code runs out. */
+  expiresIn: number
+}
+
+export interface PullRequest {
+  number: number
+  title: string
+  url: string
+  author: string
+  draft: boolean
+  /** ISO time of the last activity. */
+  updatedAt: string
+  /** The branch it's from, on its own repository (a fork's, when fromFork). */
+  head: string
+  headSha: string
+  base: string
+  fromFork: boolean
+  /** The checks on its last commit, all together; null when there are none. */
+  checks: 'success' | 'failure' | 'pending' | null
+  review: 'approved' | 'changes' | 'required' | null
+}
+
+/** A repository's pull requests, or why there are none to show. */
+export type PullsResult =
+  | { state: 'none' } // no remote on github.com
+  | { state: 'signedOut'; repo: string }
+  | { state: 'ok'; repo: string; remote: string; pulls: PullRequest[] }
+  | { state: 'error'; repo: string; message: string }
+
 export type GraphColumnKey = 'author' | 'date' | 'sha'
 
 export interface GraphColumn {

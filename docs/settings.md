@@ -114,6 +114,27 @@ host (`git@git.example.com:2222`), and which key to try, or whichever ssh picks.
 key with a passphrase to ssh-agent first. A host seen for the first time is added to `known_hosts`; one whose key
 has changed is refused, and the result says so. **What ssh said** shows its own words.
 
+## GitHub
+
+Signing in to GitHub lets Caboose list each repository's [pull requests](syncing.md#pull-requests-on-github).
+
+**Sign in to GitHub…** shows a short code. **Copy the code and open GitHub** opens GitHub's page in your browser:
+paste the code there, then authorize Caboose. The dialog closes on its own once you have. Caboose never sees your
+password, and there's no token to make or copy. It asks for the `repo` permission, so private repositories' pull
+requests show too. An organization that limits which apps can see its repositories may have to approve Caboose
+first.
+
+**Use the gh CLI's sign-in** copies the sign-in of the GitHub CLI (`gh auth login`), if it's installed and signed
+in, instead.
+
+The sign-in belongs to the current [profile](#profile), so work and personal profiles can use different GitHub
+accounts. It's kept encrypted with your system's keychain; on a system that can't encrypt it, it lasts until
+Caboose quits. **Sign out** forgets it here. To take back Caboose's access on GitHub too, revoke it in GitHub's
+**Settings › Applications**. If GitHub stops accepting the sign-in (revoked there, say), Caboose signs out and
+says so.
+
+Pushing and fetching don't use this sign-in: they go through git and your usual credentials or SSH key.
+
 ## This repository
 
 Settings for the repository in the current tab only:

@@ -70,6 +70,24 @@ remote's URL alone (nothing is fetched, and no account is needed).
 
 A commit or the repository goes by the remote the checked-out branch tracks, else `origin`, else the first remote.
 
+## Pull requests on GitHub
+
+For a repository on github.com, a **Pull requests** section in the branches panel lists its open pull requests,
+newest activity first. Each shows its number and title, **draft**, **approved** or **changes** (requested), and
+its checks: passed, failed or running. The branch a pull request is from shows its number in the graph, like
+`#12`, next to the branch's label.
+
+- Click one to pick its newest commit in the graph, if it's loaded.
+- Double-click it (or **Check out** in its menu) to work on it. One from this repository checks out its branch,
+  making it if needed or bringing it up to the remote one, as double-clicking a remote branch does. One from a
+  fork is fetched from GitHub into a branch called `pr/<number>`, which only ever moves forward: commits you make
+  on it are kept.
+- **Open on GitHub** and **Copy link** are in its menu too.
+
+The list is read when the repository opens, after each fetch, and when you click the refresh button on the
+section. It needs you to be [signed in to GitHub](settings.md#github): until then, the section says so and offers
+to sign in. The repository is found from `origin` (or the first remote) on github.com, by its fetch or push URL.
+
 ### A server of your own
 
 Caboose guesses the site from the server's name (one with *github*, *gitlab* or *bitbucket* in it, or Azure DevOps'
