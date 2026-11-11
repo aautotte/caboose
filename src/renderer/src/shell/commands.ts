@@ -1,4 +1,5 @@
 // Every command the palette lists and a shortcut can run, for the state the app is in now.
+import type { FlowConfig } from '../../../shared/types'
 import { setPrefs, useApp, type AppState } from '@/store'
 import * as act from '@/actions'
 import { refLabel } from '@/lib/format'
@@ -76,6 +77,7 @@ export function buildCommands(s: AppState, { branches }: { branches: boolean }):
       { id: 'redo', group: 'Changes', label: 'Redo', run: () => void act.redo(id) },
       ...(head?.sha ? [{ id: 'new-branch', group: 'Branch', label: 'New branch…', run: newBranch }] : []),
       { id: 'new-worktree', group: 'Branch', label: 'New worktree…', run: () => act.openDialog({ kind: 'addWorktree', repoId: id }) },
+      ...gitFlowCommands(id, r?.flow ?? null, head?.branch ?? null),
       { id: 'add-submodule', group: 'Repository', label: 'Add a submodule…', run: () => act.openDialog({ kind: 'addSubmodule', repoId: id }) },
       { id: 'log', group: 'View', label: 'Git activity log', run: () => act.openLog() },
       { id: 'apply-patch', group: 'Changes', label: 'Apply a patch…', run: () => act.openDialog({ kind: 'applyPatch', repoId: id }) },
@@ -165,6 +167,16 @@ export function buildCommands(s: AppState, { branches }: { branches: boolean }):
   }
   for (const c of list) c.shortcut = keysOf(c.id, s.prefs.keymap)[0]
   return list
+}
+
+/** Git Flow: set it up, or start a feature, release or hotfix, and finish the one checked out. */
+function gitFlowCommands(repoId: string, flow: FlowConfig | null, head: string | null): Cmd[] {
+  if (!flow) return [{ id: 'flow-init', group: 'Branch', label: 'Set up Git Flow…', run: () => act.openDialog({ kind: 'flowInit', repoId }) }]
+  const here = act.flowBranch(repoId, head)
+  return [
+    ...(['feature', 'release', 'hotfix'] as const).map((k) => ({ id: `flow-${k}`, group: 'Branch', label: `Git Flow: start a ${k}…`, run: () => act.openDialog({ kind: 'flowStart', repoId, flowKind: k }) })),
+    ...(here ? [{ id: 'flow-finish', group: 'Branch', label: `Git Flow: finish ${here.kind} ${here.name}…`, run: () => act.openDialog({ kind: 'flowFinish', repoId, flowKind: here.kind, name: here.name }) }] : [])
+  ]
 }
 
 /** A shortcut's command, if it can run here. */

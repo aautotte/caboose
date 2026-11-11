@@ -561,6 +561,27 @@ export interface GraphColumn {
 /** Git config keys the app reads and writes (Settings). */
 export type GitConfigKey = 'user.signingkey' | 'commit.gpgsign' | 'commit.template' | 'diff.tool' | 'merge.tool'
 
+/** Git Flow's three kinds of short-lived branch. */
+export type FlowKind = 'feature' | 'release' | 'hotfix'
+
+/** Git Flow's settings, from the same git config keys the git-flow tool uses (gitflow.branch.*, gitflow.prefix.*). */
+export interface FlowConfig {
+  /** Where releases land: gitflow.branch.master. */
+  production: string
+  /** Where features land: gitflow.branch.develop. */
+  develop: string
+  prefix: Record<FlowKind, string>
+  /** Put in front of a release's or hotfix's version to make its tag (gitflow.prefix.versiontag), often "" or "v". */
+  tagPrefix: string
+}
+
+export interface FlowFinished {
+  /** The branches it was merged into, in order; one it was already in is left out. */
+  merged: string[]
+  tag: string | null
+  deleted: boolean
+}
+
 export interface AuthPromptEvent {
   promptId: string
   prompt: string

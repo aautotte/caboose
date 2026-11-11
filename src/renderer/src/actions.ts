@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, CommitRow, DiffSource, GraphColumn, GraphFilter, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowKind, GraphColumn, GraphFilter, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural, refLabel } from './lib/format'
@@ -505,13 +505,14 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
   const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore, commitRules: rulesBefore } = useApp.getState().repos[repoId]
   try {
-    const [refs, status, undo, refView, columns, repoPrefs] = await Promise.all([
+    const [refs, status, undo, refView, columns, repoPrefs, flow] = await Promise.all([
       call('refs.list', { repoId }),
       call('status.get', { repoId }),
       call('undo.peek', { repoId }),
       call('refView.get', { repoId }),
       call('graph.getColumns', { repoId }),
-      call('repoPrefs.get', { repoId })
+      call('repoPrefs.get', { repoId }),
+      call('flow.config', { repoId }).catch(() => null)
     ])
     const already = useApp.getState().repos[repoId]?.commits.length ?? 0
     const filter = graphFilter(useApp.getState().repos[repoId])
@@ -524,6 +525,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
     const headBefore = useApp.getState().repos[repoId]?.refs?.head.sha ?? null
     patchRepo(repoId, (r) => ({
       refs,
+      flow,
       ...(freshStatus ? { status, undo } : {}),
       refView,
       columns: r.columns !== columnsBefore ? r.columns : columns ?? DEFAULT_COLUMNS,
@@ -2318,6 +2320,51 @@ export async function setCommitRules(repoId: string, rules: CommitRules | null):
   const kept = hasRules(rules) ? rules : null
   patchRepo(repoId, { commitRules: kept })
   await attempt(() => call('repoPrefs.set', { repoId, key: 'commit.rules', value: kept }), 'Couldn’t save the commit rules')
+}
+
+// ---------- Git Flow ----------
+
+/** Which Git Flow branch this is, from its prefix: a feature, release or hotfix, and its name after the prefix. */
+export function flowBranch(repoId: string, branch: string | null | undefined): { kind: FlowKind; name: string } | null {
+  const flow = useApp.getState().repos[repoId]?.flow
+  if (!flow || !branch) return null
+  for (const kind of ['feature', 'release', 'hotfix'] as const) {
+    const p = flow.prefix[kind]
+    if (branch.startsWith(p) && branch.length > p.length) return { kind, name: branch.slice(p.length) }
+  }
+  return null
+}
+
+export async function flowInit(repoId: string, config: FlowConfig): Promise<boolean> {
+  const ok = await attempt(() => call('flow.init', { repoId, config }), 'Couldn’t set up Git Flow')
+  await loadRepo(repoId, { keepSelection: true })
+  if (ok === undefined) return false
+  toast({ tone: 'success', title: 'Git Flow is set up', body: `Features start from ${config.develop}, releases go to ${config.production}.` })
+  return true
+}
+
+export async function flowStart(repoId: string, kind: FlowKind, name: string): Promise<boolean> {
+  const branch = await attempt(() => call('flow.start', { repoId, kind, name }), `Couldn’t start the ${kind}`)
+  await loadRepo(repoId, { keepSelection: true })
+  if (branch === undefined) return false
+  toast({ tone: 'success', title: `Started ${branch}`, body: 'It’s checked out. Finish it from the Git Flow buttons when it’s done.' })
+  return true
+}
+
+export async function flowFinish(repoId: string, kind: FlowKind, name: string, keep: boolean, tagMessage: string): Promise<boolean> {
+  const branch = `${useApp.getState().repos[repoId]?.flow?.prefix[kind] ?? ''}${name}`
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: `Finishing ${branch}…` } }))
+  const done = await attempt(() => call('flow.finish', { repoId, kind, name, keep, tagMessage }), `Couldn’t finish ${branch}`)
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: undefined } }))
+  await loadRepo(repoId, { keepSelection: true })
+  if (done === undefined) return false
+  const what = [
+    done.merged.length ? `Merged into ${done.merged.join(' and ')}` : 'It was already merged',
+    done.tag ? `tagged ${done.tag}` : '',
+    done.deleted ? `${branch} deleted` : keep ? '' : `${branch} kept: it isn’t merged into the remote branch it tracks`
+  ].filter(Boolean)
+  toast({ tone: 'success', title: `Finished ${branch}`, body: `${what.join(', ')}.` })
+  return true
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {

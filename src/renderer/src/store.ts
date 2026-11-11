@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
+import type { AuthPromptEvent, CommitRow, DiffSource, FlowConfig, FlowKind, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 import type { CommandContext, CustomCommand } from './lib/custom'
@@ -38,7 +38,7 @@ export interface RepoState {
   center: Center
   undo: UndoPeek
   /** Running remote / long operations, by key. */
-  busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout', string>>
+  busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout' | 'flow', string>>
   progress: { phase: string; percent?: number; done?: number; total?: number } | null
   lastFetch: number | null
   fetchFailed: boolean
@@ -60,6 +60,8 @@ export interface RepoState {
   refsWidth: number | null
   /** This repository's commit message rules (Settings › This repository); null for none. */
   commitRules: CommitRules | null
+  /** Git Flow's settings, when it's set up here. */
+  flow: FlowConfig | null
   /** The commit message being written. Kept here, not in the panel, so it survives looking at other commits. */
   draft: { summary: string; body: string }
   /** Read when the repository opens and after "Check again"; null until then. */
@@ -118,6 +120,9 @@ export type Dialog =
   /** Clean up the working tree: changes, untracked files, ignored files. `untrackedOnly`: only untracked ticked to start. */
   | { kind: 'clean'; repoId: string; untrackedOnly?: boolean }
   | { kind: 'applyPatch'; repoId: string }
+  | { kind: 'flowInit'; repoId: string }
+  | { kind: 'flowStart'; repoId: string; flowKind: FlowKind }
+  | { kind: 'flowFinish'; repoId: string; flowKind: FlowKind; name: string }
   /** Squash merge: what `source` brings in, as one commit on `target`, with a message to write. */
   | { kind: 'squashMerge'; repoId: string; source: string; target: string }
   /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */
@@ -251,6 +256,7 @@ export const emptyRepo = (): RepoState => ({
   graphWidth: null,
   refsWidth: null,
   commitRules: null,
+  flow: null,
   draft: { summary: '', body: '' },
   lfs: null,
   lfsDismissed: false,

@@ -7,6 +7,9 @@ import type {
   CleanPreview,
   EffectiveIdentity,
   FileHistoryEntry,
+  FlowConfig,
+  FlowFinished,
+  FlowKind,
   GitConfigKey,
   GitIdentity,
   GpuState,
@@ -116,6 +119,11 @@ export interface Api {
   'worktree.clean': { in: R & { tracked: boolean; untracked: boolean; ignored: boolean }; out: { removed: number } }
 
   'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: null }
+  'flow.config': { in: R; out: FlowConfig | null }
+  'flow.init': { in: R & { config: FlowConfig }; out: null }
+  /** The branch it made and checked out. */
+  'flow.start': { in: R & { kind: FlowKind; name: string }; out: string }
+  'flow.finish': { in: R & { kind: FlowKind; name: string; keep: boolean; tagMessage: string }; out: FlowFinished }
   /** Bisect: start between a bad and a good commit; mark the one being tested (or another); stop. */
   'bisect.start': { in: R & { bad: string; good: string }; out: null }
   'bisect.mark': { in: R & { verdict: 'good' | 'bad' | 'skip'; sha?: string }; out: null }

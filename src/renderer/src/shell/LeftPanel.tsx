@@ -1,5 +1,5 @@
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp, Workflow, Flag } from 'lucide-react'
 import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
@@ -84,6 +84,41 @@ function Section({
             {children}
           </div>
         )
+      ) : null}
+    </section>
+  )
+}
+
+/**
+ * Git Flow, once it's set up: start a feature, release or hotfix, and finish the one checked out. Starting from the
+ * branches the flow names, and finishing, merges it where it belongs (see the finish dialog).
+ */
+function FlowBar({ repoId }: { repoId: string }): React.JSX.Element | null {
+  const flow = useRepo(repoId, (r) => r.flow)
+  const head = useRepo(repoId, (r) => r.refs?.head.branch ?? null)
+  const busy = useRepo(repoId, (r) => r.busy.flow)
+  if (!flow) return null
+  const here = act.flowBranch(repoId, head)
+  const start = (kind: 'feature' | 'release' | 'hotfix') => () => act.openDialog({ kind: 'flowStart', repoId, flowKind: kind })
+  return (
+    <section aria-label="Git Flow" id={leftSectionId('Git Flow')} className="flex flex-col gap-1 px-2 pb-3">
+      <ContextMenu items={[{ type: 'item', label: 'Git Flow settings…', icon: <Settings size={14} />, onSelect: () => act.openDialog({ kind: 'flowInit', repoId }) }]}>
+        <h3 className="flex h-(--gc-list-row-h) items-center gap-1 text-xs font-medium text-muted">
+          <Workflow size={12} aria-hidden />
+          Git Flow
+        </h3>
+      </ContextMenu>
+      <div className="flex flex-wrap gap-1">
+        {(['feature', 'release', 'hotfix'] as const).map((k) => (
+          <Button key={k} size="sm" icon={<Plus size={12} />} aria-label={`Start a ${k}`} onClick={start(k)}>
+            {k[0].toUpperCase() + k.slice(1)}
+          </Button>
+        ))}
+      </div>
+      {here ? (
+        <Button size="sm" variant="primary" icon={<Flag size={12} />} loading={!!busy} className="self-start" onClick={() => act.openDialog({ kind: 'flowFinish', repoId, flowKind: here.kind, name: here.name })}>
+          Finish {here.kind} {here.name}
+        </Button>
       ) : null}
     </section>
   )
@@ -222,6 +257,8 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     m.push(rebaseOntoEntry(repoId, head, r.short))
     m.push(compareEntry(repoId, head, r.short))
   }
+  const flow = r.kind === 'local' ? act.flowBranch(repoId, r.short) : null
+  if (flow) m.push({ type: 'item', label: `Finish ${flow.kind} ${flow.name}…`, icon: <Flag size={14} />, onSelect: () => act.openDialog({ kind: 'flowFinish', repoId, flowKind: flow.kind, name: flow.name }) })
   if (r.kind === 'local' && r.upstream && !r.upstreamGone) m.push(compareEntry(repoId, r.upstream.replace(/^refs\/remotes\//, ''), r.short))
   if (r.kind === 'remote') {
     m.push({ type: 'item', label: 'Fast-forward my local branch', icon: <Download size={14} />, onSelect: () => void act.fastForwardTo(repoId, r.short) })
@@ -465,6 +502,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   const view = useRepo(repoId, (r) => r.refView)
   const focused = view.hidden.length + view.soloed.length
   const focusHead = useRepo(repoId, (r) => r.focusHead)
+  const flowOn = useRepo(repoId, (r) => !!r.flow)
   const [filter, setFilter] = useState('')
   const f = filter.trim().toLowerCase()
   const match = (s: string): boolean => !f || s.toLowerCase().includes(f)
@@ -702,7 +740,10 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               count={shownLocals.length}
               empty={f ? 'No matches' : 'No branches yet'}
               eye={eyeFor(locals) ?? undefined}
-              menu={[{ type: 'item', label: 'Reflog: where HEAD has been', icon: <History size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'reflog' }) }]}
+              menu={[
+                { type: 'item', label: 'Reflog: where HEAD has been', icon: <History size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'reflog' }) },
+                { type: 'item', label: flowOn ? 'Git Flow settings…' : 'Set up Git Flow…', icon: <Workflow size={14} />, onSelect: () => act.openDialog({ kind: 'flowInit', repoId }) }
+              ]}
               multiselectable
               note={branchPick.pick.length > 1 ? <PickBar count={branchPick.pick.length} actions={branchActions()} onClear={branchPick.clear} /> : null}
             >
@@ -736,6 +777,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
                 />
               ))}
             </Section>
+            <FlowBar repoId={repoId} />
             <Section
               title="Remotes"
               // With one remote, its row is left out: the section stands for it, and counts its branches.
