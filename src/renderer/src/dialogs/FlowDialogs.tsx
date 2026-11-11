@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FlowConfig, FlowKind } from '../../../shared/types'
 import { Button, Dialog, Field, Select, Switch, TextInput } from '@/ui'
 import { useApp, type Dialog as D } from '@/store'
 import * as act from '@/actions'
+import { call } from '@/lib/api'
 
 const close = (): void => act.closeDialog()
 const NOUN: Record<FlowKind, string> = { feature: 'feature', release: 'release', hotfix: 'hotfix' }
@@ -18,6 +19,23 @@ export function FlowInitDialog({ d }: { d: Extract<D, { kind: 'flowInit' }> }): 
   const [prefix, setPrefix] = useState<Record<FlowKind, string>>(was?.prefix ?? { feature: 'feature/', release: 'release/', hotfix: 'hotfix/' })
   const [tagPrefix, setTagPrefix] = useState(was?.tagPrefix ?? '')
   const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
+  // Read again as it opens: git-flow, or git config in a terminal, may have changed them since the repository loaded.
+  useEffect(() => {
+    let live = true
+    call('flow.config', { repoId: d.repoId })
+      .then((c) => {
+        if (!live || !c) return
+        setProduction(c.production)
+        setDevelop(c.develop)
+        setPrefix(c.prefix)
+        setTagPrefix(c.tagPrefix)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [d.repoId])
   const problem =
     develop.trim() === production
       ? 'Develop has to be another branch than production.'
@@ -35,16 +53,17 @@ export function FlowInitDialog({ d }: { d: Extract<D, { kind: 'flowInit' }> }): 
       prefix: { feature: prefix.feature.trim(), release: prefix.release.trim(), hotfix: prefix.hotfix.trim() },
       tagPrefix: tagPrefix.trim()
     }
-    const ok = await act.flowInit(d.repoId, config)
+    const err = await act.flowInit(d.repoId, config)
     setBusy(false)
-    if (ok) close()
+    if (err) setFailed(err)
+    else close()
   }
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && close()}
       title={was ? 'Git Flow settings' : 'Set up Git Flow'}
-      error={problem}
+      error={problem ?? failed ?? undefined}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -91,6 +110,7 @@ export function FlowStartDialog({ d }: { d: Extract<D, { kind: 'flowStart' }> })
   const refs = useApp((s) => s.repos[d.repoId]?.refs)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
   if (!flow) return null
   const kind = d.flowKind
   const branch = `${flow.prefix[kind]}${name.trim()}`
@@ -100,15 +120,17 @@ export function FlowStartDialog({ d }: { d: Extract<D, { kind: 'flowStart' }> })
   const submit = async (): Promise<void> => {
     if (!name.trim() || problem || busy) return
     setBusy(true)
-    const ok = await act.flowStart(d.repoId, kind, name.trim())
+    const err = await act.flowStart(d.repoId, kind, name.trim())
     setBusy(false)
-    if (ok) close()
+    if (err) setFailed(err)
+    else close()
   }
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && close()}
       title={`Start a ${NOUN[kind]}`}
+      error={failed ?? undefined}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -126,7 +148,7 @@ export function FlowStartDialog({ d }: { d: Extract<D, { kind: 'flowStart' }> })
         }}
       >
         <Field label={kind === 'feature' ? 'Feature name' : 'Version'} error={problem} help={`Makes ${name.trim() ? branch : `${flow.prefix[kind]}…`} from ${base} and checks it out.`}>
-          {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === 'feature' ? 'search-box' : '1.2.0'} />}
+          {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => (setName(e.target.value), setFailed(null))} placeholder={kind === 'feature' ? 'search-box' : '1.2.0'} />}
         </Field>
         <button type="submit" hidden />
       </form>
@@ -141,6 +163,7 @@ export function FlowFinishDialog({ d }: { d: Extract<D, { kind: 'flowFinish' }> 
   const [keep, setKeep] = useState(false)
   const [tagMessage, setTagMessage] = useState(`${kind === 'release' ? 'Release' : 'Hotfix'} ${d.name}`)
   const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState<string | null>(null)
   if (!flow) return null
   const branch = `${flow.prefix[kind]}${d.name}`
   const tag = `${flow.tagPrefix}${d.name}`
@@ -152,15 +175,18 @@ export function FlowFinishDialog({ d }: { d: Extract<D, { kind: 'flowFinish' }> 
   const submit = async (): Promise<void> => {
     if (busy) return
     setBusy(true)
-    const ok = await act.flowFinish(d.repoId, kind, d.name, keep, tagMessage)
+    setFailed(null)
+    const err = await act.flowFinish(d.repoId, kind, d.name, keep, tagMessage)
     setBusy(false)
-    if (ok) close()
+    if (err) setFailed(err)
+    else close()
   }
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && close()}
       title={`Finish ${branch}`}
+      error={failed ?? undefined}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>

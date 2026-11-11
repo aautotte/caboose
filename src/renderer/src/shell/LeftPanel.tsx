@@ -103,10 +103,10 @@ function FlowBar({ repoId }: { repoId: string }): React.JSX.Element | null {
   return (
     <section aria-label="Git Flow" id={leftSectionId('Git Flow')} className="flex flex-col gap-1 px-2 pb-3">
       <ContextMenu items={[{ type: 'item', label: 'Git Flow settings…', icon: <Settings size={14} />, onSelect: () => act.openDialog({ kind: 'flowInit', repoId }) }]}>
-        <h3 className="flex h-(--gc-list-row-h) items-center gap-1 text-xs font-medium text-muted">
+        <p className="flex h-(--gc-list-row-h) items-center gap-1 text-xs font-medium text-muted">
           <Workflow size={12} aria-hidden />
           Git Flow
-        </h3>
+        </p>
       </ContextMenu>
       <div className="flex flex-wrap gap-1">
         {(['feature', 'release', 'hotfix'] as const).map((k) => (

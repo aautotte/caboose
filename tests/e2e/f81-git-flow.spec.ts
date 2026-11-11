@@ -104,7 +104,7 @@ test('F81-H3: a release goes into main with a tag, then into develop; only one r
   await flowBlock().getByRole('button', { name: 'Start a release' }).click()
   await dialog(h.page).getByRole('textbox').fill('1.1.0')
   await dialog(h.page).getByRole('button', { name: 'Start release' }).click()
-  await expect(toasts()).toContainText('Finish release/1.0.0 first: Git Flow has one release at a time.')
+  await expect(dialog(h.page)).toContainText('Finish release/1.0.0 first: Git Flow has one release at a time.')
   await dialog(h.page).getByRole('button', { name: 'Cancel' }).click()
 
   await local('release/1.0.0').click({ button: 'right' })
@@ -119,7 +119,9 @@ test('F81-H3: a release goes into main with a tag, then into develop; only one r
   expect(git('cat-file', '-t', 'v1.0.0')).toBe('tag')
   expect(git('tag', '-l', '--format=%(contents:subject)', 'v1.0.0')).toBe('First release')
   expect(git('rev-parse', 'v1.0.0^{commit}')).toBe(git('rev-parse', 'main'))
-  git('merge-base', '--is-ancestor', 'main', 'develop')
+  // The release itself went into develop too (as git-flow does: the branch, not main's merge commit).
+  git('merge-base', '--is-ancestor', 'release/1.0.0', 'develop')
+  expect(git('log', '-1', '--format=%s', 'develop')).toBe("Merge branch 'release/1.0.0' into develop")
   // Kept, as asked.
   expect(has('refs/heads/release/1.0.0')).toBe(true)
   git('branch', '-D', 'release/1.0.0')
@@ -136,8 +138,7 @@ test('F81-H4: a hotfix from main; finishing stops on conflicts with develop, and
 
   await flowBlock().getByRole('button', { name: 'Finish hotfix 1.0.1' }).click()
   await dialog(h.page).getByRole('button', { name: 'Finish hotfix' }).click()
-  await expect(toasts()).toContainText('Merging hotfix/1.0.1 into develop stopped on conflicts.')
-  await expect(dialog(h.page)).toBeVisible()
+  await expect(dialog(h.page)).toContainText('Merging hotfix/1.0.1 into develop stopped on conflicts.')
   await dialog(h.page).getByRole('button', { name: 'Cancel' }).click()
   // main got it and the tag, before the conflict.
   expect(git('log', '-1', '--format=%s', 'main')).toBe("Merge branch 'hotfix/1.0.1' into main")
@@ -175,7 +176,7 @@ test('F81-H5: settings come from git config and can change; a finish with change
   await h.page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await flowBlock().getByRole('button', { name: 'Finish feature tidy' }).click()
   await dialog(h.page).getByRole('button', { name: 'Finish feature' }).click()
-  await expect(toasts()).toContainText('Commit or stash your changes first: finishing switches branches.')
+  await expect(dialog(h.page)).toContainText('Commit or stash your changes first: finishing switches branches.')
   await dialog(h.page).getByRole('button', { name: 'Cancel' }).click()
   expect(head()).toBe('topic/tidy')
   git('checkout', '-q', '--', 'a.txt')
