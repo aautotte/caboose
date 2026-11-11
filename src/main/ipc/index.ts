@@ -6,7 +6,7 @@ import type { Db } from '../db'
 import { uuid } from '../db'
 import { GcFail, invalid } from '../errors'
 import type { GitRunner } from '../git/runner'
-import { UNDO_REFS, samePath } from '../git/ops'
+import { UNDO_REFS, blockingFiles, inTheWay, samePath } from '../git/ops'
 import { flowConfig, flowFinish, flowInit, flowStart } from '../git/flow'
 import type { Repos } from '../repos'
 import type { UndoStack } from '../undo'
@@ -339,9 +339,18 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
 
   // ---------- branches ----------
   handle('branch.create', z.object({ ...R, name: z.string().min(1).max(255), at: ref, checkout: z.boolean() }), async ({ repoId, name, at, checkout }) => {
-    if (checkout) await undoable(repoId, 'checkout', `Switch to ${name}`, () => ops(repoId).createBranch(name, at, true))
-    else await ops(repoId).createBranch(name, at, false)
-    return null
+    await exclusive(repoId, () => ops(repoId).createBranch(name, at))
+    if (!checkout) return { switched: false, reason: null }
+    // The branch is made either way. A switch that's refused (changes in the way, say) says why, rather than
+    // failing the whole thing: the branch is there, and the switch can be undone on its own.
+    try {
+      await undoable(repoId, 'checkout', `Switch to ${name}`, () => ops(repoId).checkout(name))
+      return { switched: true, reason: null }
+    } catch (e) {
+      if (!(e instanceof GcFail)) throw e
+      const blocked = blockingFiles(e.detail ?? '')
+      return { switched: false, reason: blocked ? inTheWay(blocked, 'switching') : e.message }
+    }
   })
   // ---------- Git Flow ----------
   const flowKind = z.enum(['feature', 'release', 'hotfix'])

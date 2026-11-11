@@ -341,7 +341,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
     if (last && hasMore && !loading && last.index > rows.length - 200) void act.loadMore(repoId)
   }, [items, hasMore, loading, rows.length, repoId])
 
-  // Keep the selected row (or the moving end of a Shift selection) in view when it changes from the keyboard.
+  // Keep the selected row (or the moving end of a Shift selection) in view when it changes.
   const selIndex = rows.findIndex((r) => r.sha === selected)
   const [extent, setExtent] = useState<string | null>(null)
   const extentIndex = multi.length && extent ? rows.findIndex((r) => r.sha === extent) : -1
@@ -350,13 +350,28 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   // view back to it from wherever you've scrolled.
   const viewKey = extentIndex >= 0 ? extent : selected
   const scrolledTo = useRef<string | null>(null)
+  // Set by a click or a key in the graph: the list stays put, or scrolls just enough to show the row. A selection
+  // from elsewhere (a branch in the panel, search, a link) that's off screen comes to the middle instead.
+  const fromGrid = useRef(false)
+  const moveHere = (): void => {
+    fromGrid.current = true
+    // A click that changes nothing (the row already selected) mustn't leave it set for the next jump.
+    setTimeout(() => (fromGrid.current = false))
+  }
   useEffect(() => {
     if (viewIndex < 0 || viewKey === scrolledTo.current) return
     scrolledTo.current = viewKey
-    v.scrollToIndex(viewIndex, { align: 'auto' })
+    // 'auto' keeps its alignment only when the row is already fully in view.
+    const inView = v.getOffsetForIndex(viewIndex, 'auto')?.[1] === 'auto'
+    if (fromGrid.current || inView) return void v.scrollToIndex(viewIndex, { align: 'auto' })
+    // The middle of what's visible under the sticky header. The rows (all ROW high) start below that header, which the
+    // virtualizer's own centring doesn't know about.
+    const el = parentRef.current
+    if (el) v.scrollToOffset(Math.max(0, viewIndex * ROW + ROW / 2 - (el.clientHeight - HEADER) / 2))
   }, [viewIndex, viewKey, v])
 
   const clickRow = (e: React.MouseEvent, sha: string): void => {
+    moveHere()
     if (sha !== 'wip' && bySha.get(sha)?.kind === 'commit' && (e.ctrlKey || e.metaKey)) {
       setExtent(null)
       return act.toggleSelect(repoId, sha, order)
@@ -372,6 +387,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const onKey = (e: React.KeyboardEvent): void => {
     const move = (d: number): void => {
       e.preventDefault()
+      moveHere()
       if (e.shiftKey && selected && selected !== 'wip') {
         // Shift: grow or shrink the selection from its moving end, over commits only.
         const from = order.indexOf(extentIndex >= 0 && extent ? extent : selected)
@@ -388,6 +404,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
     else if (e.key === 'ArrowUp' || e.key === 'k' || e.key === 'K') move(-1)
     else if (e.key === 'Escape' && multi.length) {
       e.preventDefault()
+      moveHere()
       setExtent(null)
       act.select(repoId, selected)
     }

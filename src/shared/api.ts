@@ -121,7 +121,8 @@ export interface Api {
   'worktree.cleanPreview': { in: R; out: CleanPreview }
   'worktree.clean': { in: R & { tracked: boolean; untracked: boolean; ignored: boolean }; out: { removed: number } }
 
-  'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: null }
+  /** reason: why it didn't switch to the new branch, when asked to and it couldn't (the branch is made anyway). */
+  'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: { switched: boolean; reason: string | null } }
   'flow.config': { in: R; out: FlowConfig | null }
   'flow.init': { in: R & { config: FlowConfig }; out: null }
   /** The branch it made and checked out. */
