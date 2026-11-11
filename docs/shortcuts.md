@@ -92,8 +92,8 @@ Reflog, Git activity log, Settings, Switch theme and Open in terminal, editor or
 2. Press the new keys. **Esc** leaves it as it was.
 
 The keys need Ctrl or Alt, or are one of F1 to F12: a key on its own is for typing and the lists. A few stay
-as they are: Ctrl+C, Ctrl+V, Ctrl+X and Ctrl+A, Ctrl+Enter (commit), Ctrl+Tab, Ctrl+1 to Ctrl+9, Ctrl+Home and
-Ctrl+End. A key another command has is offered with **Use it here instead**, which leaves the other one
+as they are: Ctrl+C, Ctrl+V, Ctrl+X and Ctrl+A, Ctrl+Enter (commit), Ctrl+Tab, Ctrl+Shift+← / → (moving a tab),
+Ctrl+1 to Ctrl+9, Ctrl+Home and Ctrl+End. A key another command has is offered with **Use it here instead**, which leaves the other one
 without a shortcut.
 
 Next to a shortcut, **×** takes it away and the arrow puts back the one it came with. **Put every shortcut
