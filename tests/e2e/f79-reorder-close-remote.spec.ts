@@ -3,9 +3,9 @@
 // clicking a remote branch's label in the graph checks it out, offering to reset the local branch when it has
 // commits of its own.
 import { test, expect, type Locator } from '@playwright/test'
-import { rmSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { commitRow, dialog, gitIn, invoke, launch, makeRepo, seed, toGraph, writeAndCommit, type Harness } from './harness'
+import { commitRow, dialog, gitIn, grid, invoke, launch, makeRepo, seed, toGraph, writeAndCommit, type Harness } from './harness'
 
 let h: Harness
 const ta = join(seed, 'ta')
@@ -149,6 +149,10 @@ test('F79-H4: the rebase list runs newest first, like the graph; dragging a row 
 })
 
 test('F79-H5: the oldest kept commit is the bottom row, and it can’t be squashed', async () => {
+  // H4's rebase, finished and back on the graph with the new history (otherwise the menu is for the old rows).
+  await expect(list()).toHaveCount(0)
+  await expect.poll(() => existsSync(join(ta, '.git', 'rebase-merge'))).toBe(false)
+  await expect(grid(h.page).getByRole('row').nth(1)).toHaveAccessibleName(/^One,/)
   await commitRow(h.page, 'Start').click({ button: 'right' })
   await h.page.getByRole('menuitem', { name: /^Rewrite main after this commit/ }).click()
   await expect.poll(rowsText).toEqual(['One', 'Three', 'Two'])
@@ -158,6 +162,9 @@ test('F79-H5: the oldest kept commit is the bottom row, and it can’t be squash
   await list().getByRole('listitem').last().getByRole('radio', { name: 'Keep' }).click()
   await list().getByRole('listitem').first().getByRole('radio', { name: 'Fixup' }).click()
   await h.page.getByRole('button', { name: 'Start rebase' }).click()
+  // The whole rebase: right after the picks the log already reads this, before the fixup is folded in.
+  await expect(list()).toHaveCount(0)
+  await expect.poll(() => existsSync(join(ta, '.git', 'rebase-merge'))).toBe(false)
   await expect.poll(() => h.git(ta, 'log', '--format=%s')).toBe('Three\nTwo\nStart')
   expect(h.git(ta, 'show', '--format=', '--name-only', 'HEAD').split('\n').sort()).toEqual(['one.txt', 'three.txt'])
 })
