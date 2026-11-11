@@ -1,6 +1,6 @@
 // A stand-in for github.com and api.github.com, for the tests: the device flow (a code, "pending" until the test
-// approves or denies it), /user, and the GraphQL query for a repository's pull requests. Every request is kept so a
-// test can check what Caboose sent.
+// approves or denies it), /user, the GraphQL query for a repository's pull requests, and creating one. Every request
+// is kept so a test can check what Caboose sent.
 import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
@@ -29,6 +29,10 @@ export interface FakeGitHub {
   pulls: FakePull[]
   /** owner/name it knows; any other gets NOT_FOUND. */
   repo: string
+  /** A new pull request's head commit, from its branch: the test reads it from the origin. */
+  shaOf: (branch: string) => string
+  /** The next new pull request is turned down (422) with this. */
+  refuse: string | null
   close: () => Promise<void>
 }
 
@@ -49,7 +53,9 @@ export async function fakeGitHub(repo: string, pulls: FakePull[]): Promise<FakeG
     tokens: new Set(['gho_cli_token']),
     revoke: () => f.tokens.clear(),
     pulls,
-    repo
+    repo,
+    shaOf: () => '',
+    refuse: null
   }
   const server = createServer(async (req, res) => {
     const body = await read(req)
@@ -74,6 +80,26 @@ export async function fakeGitHub(repo: string, pulls: FakePull[]): Promise<FakeG
       return json(200, { access_token: token, token_type: 'bearer', scope: 'repo' })
     }
     if (path === '/user') return authed() ? json(200, { login: 'octo', name: 'Octo Cat' }) : json(401, { message: 'Bad credentials' })
+    if (req.method === 'POST' && path === `/repos/${f.repo}/pulls`) {
+      if (!authed()) return json(401, { message: 'Bad credentials' })
+      const p = JSON.parse(body) as { head: string; base: string; title: string; body: string; draft: boolean }
+      const why = f.refuse ?? (f.pulls.some((x) => x.head === p.head && !x.fork) ? `A pull request already exists for ${f.repo.split('/')[0]}:${p.head}.` : null)
+      f.refuse = null
+      if (why) return json(422, { message: 'Validation Failed', errors: [{ resource: 'PullRequest', code: 'custom', message: why }] })
+      const number = Math.max(0, ...f.pulls.map((x) => x.number)) + 1
+      const made: FakePull = { number, title: p.title, author: 'octo', head: p.head, headSha: f.shaOf(p.head), base: p.base, draft: p.draft }
+      f.pulls.unshift(made)
+      return json(201, {
+        number,
+        title: p.title,
+        html_url: `https://github.com/${f.repo}/pull/${number}`,
+        draft: p.draft,
+        updated_at: '2026-11-11T10:00:00Z',
+        user: { login: 'octo' },
+        head: { ref: p.head, sha: made.headSha },
+        base: { ref: p.base }
+      })
+    }
     if (req.method === 'POST' && path === '/graphql') {
       if (!authed()) return json(401, { message: 'Bad credentials' })
       const v = (JSON.parse(body) as { variables: { owner: string; name: string } }).variables
@@ -81,6 +107,7 @@ export async function fakeGitHub(repo: string, pulls: FakePull[]): Promise<FakeG
       return json(200, {
         data: {
           repository: {
+            defaultBranchRef: { name: 'main' },
             pullRequests: {
               nodes: f.pulls.map((p) => ({
                 number: p.number,
@@ -105,5 +132,6 @@ export async function fakeGitHub(repo: string, pulls: FakePull[]): Promise<FakeG
   })
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  return { ...f, url, close: () => new Promise((r) => server.close(() => r())) } as FakeGitHub
+  // The same object, not a copy: the test sets refuse and shaOf on it.
+  return Object.assign(f, { url, close: () => new Promise<void>((r) => server.close(() => r())) }) as FakeGitHub
 }

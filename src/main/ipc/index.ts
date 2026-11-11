@@ -969,11 +969,25 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     if (!gh) return { state: 'none' as const }
     if (!github.token()) return { state: 'signedOut' as const, repo: gh.repo }
     try {
-      return { state: 'ok' as const, repo: gh.repo, remote: gh.remote, pulls: await github.pulls(gh.repo) }
+      return { state: 'ok' as const, repo: gh.repo, remote: gh.remote, ...(await github.pulls(gh.repo)) }
     } catch (e) {
       return { state: 'error' as const, repo: gh.repo, message: (e as Error).message }
     }
   })
+  handle('github.pullDraft', z.object({ ...R, branch: ref, base: ref }), async ({ repoId, branch, base }) => {
+    const gh = await ops(repoId).githubRemote()
+    if (!gh) throw invalid('This repository has no remote on GitHub.')
+    return ops(repoId).pullDraft(gh.remote, branch, base)
+  })
+  handle(
+    'github.createPull',
+    z.object({ ...R, head: ref, base: ref, title: z.string().trim().min(1).max(256), body: z.string().max(65_000), draft: z.boolean() }),
+    async ({ repoId, head, base, title, body, draft }) => {
+      const gh = await ops(repoId).githubRemote()
+      if (!gh) throw invalid('This repository has no remote on GitHub.')
+      return github.createPull(gh.repo, { head, base, title, body, draft })
+    }
+  )
   handle('github.fetchPull', z.object({ ...R, number: z.number().int().min(1), head: z.string().min(1).max(255), fromFork: z.boolean() }), async ({ repoId, number, head, fromFork }) => {
     const gh = await ops(repoId).githubRemote()
     if (!gh) throw invalid('This repository has no remote on GitHub.')

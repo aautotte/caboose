@@ -10,6 +10,7 @@ import { AuthorDialog, RebaseFromDialog, SquashMergeDialog } from './HistoryDial
 import { CleanDialog } from './CleanDialog'
 import { ApplyPatchDialog } from './PatchDialog'
 import { GitHubSignInDialog } from './GitHubDialog'
+import { CreatePullDialog } from './CreatePullDialog'
 import { EditCommandDialog, RunCommandDialog } from './CommandDialogs'
 import { FlowFinishDialog, FlowInitDialog, FlowStartDialog } from './FlowDialogs'
 import { AddRemoteDialog, EditRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
@@ -89,6 +90,8 @@ export function DialogHost(): React.JSX.Element | null {
       return <FlowFinishDialog d={d} />
     case 'githubSignIn':
       return <GitHubSignInDialog />
+    case 'createPull':
+      return <CreatePullDialog d={d} />
     case 'confirm':
       return (
         <ConfirmDialog

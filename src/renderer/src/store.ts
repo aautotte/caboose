@@ -69,6 +69,8 @@ export interface RepoState {
   /** Its pull requests on GitHub (or why there are none to show); null until asked. */
   pulls: PullsResult | null
   pullsLoading: boolean
+  /** When the pull requests were last read (ms); they're read again on their own when older than a few minutes. */
+  pullsAt: number
   /** "Not now" on the LFS notice, for this session. */
   lfsDismissed: boolean
   /** The checked-out commit's submodules and this repository's submodule settings; null until read. */
@@ -124,6 +126,7 @@ export type Dialog =
   | { kind: 'clean'; repoId: string; untrackedOnly?: boolean }
   | { kind: 'applyPatch'; repoId: string }
   | { kind: 'githubSignIn' }
+  | { kind: 'createPull'; repoId: string; branch: string }
   | { kind: 'flowInit'; repoId: string }
   | { kind: 'flowStart'; repoId: string; flowKind: FlowKind }
   | { kind: 'flowFinish'; repoId: string; flowKind: FlowKind; name: string }
@@ -265,6 +268,7 @@ export const emptyRepo = (): RepoState => ({
   lfs: null,
   pulls: null,
   pullsLoading: false,
+  pullsAt: 0,
   lfsDismissed: false,
   submodules: null,
   subOp: null,

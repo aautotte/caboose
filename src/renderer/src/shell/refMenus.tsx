@@ -1,4 +1,4 @@
-import { Download, Eye, EyeOff, GitBranchPlus, GitCommitVertical, GitCompare, GitMerge, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
+import { Download, Eye, EyeOff, GitBranchPlus, GitCommitVertical, GitCompare, GitMerge, GitPullRequestCreate, ListOrdered, RotateCcw, Tag, Trash2, Upload } from 'lucide-react'
 import type { MenuEntry } from '@/ui'
 import * as act from '@/actions'
 
@@ -26,6 +26,12 @@ export function pushEntry(repoId: string, branch: { name: string; isHead: boolea
     // The current branch keeps the toolbar's behaviour (asks where to publish it the first time).
     onSelect: branch.isHead ? () => void act.push(repoId) : to(remotes[0])
   }
+}
+
+/** "Create a pull request…" for a local branch on GitHub with none open yet, when signed in: made here, pushed first if needed. */
+export function createPullEntry(repoId: string, branch: string): MenuEntry | null {
+  if (!act.canOpenPull(repoId, branch)) return null
+  return { type: 'item', label: 'Create a pull request…', icon: <GitPullRequestCreate size={14} />, onSelect: () => act.createPullRequest(repoId, branch) }
 }
 
 /**

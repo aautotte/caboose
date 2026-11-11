@@ -3,6 +3,7 @@ import type {
   ActivityEntry,
   DeviceCode,
   GitHubUser,
+  PullDraft,
   PullRequest,
   PullsResult,
   AgentState,
@@ -311,6 +312,9 @@ export interface Api {
   'github.signOut': { in: Record<string, never>; out: null }
   'github.pulls': { in: R; out: PullsResult }
   /** Brings a pull request's branch here: the remote branch (same repository), or pr/<number> for a fork's. */
+  /** The title and description a new pull request for `branch` into `base` starts with, and whether to push first. */
+  'github.pullDraft': { in: R & { branch: string; base: string }; out: PullDraft }
+  'github.createPull': { in: R & { head: string; base: string; title: string; body: string; draft: boolean }; out: PullRequest }
   'github.fetchPull': { in: R & { number: number; head: string; fromFork: boolean }; out: { ref: string; fork: boolean } }
   'ssh.keys': { in: Record<string, never>; out: SshKey[] }
   'ssh.generate': { in: { name: string; comment: string; passphrase: string }; out: SshKey }
