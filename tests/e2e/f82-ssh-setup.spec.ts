@@ -45,7 +45,7 @@ const clipboard = () => h.electronApp.evaluate(({ clipboard }) => clipboard.read
 
 test('F82-H1: with no ssh-agent running, the list says so and Add to ssh-agent is off', async () => {
   await expect(ssh().getByRole('status', { name: 'ssh-agent' })).toContainText('ssh-agent isn’t running')
-  await expect(ssh().getByText('id_e2e', { exact: true })).toBeVisible()
+  await expect(ssh().getByRole('listitem').filter({ hasText: 'id_e2e' })).toBeVisible()
   await ssh().getByRole('button', { name: 'More for id_e2e' }).click()
   await expect(h.page.getByRole('menuitem', { name: 'Add to ssh-agent' })).toBeDisabled()
   await h.page.keyboard.press('Escape')
