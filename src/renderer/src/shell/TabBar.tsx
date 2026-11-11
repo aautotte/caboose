@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { Check, FolderGit2, Home, Plus, Settings2, UserRound, X } from 'lucide-react'
 import { DropdownMenu, Spinner, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
+import { useReorder } from '@/ui/useReorder'
 import { useApp } from '@/store'
 import * as act from '@/actions'
 import { useKey } from '@/lib/keys'
@@ -11,7 +11,13 @@ export function TabBar(): React.JSX.Element {
   const tabs = useApp((s) => s.tabs)
   const active = useApp((s) => s.active)
   const repos = useApp((s) => s.repos)
-  const [dragId, setDragId] = useState<string | null>(null)
+  const moveTab = (from: number, to: number): void => {
+    const ids = tabs.map((t) => t.id)
+    const [id] = ids.splice(from, 1)
+    ids.splice(to, 0, id)
+    void act.reorderTabs(ids)
+  }
+  const reorder = useReorder({ axis: 'x', count: tabs.length, onMove: moveTab })
 
   const onKey = (e: React.KeyboardEvent, i: number): void => {
     const ids = ['home', ...tabs.map((t) => t.id)]
@@ -19,6 +25,14 @@ export function TabBar(): React.JSX.Element {
     if (e.key === 'Delete' && i >= 0) {
       e.preventDefault()
       void act.closeTab(tabs[i].id)
+      return
+    }
+    // Ctrl+Shift+←/→ moves the tab itself, as dragging it does.
+    if ((e.key === 'ArrowRight' || e.key === 'ArrowLeft') && e.ctrlKey && e.shiftKey && i >= 0) {
+      e.preventDefault()
+      const to = i + (e.key === 'ArrowRight' ? 1 : -1)
+      if (to >= 0 && to < tabs.length) moveTab(i, to)
+      requestAnimationFrame(() => document.getElementById(`tab-${tabs[i].id}`)?.focus())
       return
     }
     if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
@@ -57,33 +71,18 @@ export function TabBar(): React.JSX.Element {
           return (
             <Tooltip key={t.id} content={t.path}>
               <div
-                draggable
-                onDragStart={(e) => {
-                  setDragId(t.id)
-                  e.dataTransfer.setData('application/x-caboose-tab', t.id)
-                }}
-                onDragOver={(e) => {
-                  if (dragId && e.dataTransfer.types.includes('application/x-caboose-tab')) e.preventDefault()
-                }}
-                onDrop={() => {
-                  if (!dragId || dragId === t.id) return
-                  const ids = tabs.map((x) => x.id).filter((id) => id !== dragId)
-                  ids.splice(ids.indexOf(t.id) + (tabs.findIndex((x) => x.id === dragId) < i ? 1 : 0), 0, dragId)
-                  void act.reorderTabs(ids)
-                  setDragId(null)
-                }}
-                onDragEnd={() => setDragId(null)}
+                {...reorder.itemProps(i)}
                 className={cn(
                   'group flex max-w-(--gc-tab-max-w) min-w-(--gc-tab-min-w) shrink-0 items-center border-t-2 border-r border-r-border',
                   active === t.id ? 'border-t-accent bg-bg text-text' : 'border-t-transparent text-muted hover:bg-row-hover',
-                  dragId === t.id && 'opacity-60'
+                  reorder.dragging === i && 'bg-surface-raised shadow-pop'
                 )}
               >
                 <button
                   id={`tab-${t.id}`}
                   role="tab"
                   aria-selected={active === t.id}
-                  aria-keyshortcuts="Delete"
+                  aria-keyshortcuts="Delete Control+Shift+ArrowLeft Control+Shift+ArrowRight"
                   tabIndex={active === t.id ? 0 : -1}
                   onClick={() => act.setActive(t.id)}
                   onKeyDown={(e) => onKey(e, i)}
@@ -98,6 +97,7 @@ export function TabBar(): React.JSX.Element {
                     (or Ctrl+W), which the tab announces through aria-keyshortcuts. */}
                 <span
                   aria-hidden
+                  data-no-drag
                   title={`Close ${name}`}
                   onClick={() => void act.closeTab(t.id)}
                   className={cn(

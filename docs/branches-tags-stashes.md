@@ -26,6 +26,8 @@ Double-click a branch, or choose **Check out** from its menu.
 - Double-clicking a **remote** branch checks out the local branch that tracks it, creating it if needed, and
   fast-forwards it to the remote. If the local branch has commits of its own and can't fast-forward, Caboose offers
   to reset it instead.
+- Clicking a **remote** branch's label in the graph (the one with a cloud) does the same, but when the local
+  branch can't fast-forward, resetting it to the remote branch is what it offers first.
 - If your uncommitted changes are in the way, Caboose says so and offers to stash them first.
 - A branch checked out in another worktree shows **Open its worktree** instead.
 

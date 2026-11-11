@@ -48,10 +48,10 @@ Each repository opens in its own tab.
 
 | | |
 | --- | --- |
-| Close the tab | Ctrl+W, or the × on the tab |
+| Close the tab | Ctrl+W, or the × on the tab. The tab you were on before it opens |
 | Go to tab 1 to 9 | Ctrl+1 … Ctrl+9 |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
-| Reorder | drag a tab |
+| Reorder | drag a tab (Esc puts it back), or Ctrl+Shift+← / → on it |
 
 Your open tabs come back, in the same order, when you restart. Each [profile](settings.md#profile) has its own.
 

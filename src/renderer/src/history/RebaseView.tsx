@@ -3,6 +3,7 @@ import { AlertTriangle, GitCommitHorizontal, GripVertical, ListRestart, X } from
 import type { RebaseAction, RebaseRow } from '../../../shared/types'
 import { Avatar, Button, Checkbox, Dialog, EmptyState, Field, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
+import { useReorder } from '@/ui/useReorder'
 import { call } from '@/lib/api'
 import { plural, relativeTime, shortSha } from '@/lib/format'
 import { useRepo } from '@/store'
@@ -18,8 +19,8 @@ const actions: Array<{ value: RebaseAction; key: string; label: string; help: st
   { value: 'pick', key: 'p', label: 'Keep', help: 'Keep this commit as it is' },
   { value: 'reword', key: 'r', label: 'Reword', help: 'Keep it, with a new message' },
   { value: 'edit', key: 'e', label: 'Edit', help: 'Stop after this commit to change it, then continue' },
-  { value: 'squash', key: 's', label: 'Squash', help: 'Fold into the commit above, keeping both messages' },
-  { value: 'fixup', key: 'f', label: 'Fixup', help: 'Fold into the commit above, dropping this message' },
+  { value: 'squash', key: 's', label: 'Squash', help: 'Fold into the commit below, keeping both messages' },
+  { value: 'fixup', key: 'f', label: 'Fixup', help: 'Fold into the commit below, dropping this message' },
   { value: 'drop', key: 'd', label: 'Drop', help: 'Leave this commit out' }
 ]
 
@@ -27,7 +28,7 @@ const actions: Array<{ value: RebaseAction; key: string; label: string; help: st
  * S11, two modes.
  *   rebase: rewrite the commits after `onto` on the current branch (keep, reword, squash, fixup, drop, reorder).
  *   cherry: copy commits from `tip` onto the current branch (keep or skip, reorder).
- * The list runs oldest first, top to bottom, which is the order git replays them.
+ * The list runs newest first, as the graph does; git replays it from the bottom up.
  */
 export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }: { repoId: string; mode: 'rebase' | 'cherry'; base: string; baseLabel: string; range?: string[]; /** Onto another branch: worth running even with every commit kept as it is. */ ontoBranch?: boolean }): React.JSX.Element {
   const [allRows, setRows] = useState<RebaseRow[] | null>(null)
@@ -41,7 +42,6 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const [steps, setSteps] = useState<Step[]>([])
   const [focus, setFocus] = useState(0)
   const [reword, setReword] = useState<number | null>(null)
-  const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [running, setRunning] = useState(false)
   // As for a commit, git hooks run unless this is ticked.
   const [skipHooks, setSkipHooks] = useState(false)
@@ -51,6 +51,8 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const head = useRepo(repoId, (r) => r.refs?.head)
   const status = useRepo(repoId, (r) => r.status)
   const listRef = useRef<HTMLOListElement>(null)
+  // The rows as shown, newest first (the previews list them oldest first, in the order git replays them).
+  const shown = useMemo(() => (rows ? [...rows].reverse() : null), [rows])
   const choices = mode === 'cherry' ? actions.filter((a) => a.value === 'pick' || a.value === 'drop') : actions
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
         setBranch(p.branch)
         setStacked(p.stacked.map((b) => b.name))
         setMoveStacked(p.updateRefs)
-        setSteps(p.rows.filter((row) => !range || range.includes(row.sha)).map((row) => ({ row, action: 'pick' })))
+        setSteps(p.rows.filter((row) => !range || range.includes(row.sha)).map((row): Step => ({ row, action: 'pick' })).reverse())
       })
       .catch((e: Error) => live && setError(e.message))
     return () => {
@@ -87,14 +89,14 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const kept = steps.filter((s) => s.action !== 'drop')
   const problem = useMemo(() => {
     if (mode === 'cherry') return kept.length ? null : 'Keep at least one commit to copy.'
-    const first = kept[0]
-    if (first && (first.action === 'squash' || first.action === 'fixup')) return 'The first kept commit can’t be squashed: there’s nothing above it to fold into.'
+    const oldest = kept[kept.length - 1]
+    if (oldest && (oldest.action === 'squash' || oldest.action === 'fixup')) return 'The oldest kept commit can’t be squashed: there’s nothing below it to fold into.'
     if (steps.some((s) => s.action === 'reword' && !s.message?.trim())) return 'A reworded commit needs a message.'
     return null
   }, [steps, kept, mode])
   const dirty = (status?.changes ?? []).some((c) => c.worktree !== '?' || c.index !== '.')
   const busyOp = status?.op && status.op.kind !== 'none'
-  const unchanged = steps.every((s, i) => s.action === 'pick' && s.row.sha === rows?.[i]?.sha)
+  const unchanged = steps.every((s, i) => s.action === 'pick' && s.row.sha === shown?.[i]?.sha)
 
   const setAction = (i: number, a: RebaseAction): void => {
     setSteps((list) => list.map((s, k) => (k === i ? { ...s, action: a, message: a === 'reword' ? (s.message ?? fullMessage(s.row)) : s.message } : s)))
@@ -111,16 +113,19 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
     setFocus(to)
     requestAnimationFrame(() => (listRef.current?.children[to] as HTMLElement | undefined)?.focus())
   }
+  const reorder = useReorder({ axis: 'y', count: steps.length, onMove: move })
 
   const start = async (): Promise<void> => {
     if (problem || running) return
     setRunning(true)
-    if (mode === 'cherry') await act.cherryPick(repoId, kept.map((s) => s.row.sha))
+    // Git takes them oldest first: the list from the bottom up.
+    const replay = [...steps].reverse()
+    if (mode === 'cherry') await act.cherryPick(repoId, replay.filter((s) => s.action !== 'drop').map((s) => s.row.sha))
     else
       await act.rebaseInteractive(
         repoId,
         base,
-        [...steps.map((s) => ({ sha: s.row.sha, action: s.action, message: s.action === 'reword' ? s.message : undefined })), ...tail.map((r) => ({ sha: r.sha, action: 'pick' as const }))],
+        [...replay.map((s) => ({ sha: s.row.sha, action: s.action, message: s.action === 'reword' ? s.message : undefined })), ...tail.map((r) => ({ sha: r.sha, action: 'pick' as const }))],
         skipHooks,
         moveStacked && stacked.length > 0
       )
@@ -185,38 +190,30 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
       ) : (
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-2 text-sm text-muted">
-            <span>Oldest at the top. Drag rows, or Alt+↑/↓, to reorder.</span>
+            <span>Newest at the top, as in the graph. Drag rows, or Alt+↑/↓, to reorder.</span>
             <span>
               Keys: {choices.map((c) => `${c.key.toUpperCase()} ${c.label.toLowerCase()}`).join(' · ')}
             </span>
           </div>
-          <ol ref={listRef} aria-label="Commits, oldest first" className="min-h-0 flex-1 overflow-y-auto p-2">
+          {tail.length ? (
+            <p className="shrink-0 border-b border-border px-4 py-2 text-sm text-muted">
+              Above these, {plural(tail.length, 'newer commit')} on {branch ?? 'the branch'} {tail.length === 1 ? 'is' : 'are'} replayed on top, unchanged.
+            </p>
+          ) : null}
+          <ol ref={listRef} aria-label="Commits, newest first" className="min-h-0 flex-1 overflow-y-auto p-2">
             {steps.map((s, i) => (
               <li
                 key={s.row.sha}
                 tabIndex={i === focus ? 0 : -1}
                 onFocus={() => setFocus(i)}
                 onKeyDown={(e) => onRowKey(e, i)}
-                draggable
-                onDragStart={(e) => {
-                  setDragFrom(i)
-                  e.dataTransfer.effectAllowed = 'move'
-                }}
-                onDragOver={(e) => {
-                  if (dragFrom === null) return
-                  e.preventDefault()
-                  if (dragFrom !== i) {
-                    move(dragFrom, i)
-                    setDragFrom(i)
-                  }
-                }}
-                onDragEnd={() => setDragFrom(null)}
+                {...reorder.itemProps(i)}
                 aria-label={`${s.row.summary}, ${actions.find((a) => a.value === s.action)!.label}`}
                 className={cn(
                   'mb-1 flex min-h-10 items-center gap-2 rounded-md border border-border bg-surface px-2 outline-none focus-visible:outline-2 focus-visible:outline-focus-ring',
                   s.action === 'drop' && 'opacity-50',
                   (s.action === 'squash' || s.action === 'fixup') && 'ml-6',
-                  dragFrom === i && 'border-accent'
+                  reorder.dragging === i && 'border-accent shadow-pop'
                 )}
               >
                 <GripVertical size={14} aria-hidden className="shrink-0 cursor-grab text-muted" />
@@ -253,11 +250,6 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
               </li>
             ))}
           </ol>
-          {tail.length ? (
-            <p className="shrink-0 border-t border-border px-4 py-2 text-sm text-muted">
-              Then {plural(tail.length, 'newer commit')} on {branch ?? 'the branch'} {tail.length === 1 ? 'is' : 'are'} replayed on top, unchanged.
-            </p>
-          ) : null}
           <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-surface px-4 py-3">
             <p role={problem || dirty || busyOp ? 'alert' : undefined} className={cn('min-w-60 flex-1 text-sm', problem || dirty || busyOp ? 'text-danger' : 'text-muted')}>
               {busyOp
@@ -280,7 +272,7 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
             ) : null}
             {mode === 'rebase' ? <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} /> : null}
             <Tooltip content="Back to the original list">
-              <IconButton label="Reset the list" disabled={unchanged} onClick={() => setSteps(rows.map((row) => ({ row, action: 'pick' })))}>
+              <IconButton label="Reset the list" disabled={unchanged} onClick={() => setSteps((shown ?? []).map((row) => ({ row, action: 'pick' })))}>
                 <ListRestart size={16} />
               </IconButton>
             </Tooltip>

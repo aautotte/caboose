@@ -82,7 +82,7 @@ test('S09 file history', async () => {
 test('S11 interactive rebase', async () => {
   await toGraph(h.page)
   await menu(h.page, commitRow(h.page, 'Update the changelog (4)'), /^Rewrite main after this commit/)
-  await h.page.getByRole('list', { name: 'Commits, oldest first' }).waitFor()
+  await h.page.getByRole('list', { name: 'Commits, newest first' }).waitFor()
   await scan('S11')
 })
 test('S12 command palette', async () => {

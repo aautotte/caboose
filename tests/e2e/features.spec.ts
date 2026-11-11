@@ -168,16 +168,17 @@ test('interactive rebase: reword one commit and squash the next into it', async 
   const base = git('rev-parse', 'HEAD~2')
   const before = git('rev-parse', 'HEAD')
   await menu(commitRow('Update the changelog (6)'), /^Rewrite main after this commit/)
-  const list = page.getByRole('list', { name: 'Commits, oldest first' })
+  const list = page.getByRole('list', { name: 'Commits, newest first' })
   await expect(list.getByRole('listitem')).toHaveCount(2)
-  await list.getByRole('listitem').nth(0).getByRole('radio', { name: 'Reword' }).click()
+  // Newest at the top: reword the older one (below), and squash the newer one (above) into it.
+  await list.getByRole('listitem').nth(1).getByRole('radio', { name: 'Reword' }).click()
   await dialog().getByLabel('Summary').fill('Show the live temperature')
   await dialog().getByRole('button', { name: 'Save message' }).click()
-  await list.getByRole('listitem').nth(1).getByRole('radio', { name: 'Squash' }).click()
+  await list.getByRole('listitem').nth(0).getByRole('radio', { name: 'Squash' }).click()
   await page.getByRole('button', { name: 'Start rebase' }).click()
 
   // Wait for the whole rebase: right after the reword step HEAD already has the new summary, before the squash.
-  await expect(page.getByRole('list', { name: 'Commits, oldest first' })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: 'Commits, newest first' })).toHaveCount(0)
   await expect.poll(gitOr('log', '-1', '--format=%B')).toContain('Time out slow API calls after 5 seconds')
   expect(subject()).toBe('Show the live temperature')
   expect(git('rev-parse', 'HEAD~1')).toBe(base)
