@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
+import type { CommandContext, CustomCommand } from './lib/custom'
 
 export type Center =
   | { kind: 'graph' }
@@ -121,6 +122,10 @@ export type Dialog =
   /** Set the author of commits, or add a co-author to them. */
   /** `draft`: a co-author for the commit being written (no shas), not for commits already made. */
   | { kind: 'author'; repoId: string; shas: string[]; mode: 'set' | 'coAuthor' | 'draft' }
+  /** One of your commands: its questions, then what it prints (each when it has some). */
+  | { kind: 'runCommand'; repoId: string; commandId: string; ctx: CommandContext }
+  /** Write a new command (no commandId) or change one. */
+  | { kind: 'editCommand'; commandId?: string }
   | {
       kind: 'confirm'
       title: string
@@ -168,6 +173,10 @@ export interface Prefs {
   /** The side panels shrunk to a thin rail (Ctrl+J, Ctrl+K). */
   leftCollapsed: boolean
   detailCollapsed: boolean
+  /** Shortcuts you changed, by command id (lib/keys.ts); '' takes a command's shortcut away. */
+  keymap: Record<string, string>
+  /** Your own git commands (Settings › Your commands). */
+  customCommands: CustomCommand[]
 }
 
 // Preferences live in the app database (main process). A copy in localStorage paints the right theme
@@ -198,7 +207,9 @@ export const defaultPrefs: Prefs = {
   showUntracked: true,
   fileTree: false,
   leftCollapsed: false,
-  detailCollapsed: false
+  detailCollapsed: false,
+  keymap: {},
+  customCommands: []
 }
 
 function loadPrefs(): Prefs {

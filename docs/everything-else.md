@@ -20,7 +20,8 @@ exists.
 
 **Ctrl+P**, or the ⌘ button in the toolbar. Type to find a command: pull, push, fetch, stage, stash, new branch,
 new worktree, bisect, open in editor, switch theme, settings and more. It also lists the branches, to check one
-out or merge it, and offers blame and file history when a file is open.
+out or merge it, offers blame and file history when a file is open, and has
+[your own commands](custom-commands.md). Each command shows its shortcut, if it has one.
 
 ## Panels
 

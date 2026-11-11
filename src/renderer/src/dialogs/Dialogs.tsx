@@ -9,6 +9,7 @@ import { ProfilesDialog } from './ProfilesDialog'
 import { AuthorDialog, RebaseFromDialog, SquashMergeDialog } from './HistoryDialogs'
 import { CleanDialog } from './CleanDialog'
 import { ApplyPatchDialog } from './PatchDialog'
+import { EditCommandDialog, RunCommandDialog } from './CommandDialogs'
 import { AddRemoteDialog, EditRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
@@ -74,6 +75,10 @@ export function DialogHost(): React.JSX.Element | null {
       return <CleanDialog d={d} />
     case 'applyPatch':
       return <ApplyPatchDialog d={d} />
+    case 'runCommand':
+      return <RunCommandDialog d={d} />
+    case 'editCommand':
+      return <EditCommandDialog d={d} />
     case 'confirm':
       return (
         <ConfirmDialog

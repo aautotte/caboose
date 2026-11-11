@@ -350,6 +350,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('bisect.run', z.object({ ...R, command: z.string().min(1).max(4000), opId }), ({ repoId, command, opId: id }) =>
     exclusive(repoId, async () => (await ops(repoId).bisectRun(command, id, output(id)), null))
   )
+  handle('custom.run', z.object({ ...R, args: z.array(z.string().max(4000)).min(1).max(200), opId }), ({ repoId, args, opId: id }) =>
+    exclusive(repoId, () => ops(repoId).runCustom(args, id, output(id)))
+  )
   handle('branch.checkout', z.object({ ...R, ref, opId: opId.optional() }), async ({ repoId, ref, opId: id }) => {
     await undoable(repoId, 'checkout', `Switch to ${shortRef(ref)}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
     return null

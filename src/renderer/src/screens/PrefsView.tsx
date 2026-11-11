@@ -7,6 +7,7 @@ import { call } from '@/lib/api'
 import { DIFF_CONTEXT_STEPS, setPrefs, useApp, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { toast } from '@/ui/toastBus'
+import { CommandsGroup, ShortcutsGroup } from './KeysPrefs'
 
 const sections = [
   { id: 'general', label: 'General' },
@@ -16,6 +17,8 @@ const sections = [
   { id: 'identity', label: 'Your name and email' },
   { id: 'signing', label: 'Commit signing' },
   { id: 'tools', label: 'External tools' },
+  { id: 'commands', label: 'Your commands' },
+  { id: 'shortcuts', label: 'Keyboard shortcuts' },
   { id: 'ssh', label: 'SSH keys' },
   { id: 'repo', label: 'This repository' },
   { id: 'submodules', label: 'Submodules' }
@@ -193,6 +196,10 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
               <ConfigRow label="Merge tool" configKey="merge.tool" help="Used by “Open in merge tool” on a conflicted file." />
             </Group>
 
+            <CommandsGroup />
+
+            <ShortcutsGroup />
+
             <Group id="ssh" title="SSH keys" note="Public keys in your .ssh folder. Add one to your Git host to push and pull over SSH.">
               <SshKeys />
             </Group>
@@ -321,7 +328,7 @@ function ProfileGroup(): React.JSX.Element {
   )
 }
 
-function Group({ id, title, note, children }: { id: string; title: string; note?: string; children: React.ReactNode }): React.JSX.Element {
+export function Group({ id, title, note, children }: { id: string; title: string; note?: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section id={`prefs-${id}`} aria-labelledby={`prefs-${id}-h`} className="scroll-mt-4">
       <h3 id={`prefs-${id}-h`} className="text-lg text-text">

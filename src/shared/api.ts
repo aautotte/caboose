@@ -122,6 +122,8 @@ export interface Api {
   'bisect.reset': { in: R; out: null }
   /** git bisect run with a command; its output comes as op:output events. */
   'bisect.run': { in: R & { command: string; opId: string }; out: null }
+  /** One of your own commands, already split into arguments. Its exit code and output, whatever they are. */
+  'custom.run': { in: R & { args: string[]; opId: string }; out: { code: number; stdout: string; stderr: string } }
   'branch.checkout': { in: R & { ref: string; opId?: string }; out: null }
   'branch.rename': { in: R & { name: string; newName: string }; out: null }
   'branch.delete': { in: R & { name: string; force: boolean }; out: null }
