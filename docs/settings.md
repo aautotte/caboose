@@ -116,7 +116,8 @@ has changed is refused, and the result says so. **What ssh said** shows its own 
 
 ## GitHub
 
-Signing in to GitHub lets Caboose list each repository's [pull requests](syncing.md#pull-requests-on-github).
+Signing in to GitHub lets Caboose list each repository's [pull requests](syncing.md#pull-requests-on-github) and
+[create new ones](syncing.md#creating-a-pull-request).
 
 **Sign in to GitHub…** shows a short code. **Copy the code and open GitHub** opens GitHub's page in your browser:
 paste the code there, then authorize Caboose. The dialog closes on its own once you have. Caboose never sees your

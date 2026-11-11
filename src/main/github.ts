@@ -159,18 +159,40 @@ export class GitHub {
     return { login: u.login, name: u.name ?? null }
   }
 
-  /** The open pull requests of owner/name, newest activity first, with their checks and review state. */
-  async pulls(repo: string): Promise<PullRequest[]> {
+  /** A new pull request on owner/name, from its branch `head` into `base`. */
+  async createPull(repo: string, p: { head: string; base: string; title: string; body: string; draft: boolean }): Promise<PullRequest> {
+    const t = this.token()
+    if (!t) throw invalid('Sign in to GitHub first.')
+    const n = (await this.api(t, `/repos/${repo}/pulls`, p, 'POST')) as RestPull
+    return {
+      number: n.number,
+      title: n.title,
+      url: n.html_url,
+      author: n.user?.login ?? 'ghost',
+      draft: !!n.draft,
+      updatedAt: n.updated_at,
+      head: n.head.ref,
+      headSha: n.head.sha,
+      base: n.base.ref,
+      fromFork: false,
+      checks: null,
+      review: null
+    }
+  }
+
+  /** The open pull requests of owner/name, newest activity first, with their checks and review state; and its default branch. */
+  async pulls(repo: string): Promise<{ pulls: PullRequest[]; defaultBranch: string }> {
     const t = this.token()
     if (!t) throw invalid('Sign in to GitHub first.')
     const [owner, name] = repo.split('/')
     const r = (await this.api(t, '/graphql', { query: PULLS_QUERY, variables: { owner, name } })) as GraphQLPulls
     const nodes = r.data?.repository?.pullRequests.nodes
+    const defaultBranch = r.data?.repository?.defaultBranchRef?.name ?? 'main'
     if (!nodes) {
       if (r.errors?.some((e) => e.type === 'NOT_FOUND')) throw invalid(`GitHub doesn’t show you ${repo}: it doesn’t exist, or it’s private and this sign-in can’t see it.`)
       throw fail(`GitHub didn’t list the pull requests: ${r.errors?.[0]?.message ?? 'no reason given'}`)
     }
-    return nodes.map((n) => {
+    const pulls = nodes.map((n): PullRequest => {
       const state = n.commits.nodes[0]?.commit.statusCheckRollup?.state
       return {
         number: n.number,
@@ -187,15 +209,17 @@ export class GitHub {
         review: n.reviewDecision === 'APPROVED' ? 'approved' : n.reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : n.reviewDecision === 'REVIEW_REQUIRED' ? 'required' : null
       }
     })
+    return { pulls, defaultBranch }
   }
 
-  private async api(token: string, path: string, graphql?: unknown): Promise<unknown> {
+  /** A GET, or a POST of `body` (GraphQL's, or REST's with method POST). */
+  private async api(token: string, path: string, body?: unknown, method = body ? 'POST' : 'GET'): Promise<unknown> {
     let res: Response
     try {
       res = await net.fetch(`${API}${path}`, {
-        method: graphql ? 'POST' : 'GET',
-        headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', ...(graphql ? { 'Content-Type': 'application/json' } : {}) },
-        body: graphql ? JSON.stringify(graphql) : undefined
+        method,
+        headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined
       })
     } catch (e) {
       throw fail('Couldn’t reach GitHub. Check your connection, then try again.', (e as Error).message)
@@ -206,13 +230,17 @@ export class GitHub {
       throw invalid('GitHub no longer accepts this sign-in (it was revoked, or it ran out). Sign in again.')
     }
     if (!res.ok) {
-      const message = (() => {
+      const j = (() => {
         try {
-          return (JSON.parse(text) as { message?: string }).message
+          return JSON.parse(text) as { message?: string; errors?: Array<{ message?: string; code?: string; field?: string }> }
         } catch {
-          return undefined
+          return {}
         }
       })()
+      const message = j.message
+      // "Validation Failed" alone says little: GitHub puts what was wrong in errors, like "A pull request already exists for acme:x."
+      const why = j.errors?.map((e) => e.message ?? (e.field ? `${e.field} is ${e.code ?? 'invalid'}` : '')).filter(Boolean) ?? []
+      if (res.status === 422) throw invalid(`GitHub turned it down: ${why.length ? why.join(' ') : (message ?? 'no reason given')}`)
       throw fail(res.status === 403 ? `GitHub refused: ${message ?? 'no reason given'}. An organization may need to approve Caboose first.` : `GitHub answered HTTP ${res.status}${message ? `: ${message}` : ''}.`, text.slice(0, 500))
     }
     return JSON.parse(text)
@@ -221,6 +249,7 @@ export class GitHub {
 
 const PULLS_QUERY = `query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
     pullRequests(states: OPEN, first: 50, orderBy: { field: UPDATED_AT, direction: DESC }) {
       nodes {
         number title url isDraft updatedAt isCrossRepository
@@ -235,6 +264,7 @@ const PULLS_QUERY = `query($owner: String!, $name: String!) {
 interface GraphQLPulls {
   data?: {
     repository: {
+      defaultBranchRef: { name: string } | null
       pullRequests: {
         nodes: Array<{
           number: number
@@ -254,6 +284,17 @@ interface GraphQLPulls {
     } | null
   }
   errors?: Array<{ type?: string; message: string }>
+}
+
+interface RestPull {
+  number: number
+  title: string
+  html_url: string
+  draft?: boolean
+  updated_at: string
+  user: { login: string } | null
+  head: { ref: string; sha: string }
+  base: { ref: string }
 }
 
 /** owner/name of a github.com repository, from a remote URL (https, ssh or git@github.com:owner/name). */

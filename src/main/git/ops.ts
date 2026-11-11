@@ -30,6 +30,7 @@ import type {
   OperationState,
   CleanPreview,
   OpResult,
+  PullDraft,
   PullMode,
   ReflogEntry,
   Refs,
@@ -2335,7 +2336,15 @@ export class RepoOps {
 
   /** The remote on github.com that pull requests come from: origin if it's there, else the first; its fetch or push URL. */
   async githubRemote(): Promise<{ remote: string; repo: string } | null> {
-    const found = (await this.remotes()).map((r) => ({ remote: r.name, repo: githubRepo(r.fetchUrl) ?? githubRepo(r.pushUrl) })).filter((r): r is { remote: string; repo: string } => !!r.repo)
+    // The URLs as written too, before url.<base>.insteadOf rewrites them: a mirror or a local copy can stand in for GitHub.
+    const written = new Map<string, string[]>()
+    for (const line of ((await this.tryGit(['config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'])) ?? '').split('\n')) {
+      const m = /^remote\.(.+)\.(?:url|pushurl) (.+)$/.exec(line.trim())
+      if (m) written.set(m[1], [...(written.get(m[1]) ?? []), m[2]])
+    }
+    const found = (await this.remotes())
+      .map((r) => ({ remote: r.name, repo: [r.fetchUrl, r.pushUrl, ...(written.get(r.name) ?? [])].map(githubRepo).find(Boolean) ?? null }))
+      .filter((r): r is { remote: string; repo: string } => !!r.repo)
     return found.find((r) => r.remote === 'origin') ?? found[0] ?? null
   }
 
@@ -2361,6 +2370,41 @@ export class RepoOps {
       throw e
     }
     return { ref: local, fork: true }
+  }
+
+  /**
+   * A new pull request for `branch` into `base`: with one commit, its message; with several, a title from the
+   * branch's name and their subjects as a list. Also whether the branch is on `remote` yet, and up to date there.
+   */
+  async pullDraft(remote: string, branch: string, base: string): Promise<PullDraft> {
+    this.safeRev(remote)
+    await this.safeBranchName(branch)
+    await this.safeBranchName(base)
+    const up = (await this.tryGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]))?.trim() ?? ''
+    const there = up.startsWith(`${remote}/`) && !!(await this.tryGit(['rev-parse', '-q', '--verify', `refs/remotes/${up}`]))
+    const push = !there ? 'none' : Number((await this.git(['rev-list', '--count', `refs/remotes/${up}..refs/heads/${branch}`])).trim()) > 0 ? 'ahead' : 'pushed'
+    const baseRef = (await this.tryGit(['rev-parse', '-q', '--verify', `refs/remotes/${remote}/${base}`])) ? `refs/remotes/${remote}/${base}` : `refs/heads/${base}`
+    const log = (await this.tryGit(['log', '--no-merges', '--reverse', '--format=%s%x1f%b%x1e', `${baseRef}..refs/heads/${branch}`])) ?? ''
+    const commits = log
+      .split('\x1e')
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .map((c) => {
+        const [subject, body = ''] = c.split('\x1f')
+        return { subject: subject.trim(), body: body.trim() }
+      })
+    const fromName = (): string => {
+      const words = (branch.split('/').pop() ?? branch).replace(/[-_]+/g, ' ').trim()
+      return words ? words[0].toUpperCase() + words.slice(1) : branch
+    }
+    return {
+      title: commits.length === 1 ? commits[0].subject : fromName(),
+      body: commits.length === 1 ? commits[0].body : commits.map((c) => `- ${c.subject}`).join('\n'),
+      commits: commits.length,
+      push,
+      head: there ? up.slice(remote.length + 1) : branch,
+      track: !up
+    }
   }
 
   async remotes(): Promise<Remote[]> {

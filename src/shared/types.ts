@@ -570,6 +570,22 @@ export interface GitHubUser {
   name: string | null
 }
 
+/** What a new pull request for a branch starts with, and what pushing it needs first. */
+export interface PullDraft {
+  title: string
+  body: string
+  /** Commits on the branch that the base doesn't have; GitHub turns down a pull request with none. */
+  commits: number
+  /**
+   * none: not on the GitHub remote yet; ahead: there, with commits still to push; pushed: up to date there.
+   */
+  push: 'none' | 'ahead' | 'pushed'
+  /** The branch's name on the remote: what the pull request is from. */
+  head: string
+  /** Pushing it should also make it track the remote branch: it tracks nothing yet. */
+  track: boolean
+}
+
 /** Step one of signing in to GitHub: the code to type at its page. */
 export interface DeviceCode {
   userCode: string
@@ -600,7 +616,7 @@ export interface PullRequest {
 export type PullsResult =
   | { state: 'none' } // no remote on github.com
   | { state: 'signedOut'; repo: string }
-  | { state: 'ok'; repo: string; remote: string; pulls: PullRequest[] }
+  | { state: 'ok'; repo: string; remote: string; defaultBranch: string; pulls: PullRequest[] }
   | { state: 'error'; repo: string; message: string }
 
 export type GraphColumnKey = 'author' | 'date' | 'sha'

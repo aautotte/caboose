@@ -1,10 +1,10 @@
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp, Workflow, Flag, GitPullRequest, CircleCheck, CircleX, CircleDot, ExternalLink } from 'lucide-react'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp, Workflow, Flag, GitPullRequest, GitPullRequestCreate, CircleCheck, CircleX, CircleDot, ExternalLink } from 'lucide-react'
 import type { PullRequest, Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
-import { compareEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
+import { compareEntry, createPullEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
@@ -98,7 +98,11 @@ function PullsSection({ repoId }: { repoId: string }): React.JSX.Element | null 
   const pulls = useRepo(repoId, (r) => r.pulls)
   const loading = useRepo(repoId, (r) => r.pullsLoading)
   const selected = useRepo(repoId, (r) => r.selected)
+  const head = useRepo(repoId, (r) => r.refs?.head.branch)
+  // Read for the offer below: it changes when the branch is pushed.
+  useRepo(repoId, (r) => r.refs)
   if (!pulls || pulls.state === 'none') return null
+  const offer = pulls.state === 'ok' && head && act.canOpenPull(repoId, head, true) ? head : null
   const list = pulls.state === 'ok' ? pulls.pulls : []
   const note =
     pulls.state === 'signedOut' ? (
@@ -109,6 +113,12 @@ function PullsSection({ repoId }: { repoId: string }): React.JSX.Element | null 
       </div>
     ) : pulls.state === 'error' ? (
       <p className="px-7 pb-2 text-sm text-danger">{pulls.message}</p>
+    ) : offer ? (
+      <div className="px-7 pb-2">
+        <Button size="sm" icon={<GitPullRequestCreate size={14} />} onClick={() => act.createPullRequest(repoId, offer)}>
+          Create a pull request for {offer}…
+        </Button>
+      </div>
     ) : null
   const checks = { success: 'checks passed', failure: 'checks failed', pending: 'checks running' } as const
   const review = { approved: 'approved', changes: 'changes requested', required: 'review required' } as const
@@ -344,6 +354,8 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
   if (r.kind === 'local') {
     m.push(pullEntry(repoId, { name: r.short, isHead: r.isHead, upstream: r.upstream, upstreamGone: r.upstreamGone, worktree: r.worktree }))
     m.push(pushEntry(repoId, { name: r.short, isHead: r.isHead, upstream: r.upstream }, remotes))
+    const pr = createPullEntry(repoId, r.short)
+    if (pr) m.push(pr)
     m.push({ type: 'item', label: 'New branch from here…', onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: r.short, atLabel: r.short }) })
     m.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.short }) })
     m.push({ type: 'item', label: r.upstream ? 'Change upstream…' : 'Set upstream…', icon: <Link size={14} />, onSelect: () => act.openDialog({ kind: 'upstream', repoId, branch: r.short }) })

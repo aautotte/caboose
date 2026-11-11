@@ -1,5 +1,5 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowFinished, FlowKind, GitHubUser, GraphColumn, GraphFilter, PullRequest, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowFinished, FlowKind, GitHubUser, GraphColumn, GraphFilter, PullDraft, PullRequest, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural, refLabel } from './lib/format'
@@ -1634,7 +1634,14 @@ export async function push(repoId: string, opts: PushOpts = {}, subChecked = fal
     })
   } else if (res?.result === 'ok') {
     const where = opts.remote ? ` to ${opts.remote}` : ''
-    toast({ tone: 'success', title: opts.force ? `Force pushed ${branch}${where}` : `Pushed ${branch}${where}` })
+    await loadRepo(repoId, { keepSelection: true })
+    const offer = canOpenPull(repoId, branch, true)
+    toast({
+      tone: 'success',
+      title: opts.force ? `Force pushed ${branch}${where}` : `Pushed ${branch}${where}`,
+      action: offer ? { label: 'Create pull request', onClick: () => createPullRequest(repoId, branch) } : undefined
+    })
+    return
   }
   await loadRepo(repoId, { keepSelection: true })
 }
@@ -2260,7 +2267,9 @@ export function startAutoFetch(): void {
   document.addEventListener('visibilitychange', () => {
     autoFetchState.hiddenSince = document.hidden ? Date.now() : null
   })
+  window.addEventListener('focus', () => refreshPulls(60_000))
   autoFetchState.timer = setInterval(() => {
+    if (!document.hidden && document.hasFocus()) refreshPulls(PULLS_EVERY)
     const s = useApp.getState()
     const every = s.prefs.autoFetchMinutes * 60_000
     if (!every) return
@@ -2403,7 +2412,17 @@ export async function loadPulls(repoId: string): Promise<void> {
   if (!useApp.getState().repos[repoId]) return
   patchRepo(repoId, { pullsLoading: true })
   const pulls = await call('github.pulls', { repoId }).catch((e: Error) => ({ state: 'error' as const, repo: '', message: e.message }))
-  if (useApp.getState().repos[repoId]) patchRepo(repoId, { pulls, pullsLoading: false })
+  if (useApp.getState().repos[repoId]) patchRepo(repoId, { pulls, pullsLoading: false, pullsAt: Date.now() })
+}
+
+const PULLS_EVERY = 3 * 60_000
+
+/** The open tab's pull requests, read again when they're older than `stale` ms: while Caboose is in front, and as it comes back there. */
+function refreshPulls(stale: number): void {
+  const s = useApp.getState()
+  const r = s.active === 'home' ? undefined : s.repos[s.active]
+  if (r?.pulls?.state !== 'ok' || r.pullsLoading || Date.now() - r.pullsAt < stale) return
+  void loadPulls(s.active)
 }
 
 function reloadAllPulls(): void {
@@ -2433,6 +2452,55 @@ export function pullFor(repoId: string, branch: string): PullRequest | undefined
   const p = useApp.getState().repos[repoId]?.pulls
   if (p?.state !== 'ok') return undefined
   return p.pulls.find((pr) => (pr.fromFork ? branch === `pr/${pr.number}` : branch === pr.head || branch === `${p.remote}/${pr.head}`))
+}
+
+/** Whether to offer a new pull request for a local branch here: on GitHub and signed in, not its default branch, and none open yet. `pushed`: only once it's on the remote. */
+export function canOpenPull(repoId: string, branch: string, pushed = false): boolean {
+  const r = useApp.getState().repos[repoId]
+  const p = r?.pulls
+  if (p?.state !== 'ok' || branch === p.defaultBranch || pullFor(repoId, branch)) return false
+  const local = r?.refs?.refs.find((x) => x.kind === 'local' && x.short === branch)
+  if (!local) return false
+  return !pushed || (!!local.upstream?.startsWith(`refs/remotes/${p.remote}/`) && !local.upstreamGone)
+}
+
+/** A new pull request for a branch: in Caboose when signed in to GitHub, otherwise on the git host's site. One that has one already says so. */
+export function createPullRequest(repoId: string, branch: string): void {
+  const open = pullFor(repoId, branch)
+  if (open) {
+    toast({ tone: 'info', title: `${branch} already has pull request #${open.number}`, body: open.title, action: { label: 'Open on GitHub', onClick: () => void window.open(open.url, '_blank') } })
+    return
+  }
+  if (canOpenPull(repoId, branch)) openDialog({ kind: 'createPull', repoId, branch })
+  else void openOnWeb(repoId, { kind: 'pr', branch })
+}
+
+/** Pushes the branch first when it needs it, then creates the pull request. The error, for the dialog to show; null once it's made. */
+export async function createPull(repoId: string, branch: string, d: PullDraft, f: { base: string; title: string; body: string; draft: boolean }): Promise<string | null> {
+  const p = useApp.getState().repos[repoId]?.pulls
+  if (p?.state !== 'ok') return 'Sign in to GitHub first.'
+  if (d.push !== 'pushed') {
+    patchRepo(repoId, (r) => ({ busy: { ...r.busy, push: `Pushing ${branch}` }, progress: null }))
+    try {
+      const res = await call('remote.push', { repoId, opId: newOpId(), remote: p.remote, branch, setUpstream: d.track })
+      if (res.result !== 'ok') return 'message' in res && res.message ? `Couldn’t push ${branch}: ${res.message}` : `Couldn’t push ${branch}.`
+    } catch (e) {
+      return `Couldn’t push ${branch}: ${(e as Error).message}`
+    } finally {
+      patchRepo(repoId, (r) => ({ busy: { ...r.busy, push: undefined }, progress: null }))
+      void loadRepo(repoId, { keepSelection: true })
+    }
+  }
+  let pr: PullRequest
+  try {
+    pr = await call('github.createPull', { repoId, head: d.head, base: f.base, title: f.title, body: f.body, draft: f.draft })
+  } catch (e) {
+    return (e as Error).message
+  }
+  closeDialog()
+  toast({ tone: 'success', title: `Created pull request #${pr.number}`, body: pr.title, action: { label: 'Open on GitHub', onClick: () => void window.open(pr.url, '_blank') } })
+  void loadPulls(repoId)
+  return null
 }
 
 /** Its newest commit in the graph, if it's loaded there. */

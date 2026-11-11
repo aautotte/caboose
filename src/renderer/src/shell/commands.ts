@@ -66,7 +66,9 @@ export function buildCommands(s: AppState, { branches }: { branches: boolean }):
       { id: 'pop', group: 'Changes', label: 'Pop the newest stash', run: () => act.popLatest(id) },
       { id: 'add-remote', group: 'Remote', label: 'Add a remote…', run: () => act.openDialog({ kind: 'addRemote', repoId: id }) },
       { id: 'web-repo', group: 'Remote', label: 'Open the repository in the browser', run: () => void act.openOnWeb(id, { kind: 'repo' }) },
-      ...(head?.branch ? [{ id: 'web-pr', group: 'Remote', label: `Create a pull request for ${head.branch}`, run: () => void act.openOnWeb(id, { kind: 'pr', branch: head.branch! }) }] : []),
+      ...(head?.branch
+        ? [{ id: 'web-pr', group: 'Remote', label: `Create a pull request for ${head.branch}${act.canOpenPull(id, head.branch) ? '…' : ''}`, run: () => act.createPullRequest(id, head.branch!) }]
+        : []),
       {
         id: 'tag-head',
         group: 'Branch',

@@ -73,7 +73,9 @@ works offline, and it doesn't phone home.
   `git checkout -`) or a recent one from the branch name in the toolbar. Pick several branches or tags and push or delete
   them at once, on the remote too. The dialog says that undo only brings back the local side.
 - Pull requests on GitHub, in the branches panel: checks, reviews and drafts, a `#12` on their branch in the graph,
-  and a double-click to check one out, from a fork too. Signing in happens in the browser: no token to make.
+  and a double-click to check one out, from a fork too. Create one from a branch's menu or right after a push: the
+  title and description come from its commits, and the branch is pushed first if it needs to be. Signing in happens
+  in the browser: no token to make.
 - Merge or rebase by dragging one branch onto another. Merge with a merge commit every time (`--no-ff`), or squash
   a branch into one commit.
 - Git Flow without installing anything: start and finish features, releases and hotfixes. Releases are tagged, and

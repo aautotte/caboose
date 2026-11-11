@@ -13,7 +13,7 @@ import { webEntry } from '@/shell/webMenu'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
 import { FilterBar } from './FilterBar'
-import { compareEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
+import { compareEntry, createPullEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
 
 const ROW = 28 // matches --gc-graph-row-h
 const HEADER = 26 // --gc-list-row-h, the sticky column header
@@ -799,6 +799,8 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     if (r.local) {
       items.push(pullEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream, upstreamGone: r.local.upstreamGone, worktree: r.local.worktree }))
       items.push(pushEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream }, remotes))
+      const pr = createPullEntry(repoId, r.name)
+      if (pr) items.push(pr)
       items.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.name }) })
       items.push({ type: 'item', label: 'Delete…', danger: true, icon: <Trash2 size={14} />, disabled: r.isHead, onSelect: () => act.deleteBranch(repoId, r.name) })
     }
