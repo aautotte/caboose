@@ -10,6 +10,7 @@ import { ignoreChoices } from '@/lib/ignore'
 import { wrapMessage } from '@/lib/message'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { customMenu } from '@/shell/customMenu'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList, toStatus, type FileItem } from './FileList'
 import { MessageTools } from './MessageTools'
@@ -204,7 +205,8 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     ignoreMenu([f]),
     lfsMenu(f),
     { type: 'separator' as const },
-    { type: 'item' as const, label: 'Discard changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, [f.path]) }
+    { type: 'item' as const, label: 'Discard changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, [f.path]) },
+    ...customMenu(repoId, 'file', { file: f.path })
   ]
 
   const open = (f: FileItem, source: 'worktree' | 'index'): void => {

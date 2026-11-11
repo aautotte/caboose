@@ -7,7 +7,9 @@ import type { IgnoreChoice } from './lib/ignore'
 import { layoutInWorker } from './graph/layoutClient'
 import type { Layout } from './graph/lanes'
 import { toast } from './ui/toastBus'
-import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog, type RepoState } from './store'
+import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, setPrefs, useApp, type Center, type Dialog, type RepoState } from './store'
+import { fillCommand, parseCommand, type CommandContext, type CustomCommand } from './lib/custom'
+import { customKeyId } from './lib/keys'
 
 const PAGE = 2000
 
@@ -1864,6 +1866,66 @@ export async function bisectRun(repoId: string, command: string): Promise<boolea
 export function cancelBisectRun(repoId: string): void {
   const run = useApp.getState().repos[repoId]?.bisectRun
   if (run) void call('op.cancel', { opId: run.opId })
+}
+
+// ---------- your commands ----------
+
+/**
+ * Runs one of your commands on `ctx`. One that asks something, wants to be checked first or shows what it prints
+ * opens its window; any other runs straight away and says how it went.
+ */
+export function runCustomCommand(repoId: string, commandId: string, ctx: CommandContext): void {
+  const s = useApp.getState()
+  const cmd = s.prefs.customCommands.find((c) => c.id === commandId)
+  if (!cmd) return
+  const parsed = parseCommand(cmd.command)
+  const answers = Object.fromEntries(parsed.prompts.map((p) => [p.label, p.value]))
+  const filled = fillCommand(parsed, { ...ctx, head: s.repos[repoId]?.refs?.head.branch ?? undefined }, answers)
+  if ('problem' in filled) return void toast({ tone: 'error', title: `Can’t run ${cmd.name}`, body: filled.problem })
+  if (parsed.prompts.length || cmd.confirm || cmd.output) return openDialog({ kind: 'runCommand', repoId, commandId, ctx })
+  void runCustomQuietly(repoId, cmd.name, filled.args)
+}
+
+/** Runs a command's arguments; a notification says how it went. The repository is read again: it may have changed. */
+export async function runCustomQuietly(repoId: string, name: string, args: string[]): Promise<void> {
+  try {
+    const r = await call('custom.run', { repoId, args, opId: newOpId() })
+    const last = (t: string): string | undefined => t.trim().split('\n').pop() || undefined
+    if (r.code === 0) toast({ tone: 'success', title: `${name}: done`, body: last(r.stdout) ?? last(r.stderr) })
+    else toast({ tone: 'error', title: `${name} failed (exit code ${r.code})`, body: last(r.stderr) ?? last(r.stdout), action: { label: 'Show details', onClick: () => openLog() } })
+  } catch (err) {
+    fail(err, `${name} didn’t run`)
+  } finally {
+    void loadRepo(repoId, { keepSelection: true })
+  }
+}
+
+/** Adds a command, or replaces the one with its id. */
+export function saveCustomCommand(cmd: CustomCommand): void {
+  const list = useApp.getState().prefs.customCommands
+  setPrefs({ customCommands: list.some((c) => c.id === cmd.id) ? list.map((c) => (c.id === cmd.id ? cmd : c)) : [...list, cmd] })
+}
+
+/** Deletes a command and its shortcut. The notification puts both back. */
+export function deleteCustomCommand(id: string): void {
+  const { customCommands, keymap } = useApp.getState().prefs
+  const cmd = customCommands.find((c) => c.id === id)
+  if (!cmd) return
+  const key = customKeyId(id)
+  const { [key]: shortcut, ...rest } = keymap
+  setPrefs({ customCommands: customCommands.filter((c) => c.id !== id), ...(shortcut !== undefined ? { keymap: rest } : {}) })
+  toast({
+    tone: 'info',
+    title: `Deleted ${cmd.name}`,
+    action: {
+      label: 'Put it back',
+      onClick: () => {
+        const p = useApp.getState().prefs
+        const at = Math.min(customCommands.indexOf(cmd), p.customCommands.length)
+        setPrefs({ customCommands: [...p.customCommands.slice(0, at), cmd, ...p.customCommands.slice(at)], ...(shortcut !== undefined ? { keymap: { ...p.keymap, [key]: shortcut } } : {}) })
+      }
+    }
+  })
 }
 
 /**

@@ -36,6 +36,7 @@ Caboose runs the git installed on your computer. Whatever it does, you can see t
 ## Reference
 
 14. [Settings and profiles](settings.md)
-15. [Keyboard shortcuts](shortcuts.md)
-16. [Everything else](everything-else.md): Git activity log, command palette, panels, external tools.
-17. [Troubleshooting](troubleshooting.md)
+15. [Keyboard shortcuts](shortcuts.md): the list, and changing them.
+16. [Your own commands](custom-commands.md): git commands of your own in the menus and the palette.
+17. [Everything else](everything-else.md): Git activity log, command palette, panels, external tools.
+18. [Troubleshooting](troubleshooting.md)

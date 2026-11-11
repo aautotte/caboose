@@ -7,6 +7,8 @@ import { cn } from '@/ui/cn'
 import { fullDate, relativeTime, shortSha } from '@/lib/format'
 import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { customMenu } from '@/shell/customMenu'
+import { keyFor } from '@/lib/keys'
 import { webEntry } from '@/shell/webMenu'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
@@ -781,7 +783,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   const here = headBranch ?? 'HEAD'
   const isHead = row.sha === headSha
   entries.push(
-    { type: 'item', label: 'Create branch here…', icon: <Plus size={14} />, shortcut: 'Ctrl+B', onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: row.sha, atLabel: short }) },
+    { type: 'item', label: 'Create branch here…', icon: <Plus size={14} />, shortcut: keyFor('new-branch'), onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'New worktree here…', icon: <FolderPlus size={14} />, onSelect: () => act.openDialog({ kind: 'addWorktree', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'Create tag here…', icon: <Tag size={14} />, onSelect: () => act.openDialog({ kind: 'createTag', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'Check out this commit (detached)', onSelect: () => void act.checkout(repoId, row.sha) },
@@ -844,7 +846,8 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     { type: 'separator' },
     ...(remotes.length ? [webEntry(repoId, { sha: row.sha })] : []),
     patchMenu(repoId, [row.sha], row.parents.length > 1),
-    { type: 'item', label: 'Copy commit SHA', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(row.sha) }
+    { type: 'item', label: 'Copy commit SHA', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(row.sha) },
+    ...customMenu(repoId, 'commit', { commit: row.sha })
   )
   return entries
 }

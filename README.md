@@ -153,7 +153,10 @@ works offline, and it doesn't phone home.
 ### Everything else
 
 - A Git activity log with every command Caboose ran and its output, ready to copy.
-- A command palette (Ctrl+P) and keyboard shortcuts for most things (Ctrl+/ lists them).
+- A command palette (Ctrl+P) and keyboard shortcuts for most things (Ctrl+/ lists them). Change any shortcut in
+  Settings.
+- Your own git commands, with questions, on the menus of the commit, branch or file they run on and in the
+  palette.
 - Light and dark themes, or follow the system.
 - Side panels collapse to thin rails (Ctrl+J, Ctrl+K) and remember it.
 - Your own editor, terminal, diff tool and merge tool.
@@ -166,8 +169,8 @@ works offline, and it doesn't phone home.
 ## User guide
 
 How to do each of these, step by step, is in the [user guide](docs/README.md): getting started, the graph, staging,
-branches, syncing, rewriting history, conflicts, bisect, submodules, worktrees, Git LFS, undo, settings and
-keyboard shortcuts.
+branches, syncing, rewriting history, conflicts, bisect, submodules, worktrees, Git LFS, undo, settings,
+keyboard shortcuts and your own commands.
 
 ## Requirements
 

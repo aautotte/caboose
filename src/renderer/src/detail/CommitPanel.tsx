@@ -6,6 +6,7 @@ import { call } from '@/lib/api'
 import { fullDate, plural, shortSha } from '@/lib/format'
 import { patchRepo, useRepo } from '@/store'
 import * as act from '@/actions'
+import { customMenu } from '@/shell/customMenu'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList } from './FileList'
 import { toStatus } from './FileList'
@@ -203,7 +204,8 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
                 ] as const)
               : []),
             { type: 'separator' },
-            { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(f.path) }
+            { type: 'item', label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(f.path) },
+            ...customMenu(repoId, 'file', { file: f.path, commit: d.sha })
           ]}
           dirMenu={(_, path) => [filterPathEntry(repoId, path, true)]}
           emptyText={`No file changes (${plural(d.parents.length, 'parent')}).`}

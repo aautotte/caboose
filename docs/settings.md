@@ -81,6 +81,15 @@ Git does the signing with the `gpg` on your computer.
 Commands run without a shell. `{path}` is the repository folder, `{file}` the file you picked (or the folder). **Try it on
 this repository** checks a command.
 
+## Your commands
+
+Git commands of your own, for the menus, the command palette and shortcuts: see
+[Your own commands](custom-commands.md).
+
+## Keyboard shortcuts
+
+Change, take away or put back the key of a command: see [Changing a shortcut](shortcuts.md#changing-a-shortcut).
+
 ## SSH keys
 
 Lists the public keys in your `.ssh` folder, with a button to copy each one. Add a public key to your git host

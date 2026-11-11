@@ -15,6 +15,7 @@ function lfsChange({ old, new: now }: NonNullable<FileDiff['lfs']>): string {
 }
 import { DIFF_CONTEXT_STEPS, setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
+import { useKey } from '@/lib/keys'
 import { highlightLine, languageFor } from './highlight'
 import { SubmoduleDiff } from './SubmoduleDiff'
 import { FindBar, useFindInView } from './FindBar'
@@ -47,6 +48,7 @@ export function DiffView({
   /** Inside another view (file history): no close, history or Esc handling of its own. */
   embedded?: boolean
 }): React.JSX.Element {
+  const findKey = useKey('find')
   const mode = useApp((s) => s.prefs.diffMode)
   const wrap = useApp((s) => s.prefs.diffWrap)
   const ignoreWs = useApp((s) => s.prefs.diffIgnoreWs)
@@ -200,7 +202,7 @@ export function DiffView({
             </Tooltip>
           </>
         )}
-        <Tooltip content="Find in file" shortcut="Ctrl+F">
+        <Tooltip content="Find in file" shortcut={findKey}>
           <IconButton label="Find in file" pressed={findOpen} onClick={() => (findOpen ? setFindOpen(false) : openFind())}>
             <Search size={16} />
           </IconButton>

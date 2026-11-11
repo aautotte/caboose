@@ -111,6 +111,9 @@ const EXCLUDE_OWN = OWN_REFS.map((r) => `--exclude=${r}*`)
 const nearestCache = new Map<string, { key: string; nearest: Map<string, string[]> }>()
 
 /** Git operations for one repository. Mutating calls go through the runner's per-repo queue. */
+/** What one of your commands may print before the rest is left out. */
+const CUSTOM_OUTPUT = 1024 * 1024
+
 export class RepoOps {
   private gitDir: string | null = null
 
@@ -891,6 +894,17 @@ export class RepoOps {
     if (!command.trim()) throw invalid('Give a command to test each commit with.')
     // bisect run takes a program and its arguments: the command line goes through git's shell, as typed.
     await this.mut(['bisect', 'run', 'sh', '-c', command], { opId, onOutput, timeoutMs: 12 * 60 * 60_000 })
+  }
+
+  /**
+   * One of your own commands (Settings › Your commands), as the arguments it was split into: no shell. Waits up to
+   * an hour, lets you cancel it, and hands back what it printed whatever its exit code.
+   */
+  async runCustom(args: string[], opId: string, onOutput: (line: string) => void): Promise<{ code: number; stdout: string; stderr: string }> {
+    if (!args.length) throw invalid('Give the command to run.')
+    const r = await this.raw(args, { mutating: true, opId, onOutput, stdin: '', timeoutMs: 60 * 60_000 })
+    const cap = (t: string): string => (t.length > CUSTOM_OUTPUT ? `${t.slice(0, CUSTOM_OUTPUT)}\n… (cut short: it printed more than 1 MB)` : t)
+    return { code: r.code, stdout: cap(r.stdout), stderr: cap(r.stderr) }
   }
 
   /** Ends the bisect and checks out what was checked out when it started. */

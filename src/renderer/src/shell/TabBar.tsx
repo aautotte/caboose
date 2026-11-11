@@ -4,8 +4,10 @@ import { DropdownMenu, Spinner, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { useApp } from '@/store'
 import * as act from '@/actions'
+import { useKey } from '@/lib/keys'
 
 export function TabBar(): React.JSX.Element {
+  const homeKey = useKey('home')
   const tabs = useApp((s) => s.tabs)
   const active = useApp((s) => s.active)
   const repos = useApp((s) => s.repos)
@@ -30,7 +32,7 @@ export function TabBar(): React.JSX.Element {
   return (
     <header className="flex h-(--gc-tabbar-h) shrink-0 items-stretch border-b border-border bg-surface-sunken select-none">
       <div role="tablist" aria-label="Open repositories" className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
-        <Tooltip content="Repositories" shortcut="Ctrl+T">
+        <Tooltip content="Repositories" shortcut={homeKey}>
           <button
             id="tab-home"
             role="tab"
@@ -111,7 +113,7 @@ export function TabBar(): React.JSX.Element {
         })}
       </div>
       <ProfileButton />
-      <Tooltip content="Open another repository" shortcut="Ctrl+T">
+      <Tooltip content="Open another repository" shortcut={homeKey}>
         <button aria-label="Open another repository" onClick={() => act.setActive('home')} className="grid w-9 shrink-0 place-items-center text-muted hover:bg-row-hover hover:text-text">
           <Plus size={16} />
         </button>

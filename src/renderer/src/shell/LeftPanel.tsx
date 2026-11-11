@@ -9,6 +9,7 @@ import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
 import { webEntry } from './webMenu'
+import { customMenu } from './customMenu'
 import { progressAmount } from '@/lib/format'
 import { CollapseLeftButton, leftSectionId } from './PanelRails'
 
@@ -246,6 +247,7 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
   const views = viewMenu(repoId, r, v)
   if (views.length) m.push({ type: 'separator' }, ...views)
   m.push({ type: 'item', label: 'Copy name', onSelect: () => void navigator.clipboard.writeText(r.short) })
+  m.push(...customMenu(repoId, 'branch', { branch: r.short }))
   return m
 }
 
