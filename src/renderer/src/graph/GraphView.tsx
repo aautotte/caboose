@@ -495,9 +495,14 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
                   aria-selected={isSel}
                   aria-label={label}
                   onClick={(e) => clickRow(e, row.sha)}
-                  onDoubleClick={() => {
-                    const local = rowRefs.find((r) => r.kind !== 'tag' && r.kind !== 'remote') ?? rowRefs.find((r) => r.kind === 'remote')
-                    if (local && !local.isHead) void act.checkout(repoId, local.name)
+                  onDoubleClick={(e) => {
+                    // A remote branch's label has its own click (below).
+                    if ((e.target as HTMLElement).closest('[data-remote-label]')) return
+                    const local = rowRefs.find((r) => r.kind !== 'tag' && r.kind !== 'remote')
+                    if (local) return void (!local.isHead && act.checkout(repoId, local.name))
+                    // Only a remote branch here: its local branch is brought up to it (or made), then checked out.
+                    const remote = rowRefs.find((r) => r.kind === 'remote')
+                    if (remote) void act.fastForwardTo(repoId, remote.name, { checkout: true })
                   }}
                   className={cn(
                     'absolute left-0 flex w-full cursor-default items-center text-base select-none',
@@ -628,6 +633,10 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
         }
       }}
       onDragLeave={() => setOver(false)}
+      // A remote branch's label checks it out: its local branch moves up to it, or (asking first) is reset to it.
+      data-remote-label={r.kind === 'remote' ? '' : undefined}
+      title={r.kind === 'remote' ? `Click to check out ${r.name}` : undefined}
+      onClick={r.kind === 'remote' ? (e) => e.detail === 1 && void act.fastForwardTo(repoId, r.name, { checkout: true, resetFirst: true }) : undefined}
       onDrop={(e) => {
         setOver(false)
         const data = e.dataTransfer.getData('application/x-caboose-ref')
@@ -636,7 +645,7 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
         if (src.repoId !== repoId || src.name === r.name) return
         onDrop({ source: src.name, sourceKind: src.kind, target: r.name, targetKind: r.kind, x: e.clientX, y: e.clientY })
       }}
-      className={cn('min-w-0 rounded-sm', over && 'outline-2 outline-dashed outline-accent')}
+      className={cn('min-w-0 rounded-sm', r.kind === 'remote' && 'cursor-pointer', over && 'outline-2 outline-dashed outline-accent')}
     >
       <RefPill name={r.label} kind={r.kind} remote={r.remote} lane={lane} current={r.isHead} />
     </span>

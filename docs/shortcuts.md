@@ -43,6 +43,7 @@ These are the keys out of the box: most can be [changed](#changing-a-shortcut).
 | Close tab | Ctrl+W |
 | Go to tab 1 to 9 | Ctrl+1 … Ctrl+9 |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Move the tab left / right | Ctrl+Shift+← / → (on the tab) |
 | Open a folder | Alt+O |
 
 ## Branches panel

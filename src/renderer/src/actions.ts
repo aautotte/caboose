@@ -97,6 +97,12 @@ export async function pickAndOpen(): Promise<void> {
   if (path) await openRepo(path)
 }
 
+// The tabs by when they were last open, the latest first: closing the one you're on goes back to the one before it.
+let lastUsed: string[] = []
+useApp.subscribe((s, prev) => {
+  if (s.active !== prev.active) lastUsed = [s.active, ...[prev.active, ...lastUsed].filter((id) => id !== s.active)].filter((id, i, all) => all.indexOf(id) === i)
+})
+
 export async function closeTab(repoId: string): Promise<void> {
   await attempt(() => call('repo.close', { repoId }))
   useApp.setState((s) => {
@@ -104,7 +110,10 @@ export async function closeTab(repoId: string): Promise<void> {
     const tabs = s.tabs.filter((t) => t.id !== repoId)
     const repos = { ...s.repos }
     delete repos[repoId]
-    const active = s.active === repoId ? (tabs[Math.min(idx, tabs.length - 1)]?.id ?? 'home') : s.active
+    // The repository used before this one; one never left (opened at startup, say) falls back to its neighbour.
+    const previous = lastUsed.find((id) => id !== repoId && tabs.some((t) => t.id === id))
+    const active = s.active === repoId ? (previous ?? tabs[Math.min(idx, tabs.length - 1)]?.id ?? 'home') : s.active
+    lastUsed = lastUsed.filter((id) => id !== repoId)
     return { tabs, repos, active }
   })
 }
@@ -1510,8 +1519,10 @@ export function localFor(repoId: string, remoteBranch: string): Ref | undefined 
  * For a remote branch such as origin/x: fast-forwards the local branch that tracks it (or the one with its name) to
  * it. With no such local branch, makes one that tracks it. With `checkout` (a double-click), it then checks that
  * branch out too, even when it couldn't be fast-forwarded (the toast says why); otherwise you stay where you are.
+ * `resetFirst` (a click on the remote branch's label): when it can't be fast-forwarded, resetting it to the remote
+ * branch is what the question offers first.
  */
-export async function fastForwardTo(repoId: string, remoteBranch: string, opts: { checkout?: boolean } = {}): Promise<void> {
+export async function fastForwardTo(repoId: string, remoteBranch: string, opts: { checkout?: boolean; resetFirst?: boolean } = {}): Promise<void> {
   const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
   const r = refs.find((x) => x.kind === 'remote' && x.short === remoteBranch)
   const name = r?.remote ? remoteBranch.slice(r.remote.length + 1) : remoteBranch.split('/').slice(1).join('/')
@@ -1521,7 +1532,7 @@ export async function fastForwardTo(repoId: string, remoteBranch: string, opts: 
   if (!local && opts.checkout) return checkout(repoId, remoteBranch)
   const res = await attempt(() => call('branch.fastForward', { repoId, name: local?.short ?? name, to: remoteBranch, fetch: false, create: !local, opId: newOpId() }), `Couldn’t fast-forward ${local?.short ?? name}`)
   // It has commits of its own: offer to check it out as it is, or to reset it to the remote branch.
-  if (opts.checkout && local && !local.worktree && res?.result === 'rejected') return offerReset(repoId, local, remoteBranch, res.ahead)
+  if (opts.checkout && local && !local.worktree && res?.result === 'rejected') return offerReset(repoId, local, remoteBranch, res.ahead, opts.resetFirst)
   // Up to date is the usual case for a double-click: no need to say so before switching.
   if (!(opts.checkout && res?.result === 'nothing')) fastForwardResult(res)
   if (opts.checkout && local && !local.isHead) return checkout(repoId, local.short)
@@ -1531,31 +1542,31 @@ export async function fastForwardTo(repoId: string, remoteBranch: string, opts: 
 /**
  * After a double-click on a remote branch whose local branch can't be fast-forwarded. Checking it out as it is comes
  * first; resetting moves a branch that isn't checked out (then checks it out), or hard-resets the checked-out one.
- * Both can be undone.
+ * Both can be undone. With `resetFirst`, resetting is the main button and keeping it as it is the other one.
  */
-function offerReset(repoId: string, local: Ref, remoteBranch: string, ahead?: number): void {
+function offerReset(repoId: string, local: Ref, remoteBranch: string, ahead?: number, resetFirst = false): void {
   const own = ahead ? plural(ahead, 'commit') : 'commits'
+  const keep = { label: local.isHead ? 'Keep it as it is' : 'Check out as it is', run: () => (local.isHead ? undefined : void checkout(repoId, local.short)) }
+  const toRemote = {
+    label: `Reset to ${remoteBranch}`,
+    run: async () => {
+      if (local.isHead) await reset(repoId, remoteBranch, 'hard', local.short)
+      else if (await moveBranch(repoId, local.short, remoteBranch)) await checkout(repoId, local.short)
+    }
+  }
+  const [main, other] = resetFirst ? [toRemote, keep] : [keep, toRemote]
   confirm({
-    title: `${local.short} can’t be fast-forwarded`,
+    title: resetFirst ? `Reset ${local.short} to ${remoteBranch}?` : `${local.short} can’t be fast-forwarded`,
     body:
       `${local.short} has ${own} that ${remoteBranch} doesn’t, so it can’t just move forward. ` +
       (local.isHead
         ? `Keep it as it is, or reset it to ${remoteBranch}: a hard reset, so your uncommitted changes are discarded too.`
         : `Check it out as it is, or reset it to ${remoteBranch} and check it out: its own commits are left out of it.`),
-    confirmLabel: local.isHead ? 'Keep it as it is' : 'Check out as it is',
-    danger: false,
+    confirmLabel: main.label,
+    danger: main === toRemote,
     undoable: true,
-    onConfirm: () => {
-      if (!local.isHead) void checkout(repoId, local.short)
-    },
-    alt: {
-      label: `Reset to ${remoteBranch}`,
-      danger: true,
-      onSelect: async () => {
-        if (local.isHead) await reset(repoId, remoteBranch, 'hard', local.short)
-        else if (await moveBranch(repoId, local.short, remoteBranch)) await checkout(repoId, local.short)
-      }
-    }
+    onConfirm: () => void main.run(),
+    alt: { label: other.label, danger: other === toRemote, onSelect: () => void other.run() }
   })
 }
 

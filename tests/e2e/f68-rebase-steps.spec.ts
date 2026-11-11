@@ -41,7 +41,7 @@ const toasts = () => h.page.getByRole('region', { name: /Notifications/ })
 const refocus = () => h.page.evaluate(() => window.dispatchEvent(new Event('focus')))
 const sha = (rev: string): string => h.git(repo, 'rev-parse', rev)
 const summaries = (range: string): string[] => h.git(repo, 'log', '--format=%s', range).split('\n')
-const list = () => h.page.getByRole('list', { name: 'Commits, oldest first' })
+const list = () => h.page.getByRole('list', { name: 'Commits, newest first' })
 const step = (summary: string) => list().getByRole('listitem').filter({ hasText: summary })
 async function rewriteAfter(summary: string): Promise<void> {
   await commitRow(h.page, summary).click({ button: 'right' })

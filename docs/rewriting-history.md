@@ -102,12 +102,14 @@ Each commit gets one of:
 | Keep | keep it as it is | P |
 | Reword | keep it, with a new message | R |
 | Edit | stop after this commit to change it, then continue | E |
-| Squash | fold into the commit above, keeping both messages | S |
-| Fixup | fold into the commit above, dropping this message | F |
+| Squash | fold into the commit below, keeping both messages | S |
+| Fixup | fold into the commit below, dropping this message | F |
 | Drop | leave it out | D |
 
-The oldest commit is at the top. Drag rows, or use **Alt+↑ / Alt+↓**, to reorder them. **Start rebase** runs it;
-if a step conflicts, Caboose stops and shows the [conflicts](conflicts.md).
+The newest commit is at the top, as in the graph; git replays them from the bottom up. Drag a row by any part of
+it, or use **Alt+↑ / Alt+↓**, to reorder them: the others make room as you drag, and **Esc** puts it back. Near
+the top or bottom of the list, it scrolls. **Start rebase** runs it; if a step conflicts, Caboose stops and shows
+the [conflicts](conflicts.md).
 
 ### Stop to edit a commit
 
