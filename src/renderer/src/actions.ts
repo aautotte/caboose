@@ -4,6 +4,7 @@ import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
 import { plural, refLabel } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
+import { hasRules, readRules, type CommitRules } from './lib/commitRules'
 import { layoutInWorker } from './graph/layoutClient'
 import type { Layout } from './graph/lanes'
 import { toast } from './ui/toastBus'
@@ -502,7 +503,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
-  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore } = useApp.getState().repos[repoId]
+  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore, commitRules: rulesBefore } = useApp.getState().repos[repoId]
   try {
     const [refs, status, undo, refView, columns, repoPrefs] = await Promise.all([
       call('refs.list', { repoId }),
@@ -529,6 +530,7 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
       focusHead: r.focusHead !== focusBefore ? r.focusHead : repoPrefs['graph.focusHead'] === true,
       graphWidth: r.graphWidth !== widthBefore ? r.graphWidth : typeof repoPrefs['graph.width'] === 'number' ? repoPrefs['graph.width'] : null,
       refsWidth: r.refsWidth !== refsBefore ? r.refsWidth : typeof repoPrefs['graph.refsWidth'] === 'number' ? repoPrefs['graph.refsWidth'] : null,
+      commitRules: r.commitRules !== rulesBefore ? r.commitRules : readRules(repoPrefs['commit.rules']),
       commits: page.commits,
       hasMore: page.hasMore,
       layout,
@@ -2309,6 +2311,13 @@ export function setGraphWidth(repoId: string, width: number | null): void {
 export function setRefsWidth(repoId: string, width: number | null): void {
   patchRepo(repoId, { refsWidth: width })
   void call('repoPrefs.set', { repoId, key: 'graph.refsWidth', value: width }).catch(() => {})
+}
+
+/** This repository's commit message rules; null takes them all away. */
+export async function setCommitRules(repoId: string, rules: CommitRules | null): Promise<void> {
+  const kept = hasRules(rules) ? rules : null
+  patchRepo(repoId, { commitRules: kept })
+  await attempt(() => call('repoPrefs.set', { repoId, key: 'commit.rules', value: kept }), 'Couldn’t save the commit rules')
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {

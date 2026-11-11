@@ -117,6 +117,21 @@ A commit message template (`commit.template`) pre-fills the message. Commit sign
 
 When a commit leaves nothing else to commit, you're taken back to the commit list.
 
+### Commit rules
+
+A repository can have rules for its messages, set in [Settings › Commit rules](settings.md#commit-rules):
+
+| | |
+| --- | --- |
+| Summary length | a limit, like 50 or 72 characters; the counter shows `64/72` and turns red past it |
+| Conventional Commits | the summary starts with a type and a colon, like `feat: add search` or `fix(api)!: …`, from the repository's list of types |
+| Mention an issue | the summary, or anywhere in the message, has to match a pattern: `ABC-123` by default, `#\d+` for GitHub issues |
+
+The commit box checks the message as you type and lists what doesn't fit under the description. With **Warn**
+you can commit anyway. With **Hold back the commit**, the button says **Fix the message to commit** until it fits.
+**This repository's rules** under the list opens the settings. Messages git writes (`Merge …`, `Revert …`) and
+`fixup!` commits aren't checked.
+
 ## Discarding everything
 
 The trash icon on **Uncommitted changes** (or **Discard all changes…** in the command palette) throws away every
