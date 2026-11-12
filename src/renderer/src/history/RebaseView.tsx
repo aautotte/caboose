@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, GitCommitHorizontal, GripVertical, ListRestart, X } from 'lucide-react'
 import type { RebaseAction, RebaseRow } from '../../../shared/types'
-import { Avatar, Button, Checkbox, Dialog, EmptyState, Field, IconButton, TextArea, TextInput, Tooltip } from '@/ui'
+import { Avatar, Button, Checkbox, Dialog, EmptyState, Field, IconButton, Splitter, TextArea, TextInput, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { useReorder } from '@/ui/useReorder'
 import { call } from '@/lib/api'
 import { plural, relativeTime, shortSha } from '@/lib/format'
-import { useRepo } from '@/store'
+import { setPrefs, useApp, useRepo } from '@/store'
+import { DiffView } from '@/diff/DiffView'
 import * as act from '@/actions'
 
 interface Step {
@@ -50,6 +51,8 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const [moveStacked, setMoveStacked] = useState(false)
   const head = useRepo(repoId, (r) => r.refs?.head)
   const status = useRepo(repoId, (r) => r.status)
+  const rebaseFile = useRepo(repoId, (r) => r.rebaseFile)
+  const diffHeight = useApp((s) => s.prefs.rebaseDiffHeight)
   const listRef = useRef<HTMLOListElement>(null)
   // The rows as shown, newest first (the previews list them oldest first, in the order git replays them).
   const shown = useMemo(() => (rows ? [...rows].reverse() : null), [rows])
@@ -79,12 +82,23 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
   const close = (): void => act.setCenter(repoId, { kind: 'graph' })
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu]')) close()
+      // A file's diff open under the list closes first.
+      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu]')) {
+        if (useApp.getState().repos[repoId]?.rebaseFile) act.closeRebaseFile(repoId)
+        else close()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId])
+
+  // The commit on the focused row shows in the details panel: its message and files, a file's diff under the list.
+  const current = steps[focus]?.row.sha
+  useEffect(() => {
+    if (current) act.select(repoId, current)
+  }, [repoId, current])
+  const openFile = rebaseFile?.source.kind === 'commit' && rebaseFile.source.sha === current ? rebaseFile : null
 
   const kept = steps.filter((s) => s.action !== 'drop')
   const problem = useMemo(() => {
@@ -200,7 +214,7 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
               Above these, {plural(tail.length, 'newer commit')} on {branch ?? 'the branch'} {tail.length === 1 ? 'is' : 'are'} replayed on top, unchanged.
             </p>
           ) : null}
-          <ol ref={listRef} aria-label="Commits, newest first" className="min-h-0 flex-1 overflow-y-auto p-2">
+          <ol ref={listRef} aria-label="Commits, newest first" className="@container min-h-28 flex-1 overflow-y-auto p-2">
             {steps.map((s, i) => (
               <li
                 key={s.row.sha}
@@ -208,10 +222,11 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
                 onFocus={() => setFocus(i)}
                 onKeyDown={(e) => onRowKey(e, i)}
                 {...reorder.itemProps(i)}
-                aria-label={`${s.row.summary}, ${actions.find((a) => a.value === s.action)!.label}`}
+                aria-label={`${s.row.summary}, ${actions.find((a) => a.value === s.action)!.label}${s.row.stat ? `, ${statLabel(s.row.stat)}` : ''}`}
+                aria-current={i === focus || undefined}
                 className={cn(
-                  'mb-1 flex min-h-10 items-center gap-2 rounded-md border border-border bg-surface px-2 outline-none focus-visible:outline-2 focus-visible:outline-focus-ring',
-                  s.action === 'drop' && 'opacity-50',
+                  'mb-1 flex min-h-10 items-center gap-2 rounded-md border border-border px-2 outline-none focus-visible:outline-2 focus-visible:outline-focus-ring',
+                  i === focus ? 'bg-row-selected' : s.action === 'drop' ? 'bg-surface-sunken' : 'bg-surface',
                   (s.action === 'squash' || s.action === 'fixup') && 'ml-6',
                   reorder.dragging === i && 'border-accent shadow-pop'
                 )}
@@ -236,20 +251,57 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
                     </Tooltip>
                   ))}
                 </div>
-                <span className="w-16 shrink-0 font-mono text-xs text-muted">{shortSha(s.row.sha)}</span>
-                <span className={cn('min-w-0 flex-1 truncate text-base', s.action === 'drop' ? 'text-muted line-through' : 'text-text')}>
-                  {s.action === 'reword' && s.message ? s.message.split('\n')[0] : s.row.summary}
+                {/* Narrow, the SHA and the author give way to the message: the details panel has them. */}
+                <span className="hidden w-16 shrink-0 font-mono text-xs text-muted @2xl:inline">{shortSha(s.row.sha)}</span>
+                <span className="flex min-w-24 flex-1 flex-col py-1">
+                  <span className={cn('truncate text-base', s.action === 'drop' ? 'text-muted line-through' : 'text-text')}>
+                    {s.action === 'reword' && s.message ? s.message.split('\n')[0] : s.row.summary}
+                  </span>
+                  <span className="flex min-w-0 gap-1.5 text-xs whitespace-nowrap text-muted">
+                    {s.row.stat ? <Stat stat={s.row.stat} /> : null}
+                    <span className="truncate">{relativeTime(s.row.authorTime)}</span>
+                  </span>
                 </span>
                 {s.action === 'reword' ? (
                   <Button size="sm" variant="ghost" tabIndex={-1} onClick={() => setReword(i)}>
                     Edit message
                   </Button>
                 ) : null}
-                <Avatar name={s.row.authorName} email={s.row.authorEmail} decorative />
-                <span className="hidden w-24 shrink-0 truncate text-sm text-muted md:inline">{relativeTime(s.row.authorTime)}</span>
+                <span className="hidden shrink-0 @2xl:inline-flex">
+                  <Avatar name={s.row.authorName} email={s.row.authorEmail} decorative />
+                </span>
               </li>
             ))}
           </ol>
+          {openFile && openFile.source.kind === 'commit' ? (
+            <>
+              <Splitter
+                label="Resize the file’s changes"
+                orientation="horizontal"
+                edge="right"
+                value={diffHeight}
+                min={120}
+                max={1200}
+                defaultValue={320}
+                onChange={(v) => setPrefs({ rebaseDiffHeight: v })}
+              />
+              <div className="flex min-h-0 shrink flex-col" style={{ height: diffHeight, maxHeight: '60%' }}>
+                <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border bg-surface-sunken px-3 text-sm text-muted">
+                  <span className="shrink-0 font-mono text-xs">{shortSha(openFile.source.sha)}</span>
+                  <span className="min-w-0 flex-1 truncate" title={openFile.path}>
+                    {openFile.oldPath && openFile.oldPath !== openFile.path ? `${openFile.oldPath} → ` : ''}
+                    {openFile.path}
+                  </span>
+                  <Tooltip content="Close" shortcut="Esc">
+                    <IconButton label="Close the file" size="sm" onClick={() => act.closeRebaseFile(repoId)}>
+                      <X size={14} />
+                    </IconButton>
+                  </Tooltip>
+                </div>
+                <DiffView key={`${openFile.path}|${openFile.source.sha}`} embedded repoId={repoId} path={openFile.path} oldPath={openFile.oldPath} source={openFile.source} />
+              </div>
+            </>
+          ) : null}
           <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-surface px-4 py-3">
             <p role={problem || dirty || busyOp ? 'alert' : undefined} className={cn('min-w-60 flex-1 text-sm', problem || dirty || busyOp ? 'text-danger' : 'text-muted')}>
               {busyOp
@@ -294,6 +346,22 @@ export function RebaseView({ repoId, mode, base, baseLabel, range, ontoBranch }:
         />
       ) : null}
     </section>
+  )
+}
+
+function statLabel(s: NonNullable<RebaseRow['stat']>): string {
+  return `${plural(s.files, 'file')} changed, ${plural(s.adds, 'line')} added, ${s.dels} removed`
+}
+
+/** "3 files +42 −7 ·": how big a commit is, at a glance. */
+function Stat({ stat }: { stat: NonNullable<RebaseRow['stat']> }): React.JSX.Element {
+  return (
+    <span aria-hidden className="flex shrink-0 gap-1.5" title={statLabel(stat)}>
+      <span>{plural(stat.files, 'file')}</span>
+      <span className="font-mono text-success">+{stat.adds}</span>
+      <span className="font-mono text-danger">−{stat.dels}</span>
+      <span>·</span>
+    </span>
   )
 }
 

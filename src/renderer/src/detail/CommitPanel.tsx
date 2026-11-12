@@ -21,6 +21,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
   const [body, setBody] = useState('')
   const [skipHooks, setSkipHooks] = useState(false)
   const center = useRepo(repoId, (r) => r.center)
+  const rebaseFile = useRepo(repoId, (r) => r.rebaseFile)
   const headSha = useRepo(repoId, (r) => r.refs?.head.sha)
   const stash = useRepo(repoId, (r) => r.refs?.stashes.find((s) => s.sha === sha))
   const editRequest = useRepo(repoId, (r) => r.editing)
@@ -63,19 +64,21 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
     )
   }
 
-  const openPath = center.kind === 'diff' ? center.path : null
+  // Planning a rebase or a copy: the commits are only looked at here, not rewritten under the plan.
+  const planning = center.kind === 'rebase' || center.kind === 'cherry'
+  const openPath = center.kind === 'diff' ? center.path : planning && rebaseFile?.source.kind === 'commit' && rebaseFile.source.sha === d.sha ? rebaseFile.path : null
   // Any commit on the checked-out branch's line can get a new message: the newest by amending, older ones by a reword.
   void commitCount
   void status
   const onLine = act.headLine(repoId).includes(d.sha)
   // Not while the graph is filtered: the commits it hides would be rewritten unseen.
-  const canEdit = !stash && !filtered && d.parents.length <= 1 && (d.isHead || (onLine && d.parents.length === 1))
+  const canEdit = !planning && !stash && !filtered && d.parents.length <= 1 && (d.isHead || (onLine && d.parents.length === 1))
   const pushed = canEdit && act.alreadyPushed(repoId, [d.sha])
   // Older commits are reworded by a rebase: not past a merge (it would be flattened), and not with work in the way.
   const behindMerge = canEdit && !d.isHead && act.mergeAbove(repoId, d.sha)
   const blocker = canEdit && !d.isHead ? act.rewriteBlocker(repoId) : null
   // Whole files can be taken out of a commit of the checked-out branch (blocks and lines, from the diff).
-  const canPatch = !stash && act.patchProblem(repoId, d.sha) === null
+  const canPatch = !planning && !stash && act.patchProblem(repoId, d.sha) === null
   const saveMessage = async (): Promise<void> => {
     if (!summary.trim()) return
     if (d.isHead) {

@@ -707,8 +707,11 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       (r) => r.result !== 'conflicts'
     )
   )
-  handle('cherry.preview', z.object({ ...R, tip: ref }), ({ repoId, tip }) => ops(repoId).cherryPreview(tip))
-  handle('rebase.preview', z.object({ ...R, onto: ref }), ({ repoId, onto }) => ops(repoId).rebasePreview(onto))
+  handle('cherry.preview', z.object({ ...R, tip: ref }), async ({ repoId, tip }) => ops(repoId).withStats(await ops(repoId).cherryPreview(tip)))
+  handle('rebase.preview', z.object({ ...R, onto: ref }), async ({ repoId, onto }) => {
+    const p = await ops(repoId).rebasePreview(onto)
+    return { ...p, rows: await ops(repoId).withStats(p.rows) }
+  })
   handle(
     'rebase.interactive',
     z.object({

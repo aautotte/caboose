@@ -111,6 +111,15 @@ it, or use **Alt+↑ / Alt+↓**, to reorder them: the others make room as you d
 the top or bottom of the list, it scrolls. **Start rebase** runs it; if a step conflicts, Caboose stops and shows
 the [conflicts](conflicts.md).
 
+### What's in each commit
+
+Under each message, a row says how big the commit is (**3 files +42 −7**) and when it was made. The commit on the
+row you click, or move to with **↑ / ↓**, shows in the details panel: its whole message, its author and the files
+it changes. Click a file there to see its diff under the list, without leaving the rebase. Drag the line between
+them to make it taller or shorter. **Esc** closes the diff, and closes the rebase after that. The commits can't be
+edited from the details panel while you plan: the plan would no longer match them. The same goes for
+[picking several commits](#cherry-pick) to copy.
+
 ### Stop to edit a commit
 
 A commit marked **Edit** is replayed, then the rebase stops there. **Uncommitted changes** says which commit it

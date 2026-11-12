@@ -966,11 +966,18 @@ export function rebaseRange(repoId: string, shas: string[]): void {
 }
 
 export function setCenter(repoId: string, center: Center): void {
-  patchRepo(repoId, { center })
+  patchRepo(repoId, { center, rebaseFile: null })
 }
 
+/** A file's diff in the middle. While a rebase or a copy is being planned, it opens under that list instead. */
 export function openDiff(repoId: string, path: string, source: DiffSource, oldPath?: string): void {
-  setCenter(repoId, { kind: 'diff', path, source, oldPath })
+  const kind = useApp.getState().repos[repoId]?.center.kind
+  if (source.kind === 'commit' && (kind === 'rebase' || kind === 'cherry')) patchRepo(repoId, { rebaseFile: { path, oldPath, source } })
+  else setCenter(repoId, { kind: 'diff', path, source, oldPath })
+}
+
+export function closeRebaseFile(repoId: string): void {
+  patchRepo(repoId, { rebaseFile: null })
 }
 
 export function openLog(): void {
