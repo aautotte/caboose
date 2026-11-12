@@ -1,14 +1,14 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronUp, Columns3, FileWarning, Lightbulb, RotateCcw, X } from 'lucide-react'
-import type { ConflictFile } from '../../../shared/types'
+import type { ConflictFile, ConflictWhy } from '../../../shared/types'
 import { Badge, Button, Checkbox, EmptyState, IconButton, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { plural, splitPath } from '@/lib/format'
+import { plural, relativeTime, shortSha, splitPath } from '@/lib/format'
 import { toast } from '@/ui/toastBus'
 import { setPrefs, useApp } from '@/store'
 import * as act from '@/actions'
-import { baseLines, compose, eolOf, hasMarkers, parseConflicts, type Pick, type Segment } from './conflicts'
+import { baseLines, compose, eolOf, hasMarkers, parseConflicts, rangesIn, type Pick, type Segment } from './conflicts'
 import { suggest, wordMarks, type Marked, type Suggestion } from './suggest'
 
 /** S10: pick lines from each side of every conflict, or edit the result directly, then save. */
@@ -18,6 +18,8 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
   const [picks, setPicks] = useState<Pick[]>([])
   // A conflict's own lines, from a suggestion that combines both sides.
   const [custom, setCustom] = useState<Array<string[] | null>>([])
+  // For each conflict, the commits on each side that changed its lines.
+  const [why, setWhy] = useState<Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }>>([])
   const [output, setOutput] = useState('')
   const [edited, setEdited] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -70,6 +72,21 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
     })
     return out
   }, [segs, bases])
+
+  useEffect(() => {
+    setWhy([])
+    if (!file || file.binary || file.ours === null || file.theirs === null) return
+    let live = true
+    const parts = segs.filter((s): s is Extract<Segment, { kind: 'conflict' }> => s.kind === 'conflict')
+    const ours = rangesIn(file.ours, parts.map((s) => s.ours))
+    const theirs = rangesIn(file.theirs, parts.map((s) => s.theirs))
+    call('conflict.why', { repoId, path, ranges: parts.map((_, i) => ({ ours: ours[i], theirs: theirs[i] })) })
+      .then((w) => live && setWhy(w))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [repoId, path, file, segs])
 
   useEffect(() => {
     if (file && !edited) setOutput(compose(segs, picks, labels, eol, custom))
@@ -248,6 +265,7 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           const idx = ++ci
           const lines = which === 'ours' ? s.ours : s.theirs
           const marks = hints[idx]?.[which]
+          const changedIn = why[idx]?.[which]
           const hint = hints[idx]?.suggestion
           const checked = !custom[idx] && (picks[idx] ?? []).includes(which)
           const order = (picks[idx] ?? []).indexOf(which)
@@ -271,6 +289,7 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
                 />
                 <span className="ml-auto text-xs text-muted">Conflict {idx + 1}</span>
               </div>
+              {changedIn?.commits.length ? <ChangedIn repoId={repoId} why={changedIn} /> : null}
               {which === 'ours' && hint ? (
                 <div className="flex items-start gap-2 px-3 pb-1 font-sans text-sm">
                   <Lightbulb size={14} aria-hidden className="mt-0.5 shrink-0 text-accent-text" />
@@ -413,5 +432,28 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
         />
       </div>
     </section>
+  )
+}
+
+/** "Changed in “Raise the timeout” · Ana, 2 days ago": the commits behind a side's lines. A click shows one in the details panel. */
+function ChangedIn({ repoId, why }: { repoId: string; why: ConflictWhy }): React.JSX.Element {
+  const [first, ...rest] = why.commits
+  return (
+    <p className="px-3 pb-1 font-sans text-xs text-muted">
+      Changed in{' '}
+      <button type="button" className="text-accent-text hover:underline" title={shortSha(first.sha)} onClick={() => act.select(repoId, first.sha)}>
+        {first.summary}
+      </button>{' '}
+      · {first.author}, {relativeTime(first.time)}
+      {rest.map((c) => (
+        <Fragment key={c.sha}>
+          {', '}
+          <button type="button" className="text-accent-text hover:underline" title={`${shortSha(c.sha)} · ${c.author}, ${relativeTime(c.time)}`} onClick={() => act.select(repoId, c.sha)}>
+            {c.summary}
+          </button>
+        </Fragment>
+      ))}
+      {why.more ? ' and earlier commits' : ''}
+    </p>
   )
 }
