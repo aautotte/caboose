@@ -1,20 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Columns3, FileWarning, RotateCcw, X } from 'lucide-react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronUp, Columns3, FileWarning, Lightbulb, RotateCcw, X } from 'lucide-react'
 import type { ConflictFile } from '../../../shared/types'
 import { Badge, Button, Checkbox, EmptyState, IconButton, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { splitPath } from '@/lib/format'
+import { plural, splitPath } from '@/lib/format'
 import { toast } from '@/ui/toastBus'
 import { setPrefs, useApp } from '@/store'
 import * as act from '@/actions'
 import { baseLines, compose, eolOf, hasMarkers, parseConflicts, type Pick, type Segment } from './conflicts'
+import { suggest, wordMarks, type Marked, type Suggestion } from './suggest'
 
 /** S10: pick lines from each side of every conflict, or edit the result directly, then save. */
 export function MergeTool({ repoId, path }: { repoId: string; path: string }): React.JSX.Element {
   const [file, setFile] = useState<ConflictFile | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picks, setPicks] = useState<Pick[]>([])
+  // A conflict's own lines, from a suggestion that combines both sides.
+  const [custom, setCustom] = useState<Array<string[] | null>>([])
   const [output, setOutput] = useState('')
   const [edited, setEdited] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -31,6 +34,7 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
         if (!live) return
         setFile(f)
         setPicks([])
+        setCustom([])
         setEdited(false)
         setCurrent(0)
       })
@@ -49,18 +53,60 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
   )
   const eol = file ? eolOf(file.merged) : '\n'
   const labels = { ours: file?.oursLabel ?? 'yours', theirs: file?.theirsLabel ?? 'theirs' }
+  // Per conflict: a suggested resolution when the answer is clear, and the words each side changed (from the base,
+  // or from the other side when the base isn't known).
+  const hints = useMemo(() => {
+    const out: Array<{ suggestion: Suggestion | null; ours: Marked[]; theirs: Marked[] }> = []
+    segs.forEach((s, i) => {
+      if (s.kind !== 'conflict') return
+      const base = bases[out.length] ?? null
+      const before = segs[i - 1]?.kind === 'common' ? (segs[i - 1] as Extract<Segment, { kind: 'common' }>).lines.at(-1) : undefined
+      const after = segs[i + 1]?.kind === 'common' ? (segs[i + 1] as Extract<Segment, { kind: 'common' }>).lines[0] : undefined
+      out.push({
+        suggestion: suggest(s.ours, s.theirs, base, before, after),
+        ours: wordMarks(s.ours, base ?? s.theirs),
+        theirs: wordMarks(s.theirs, base ?? s.ours)
+      })
+    })
+    return out
+  }, [segs, bases])
 
   useEffect(() => {
-    if (file && !edited) setOutput(compose(segs, picks, labels, eol))
+    if (file && !edited) setOutput(compose(segs, picks, labels, eol, custom))
     // labels derive from file
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, segs, picks, edited, eol])
+  }, [file, segs, picks, custom, edited, eol])
 
-  const resolved = picks.filter((p) => p && p.length).length
+  const resolved = hints.filter((_, i) => custom[i] || picks[i]?.length).length
   const clean = !hasMarkers(output)
+  const inUse = (i: number): boolean => {
+    const s = hints[i]?.suggestion
+    if (!s) return false
+    return s.pick ? !custom[i] && (picks[i] ?? []).join() === s.pick.join() : (custom[i] ?? []).join('\n') === s.lines.join('\n')
+  }
+  const waiting = hints.map((h, i) => (h.suggestion && !inUse(i) ? i : -1)).filter((i) => i >= 0)
+  const applySuggestions = (which: number[]): void => {
+    setEdited(false)
+    setPicks((prev) => {
+      const next = [...prev]
+      for (const i of which) next[i] = hints[i].suggestion?.pick ?? []
+      return next
+    })
+    setCustom((prev) => {
+      const next = [...prev]
+      for (const i of which) next[i] = hints[i].suggestion?.pick ? null : (hints[i].suggestion?.lines ?? null)
+      return next
+    })
+  }
 
   const toggle = (idx: number, side: 'ours' | 'theirs', on: boolean): void => {
     setEdited(false)
+    setCustom((prev) => {
+      if (!prev[idx]) return prev
+      const next = [...prev]
+      next[idx] = null
+      return next
+    })
     setPicks((prev) => {
       const next = [...prev]
       const cur = next[idx] ?? []
@@ -156,7 +202,7 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
   const basePane = (): React.JSX.Element => {
     ci = -1
     return (
-      <div className="min-h-0 flex-1 overflow-auto font-mono text-code">
+      <div role="group" aria-label="Base lines" tabIndex={0} className="min-h-0 flex-1 overflow-auto font-mono text-code outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring">
         {segs.map((s, i) => {
           if (s.kind === 'common') {
             return (
@@ -184,7 +230,13 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
   const side = (which: 'ours' | 'theirs'): React.JSX.Element => {
     ci = -1
     return (
-      <div className="min-h-0 flex-1 overflow-auto font-mono text-code">
+      // Focusable, so the keyboard can scroll it.
+      <div
+        role="group"
+        aria-label={which === 'ours' ? 'Your lines' : 'Their lines'}
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-auto font-mono text-code outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring"
+      >
         {segs.map((s, i) => {
           if (s.kind === 'common') {
             return (
@@ -195,7 +247,9 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           }
           const idx = ++ci
           const lines = which === 'ours' ? s.ours : s.theirs
-          const checked = (picks[idx] ?? []).includes(which)
+          const marks = hints[idx]?.[which]
+          const hint = hints[idx]?.suggestion
+          const checked = !custom[idx] && (picks[idx] ?? []).includes(which)
           const order = (picks[idx] ?? []).indexOf(which)
           return (
             <div
@@ -217,7 +271,44 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
                 />
                 <span className="ml-auto text-xs text-muted">Conflict {idx + 1}</span>
               </div>
-              <pre className="px-3 pb-1 whitespace-pre text-text">{lines.join('\n') || '(nothing)'}</pre>
+              {which === 'ours' && hint ? (
+                <div className="flex items-start gap-2 px-3 pb-1 font-sans text-sm">
+                  <Lightbulb size={14} aria-hidden className="mt-0.5 shrink-0 text-accent-text" />
+                  <p className="min-w-0 flex-1">
+                    <span className="font-medium text-text">Suggested: {hint.what}.</span> <span className="text-muted">{hint.why}</span>
+                  </p>
+                  {inUse(idx) ? (
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-success">
+                      <Check size={12} aria-hidden />
+                      In the result
+                    </span>
+                  ) : (
+                    <Button size="sm" aria-label={`Use suggestion for conflict ${idx + 1}`} onClick={() => applySuggestions([idx])}>
+                      Use suggestion
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+              <pre className="px-3 pb-1 whitespace-pre text-text">
+                {lines.length ? (
+                  (marks ?? lines.map((l): Marked => [[l, false]])).map((parts, k) => (
+                    <Fragment key={k}>
+                      {k ? '\n' : null}
+                      {parts.map(([t, changed], j) =>
+                        changed ? (
+                          <mark key={j} className={cn('rounded-xs text-text', which === 'ours' ? 'bg-conflict-ours-emph' : 'bg-conflict-theirs-emph')}>
+                            {t}
+                          </mark>
+                        ) : (
+                          t
+                        )
+                      )}
+                    </Fragment>
+                  ))
+                ) : (
+                  '(nothing)'
+                )}
+              </pre>
             </div>
           )
         })}
@@ -233,6 +324,13 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           {path}
         </h2>
         <Badge tone={clean ? 'success' : 'warning'}>{clean ? 'All conflicts resolved' : `${Math.min(current + 1, conflicts)} of ${conflicts} · ${resolved} picked`}</Badge>
+        {waiting.length ? (
+          <Tooltip content="Take the suggested resolution for every conflict that has one. The others stay for you to pick, and nothing is saved until you save.">
+            <Button size="sm" icon={<Lightbulb size={14} />} onClick={() => applySuggestions(waiting)}>
+              Use {plural(waiting.length, 'suggestion')}
+            </Button>
+          </Tooltip>
+        ) : null}
         <Tooltip content="Previous conflict">
           <IconButton label="Previous conflict" onClick={() => go(-1)} disabled={!conflicts}>
             <ChevronUp size={16} />
