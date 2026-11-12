@@ -1385,8 +1385,47 @@ function afterOp(repoId: string, res: { result: string; message?: string } | und
   else if (res.result === 'ok') toast({ tone: 'success', title: okTitle })
 }
 
-/** Merge `source` into `target`. Checks out target first if needed. `noFf`: always a merge commit. */
-export async function mergeInto(repoId: string, source: string, target: string, noFf = false): Promise<void> {
+/** "a.txt", "a.txt and b.txt", or "a.txt, b.txt, c.txt and 4 more files". */
+export function fileList(files: string[], shown = 3): string {
+  if (files.length <= shown) return files.length > 1 ? `${files.slice(0, -1).join(', ')} and ${files[files.length - 1]}` : (files[0] ?? '')
+  return `${files.slice(0, shown).join(', ')} and ${plural(files.length - shown, 'more file')}`
+}
+
+/**
+ * Before a merge, rebase or pull: whether it would conflict, worked out by git without touching anything. If it
+ * would, asks first, and `go` runs only on "anyway". A forecast that can't be made (an old git) doesn't stand in the way.
+ */
+async function unlessConflicts(
+  repoId: string,
+  p: { kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean },
+  ask: { title: string; confirmLabel: string; note?: string },
+  go: () => void
+): Promise<void> {
+  const f = await call('conflict.forecast', { repoId, ...p }).catch(() => null)
+  if (!f?.files.length) return go()
+  const files = fileList(f.files)
+  const where = f.stopAt
+    ? `It would stop at “${f.stopAt.summary}” (commit ${f.stopAt.step} of ${f.stopAt.total}), with conflicts in ${files}.`
+    : `Both sides changed the same lines in ${files}.`
+  confirm({
+    title: ask.title,
+    body: `${where} You can go ahead and sort them out, or leave it for now.${ask.note ? ` ${ask.note}` : ''}`,
+    confirmLabel: ask.confirmLabel,
+    danger: false,
+    undoable: true,
+    onConfirm: go
+  })
+}
+
+/**
+ * Merge `source` into `target`. Checks out target first if needed. `noFf`: always a merge commit. `checked`: the
+ * conflict forecast was seen.
+ */
+export async function mergeInto(repoId: string, source: string, target: string, noFf = false, checked = false): Promise<void> {
+  if (!checked) {
+    const title = `Merging ${source} into ${target} will conflict`
+    return unlessConflicts(repoId, { kind: 'merge', into: target, from: source }, { title, confirmLabel: 'Merge anyway' }, () => void mergeInto(repoId, source, target, noFf, true))
+  }
   if (!(await switchFor(repoId, target))) return
   const res = await attempt(() => call('branch.merge', { repoId, source, noFf }), `Couldn’t merge ${source}`)
   afterOp(repoId, res, `Merged ${source} into ${target}`)
@@ -1410,8 +1449,12 @@ export async function squashMerge(repoId: string, source: string, target: string
   return !!res
 }
 
-/** Rebase `branch` onto `onto`. Checks out branch first if needed. */
-export async function rebaseOnto(repoId: string, branch: string, onto: string): Promise<void> {
+/** Rebase `branch` onto `onto`. Checks out branch first if needed. `checked`: the conflict forecast was seen. */
+export async function rebaseOnto(repoId: string, branch: string, onto: string, checked = false): Promise<void> {
+  if (!checked) {
+    const title = `Rebasing ${branch} onto ${onto} will conflict`
+    return unlessConflicts(repoId, { kind: 'rebase', branch, onto }, { title, confirmLabel: 'Rebase anyway' }, () => void rebaseOnto(repoId, branch, onto, true))
+  }
   const head = useApp.getState().repos[repoId]?.refs?.head.branch
   if (branch !== head) {
     const ok = await attempt(() => call('branch.checkout', { repoId, ref: branch }), `Couldn’t switch to ${branch}`)
@@ -1461,8 +1504,18 @@ export async function fetchAll(repoId: string, quiet = false): Promise<void> {
  * Pulls the checked-out branch. When uncommitted changes are in the way, asks: stash them and pull (they're put back
  * after), discard them and pull, or cancel. `autostash` is that first answer.
  */
-export async function pull(repoId: string, mode?: PullMode, autostash = false): Promise<void> {
+export async function pull(repoId: string, mode?: PullMode, autostash = false, checked = false): Promise<void> {
   const m = mode ?? useApp.getState().prefs.pullMode
+  // Merged or replayed onto the remote branch (as of the last fetch): would that conflict?
+  if (!checked && m !== 'ff-only') {
+    const what = m === 'rebase' ? 'Pulling with rebase' : 'Pulling'
+    return unlessConflicts(
+      repoId,
+      { kind: 'pull', rebase: m === 'rebase' },
+      { title: `${what} will conflict`, confirmLabel: 'Pull anyway', note: 'This is from the last fetch: the pull gets anything newer first.' },
+      () => void pull(repoId, m, autostash, true)
+    )
+  }
   const res = await remoteOp(repoId, 'pull', 'Pulling', (opId) => call('remote.pull', { repoId, mode: m, opId, autostash }), 'Pull failed')
   if (res?.result === 'rejected') toast({ tone: 'error', title: 'Pull stopped', body: res.message })
   else if (res?.result === 'dirty') {
@@ -1472,7 +1525,7 @@ export async function pull(repoId: string, mode?: PullMode, autostash = false): 
       confirmLabel: 'Stash and pull',
       danger: false,
       undoable: null,
-      onConfirm: () => void pull(repoId, m, true),
+      onConfirm: () => void pull(repoId, m, true, true),
       alt: {
         label: 'Discard and pull…',
         onSelect: () =>
@@ -1483,7 +1536,7 @@ export async function pull(repoId: string, mode?: PullMode, autostash = false): 
             danger: true,
             undoable: true,
             onConfirm: async () => {
-              if ((await attempt(() => call('worktree.discard', { repoId, paths: 'all' }), 'Couldn’t discard')) !== undefined) await pull(repoId, m)
+              if ((await attempt(() => call('worktree.discard', { repoId, paths: 'all' }), 'Couldn’t discard')) !== undefined) await pull(repoId, m, false, true)
             }
           })
       }

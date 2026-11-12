@@ -37,6 +37,7 @@ import type {
   CommitDetails,
   Comparison,
   ConflictFile,
+  ConflictForecast,
   DiffSource,
   FileDiff,
   GraphPage,
@@ -169,6 +170,8 @@ export interface Api {
   'remote.push': { in: R & { opId: string; remote?: string; branch?: string; setUpstream?: boolean; force?: boolean }; out: OpResult }
 
   'conflict.get': { in: R & { path: string }; out: ConflictFile }
+  /** Before starting: would merging `from` into `into`, rebasing `branch` onto `onto`, or pulling, conflict? */
+  'conflict.forecast': { in: R & ({ kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean }); out: ConflictForecast }
   'conflict.resolve': { in: R & { path: string; content: string }; out: null }
   'conflict.take': { in: R & { path: string; side: 'ours' | 'theirs' }; out: null }
   'op.continue': { in: R; out: OpResult }

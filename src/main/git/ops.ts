@@ -10,6 +10,7 @@ import type {
   FileHistoryEntry,
   RebasePreview,
   RebaseRow,
+  ConflictForecast,
   RebaseStep,
   RefViewState,
   Remote,
@@ -1383,6 +1384,47 @@ export class RepoOps {
     const oursLabel = op.kind === 'rebase' ? (op.onto?.slice(0, 7) ?? 'Base') : (st.branch ?? 'HEAD')
     const diff3 = !binary && base !== null && ours !== null && theirs !== null ? await this.diff3(base, ours, theirs) : null
     return { path, binary, base, ours, theirs, merged, diff3, oursLabel, theirsLabel }
+  }
+
+  /**
+   * The files a merge of `theirs` into `ours` (commits, or a tree for `ours`) would leave conflicted, and the tree it
+   * makes otherwise, from git merge-tree: nothing is written to the working tree or the index.
+   */
+  private async mergeTree(ours: string, theirs: string, base?: string): Promise<{ tree: string; files: string[] }> {
+    const args = ['merge-tree', '--write-tree', '--name-only', '--no-messages', ...(base ? [`--merge-base=${base}`] : []), ours, theirs]
+    const r = await this.runner.run({ cwd: this.repo.path, repoId: this.repo.id, args, okCodes: [1] })
+    const [tree, ...rest] = r.stdout.split('\n')
+    const end = rest.indexOf('')
+    return { tree: tree.trim(), files: r.code === 1 ? [...new Set(end < 0 ? rest : rest.slice(0, end))] : [] }
+  }
+
+  /** Commits a rebase of `branch` onto `onto` replays one by one, as far as the first that conflicts. */
+  private async rebaseForecast(branch: string, onto: string): Promise<ConflictForecast> {
+    const out = await this.git(['rev-list', '--reverse', '--no-merges', '--cherry-pick', '--right-only', `${onto}...${branch}`])
+    const shas = out.split('\n').filter(Boolean)
+    // A very long branch: what it would look like all at once.
+    if (shas.length > 200) return { files: (await this.mergeTree(onto, branch)).files }
+    let cur = onto
+    for (const [i, sha] of shas.entries()) {
+      const parent = (await this.tryGit(['rev-parse', '--verify', '-q', `${sha}^`]))?.trim()
+      if (!parent) continue
+      const r = await this.mergeTree(cur, sha, parent)
+      if (r.files.length) {
+        const summary = (await this.git(['log', '-1', '--format=%s', sha])).trim()
+        return { files: r.files, stopAt: { sha, summary, step: i + 1, total: shas.length } }
+      }
+      cur = r.tree
+    }
+    return { files: [] }
+  }
+
+  async forecast(p: { kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean }): Promise<ConflictForecast> {
+    if (p.kind === 'merge') return { files: (await this.mergeTree(this.safeRev(p.into), this.safeRev(p.from))).files }
+    if (p.kind === 'rebase') return this.rebaseForecast(this.safeRev(p.branch), this.safeRev(p.onto))
+    // As of the last fetch: the remote branch as it was then.
+    const up = (await this.tryGit(['rev-parse', '--verify', '-q', '@{upstream}']))?.trim()
+    if (!up) return { files: [] }
+    return p.rebase ? this.rebaseForecast('HEAD', up) : { files: (await this.mergeTree('HEAD', up)).files }
   }
 
   /** Re-merges the three versions in a temp folder with the ancestor's lines kept (git merge-file --diff3). */
