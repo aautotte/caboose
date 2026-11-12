@@ -44,6 +44,9 @@ The top shows **yours** (the branch you're on) and **theirs** (what's coming in)
 - **Save result** writes the file and stages it. It's enabled once no conflict is left open.
 
 The words each side changed are highlighted: against the base when it's known, against the other side otherwise.
+Above each side's lines, **Changed in** names the commits on that side that changed them since the two sides split,
+newest first, with who made the last one and when: often what decides which side is right. Click one to see it in
+the details panel; **Uncommitted changes** brings back the conflict banner.
 
 ### Suggestions
 

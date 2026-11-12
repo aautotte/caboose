@@ -19,9 +19,11 @@ test.beforeAll(async () => {
     setup: (env) => {
       makeRepo(env, 'suggest', [['Base', { 'app.txt': file('import b', 'L1\nL2', '  value = 1', 'x = 0') }]])
       gitIn(env, repo, 'switch', '-q', '-c', 'other')
-      writeAndCommit(env, repo, 'Theirs', { 'app.txt': file('import b\nimport m', 'L1\nL2 theirs', '  value = 2', 'x = 2') })
+      writeAndCommit(env, repo, 'Theirs', { 'app.txt': file('import b\nimport m', 'L1\nL2 theirs', '  value = 2', 'x = 0') })
+      writeAndCommit(env, repo, 'Set x to 2', { 'app.txt': file('import b\nimport m', 'L1\nL2 theirs', '  value = 2', 'x = 2') })
       gitIn(env, repo, 'switch', '-q', 'main')
-      writeAndCommit(env, repo, 'Ours', { 'app.txt': file('import b\nimport c', 'L1 ours\nL2', '    value = 1', 'x = 1') })
+      writeAndCommit(env, repo, 'Ours', { 'app.txt': file('import b\nimport c', 'L1 ours\nL2', '    value = 1', 'x = 0') })
+      writeAndCommit(env, repo, 'Set x to 1', { 'app.txt': file('import b\nimport c', 'L1 ours\nL2', '    value = 1', 'x = 1') })
       try {
         gitIn(env, repo, 'merge', '-q', 'other')
       } catch {
@@ -61,6 +63,18 @@ test('F88-H2: the words each side changed are marked', async () => {
   await expect(marks.filter({ hasText: /^import c$/ })).toHaveCount(1)
   // Lines a side left as they were aren't marked.
   await expect(marks.filter({ hasText: 'filler' })).toHaveCount(0)
+})
+
+test('F88-H4: each side says which of its commits changed the lines', async () => {
+  await expect(tool().getByText(/^Changed in /)).toHaveCount(8)
+  await expect(tool().getByText(/^Changed in Ours · E2E, /)).toHaveCount(3)
+  await expect(tool().getByText(/^Changed in Theirs · E2E, /)).toHaveCount(3)
+  await expect(tool().getByText(/^Changed in Set x to 1 · E2E, /)).toHaveCount(1)
+  // A click shows the commit in the details panel; the merge tool stays.
+  await tool().getByRole('button', { name: 'Set x to 2' }).click()
+  await expect(h.page.getByRole('region', { name: 'Details' })).toContainText('Set x to 2')
+  await expect(tool()).toBeVisible()
+  expect(await axe(h.page)).toEqual([])
 })
 
 test('F88-H3: one suggestion, then the rest; a pick by hand replaces a suggestion; the clash is picked by hand, then saved', async () => {

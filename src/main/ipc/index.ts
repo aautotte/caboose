@@ -471,6 +471,12 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   )
   handle('conflict.resolve', z.object({ ...R, path: z.string().min(1).max(4096), content: z.string().max(50_000_000) }), ({ repoId, path, content }) => exclusive(repoId, async () => (await ops(repoId).resolve(path, content), null)))
   handle('conflict.take', z.object({ ...R, path: z.string().min(1).max(4096), side: z.enum(['ours', 'theirs']) }), ({ repoId, path, side }) => exclusive(repoId, async () => (await ops(repoId).take(path, side), null)))
+  const lineRange = z.tuple([z.number().int().min(1), z.number().int().min(1)]).refine(([a, b]) => b >= a).nullable()
+  handle(
+    'conflict.why',
+    z.object({ ...R, path: z.string().min(1).max(4096), ranges: z.array(z.object({ ours: lineRange, theirs: lineRange })).max(200) }),
+    ({ repoId, path, ranges }) => ops(repoId).conflictWhy(path, ranges)
+  )
   handle('op.continue', z.object(R), ({ repoId }) => exclusive(repoId, async () => {
     const o = ops(repoId)
     const r = await o.continueOp()
