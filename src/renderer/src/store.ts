@@ -36,6 +36,8 @@ export interface RepoState {
   /** A commit whose message the details panel should open for editing (set from the graph's menu). */
   editing: string | null
   center: Center
+  /** While planning a rebase or a copy: a file of one of its commits, open under the list. */
+  rebaseFile: { path: string; oldPath?: string; source: DiffSource } | null
   undo: UndoPeek
   /** Running remote / long operations, by key. */
   busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout' | 'flow', string>>
@@ -169,6 +171,8 @@ export interface Prefs {
   diffWrap: boolean
   stashUntracked: boolean
   historyListWidth: number
+  /** The height of a commit's file diff under the interactive rebase list, in px. */
+  rebaseDiffHeight: number
   /** Code size in diffs, blame and the merge tool, in px. */
   codeFontSize: number
   tabSize: number
@@ -212,6 +216,7 @@ export const defaultPrefs: Prefs = {
   diffWrap: false,
   stashUntracked: true,
   historyListWidth: 320,
+  rebaseDiffHeight: 320,
   codeFontSize: 12,
   tabSize: 4,
   terminalCommand: '',
@@ -247,6 +252,7 @@ export const emptyRepo = (): RepoState => ({
   multi: [],
   editing: null,
   center: { kind: 'graph' },
+  rebaseFile: null,
   undo: { undo: null, redo: null },
   busy: {},
   progress: null,

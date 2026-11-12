@@ -1878,6 +1878,23 @@ export class RepoOps {
       })
   }
 
+  /** The rows with their size: files changed, lines added and removed. */
+  async withStats(rows: RebaseRow[]): Promise<RebaseRow[]> {
+    const stats = new Map<string, RebaseRow['stat']>()
+    // A few hundred commits at a time keep the command line short.
+    for (let i = 0; i < rows.length; i += 200) {
+      const out = await this.git(['log', '--no-walk=unsorted', '--format=%x1e%H', '--shortstat', ...rows.slice(i, i + 200).map((r) => r.sha), '--'])
+      for (const part of out.split(RS)) {
+        const [sha, ...rest] = part.trim().split('\n')
+        if (!sha) continue
+        const line = rest.join(' ')
+        const n = (re: RegExp): number => Number(re.exec(line)?.[1] ?? 0)
+        stats.set(sha.trim(), { files: n(/(\d+) files? changed/), adds: n(/(\d+) insertions?\(\+\)/), dels: n(/(\d+) deletions?\(-\)/) })
+      }
+    }
+    return rows.map((r) => ({ ...r, stat: stats.get(r.sha) ?? { files: 0, adds: 0, dels: 0 } }))
+  }
+
   /** Commits on `tip` that HEAD doesn't have, oldest first, merges left out. */
   async cherryPreview(tip: string): Promise<RebaseRow[]> {
     this.safeRev(tip)

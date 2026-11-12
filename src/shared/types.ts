@@ -461,6 +461,8 @@ export interface RebaseRow {
   authorName: string
   authorEmail: string
   authorTime: number
+  /** How big it is: files changed, lines added and removed (binary files count as files, with no lines). */
+  stat?: { files: number; adds: number; dels: number }
 }
 
 export interface RebaseStep {
