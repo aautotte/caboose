@@ -457,6 +457,18 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
 
   // ---------- conflicts ----------
   handle('conflict.get', z.object({ ...R, path: z.string().min(1).max(4096) }), ({ repoId, path }) => ops(repoId).conflict(path))
+  handle(
+    'conflict.forecast',
+    z.intersection(
+      z.object(R),
+      z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('merge'), into: ref, from: ref }),
+        z.object({ kind: z.literal('rebase'), branch: ref, onto: ref }),
+        z.object({ kind: z.literal('pull'), rebase: z.boolean() })
+      ])
+    ),
+    ({ repoId, ...p }) => ops(repoId).forecast(p)
+  )
   handle('conflict.resolve', z.object({ ...R, path: z.string().min(1).max(4096), content: z.string().max(50_000_000) }), ({ repoId, path, content }) => exclusive(repoId, async () => (await ops(repoId).resolve(path, content), null)))
   handle('conflict.take', z.object({ ...R, path: z.string().min(1).max(4096), side: z.enum(['ours', 'theirs']) }), ({ repoId, path, side }) => exclusive(repoId, async () => (await ops(repoId).take(path, side), null)))
   handle('op.continue', z.object(R), ({ repoId }) => exclusive(repoId, async () => {

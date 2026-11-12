@@ -106,6 +106,15 @@ export interface Change {
 
 export type OperationKind = 'none' | 'merge' | 'rebase' | 'cherry_pick' | 'revert'
 
+/**
+ * What a merge, rebase or pull would run into, worked out without touching anything: the files that would conflict
+ * (none: it goes through). A rebase stops at the first commit that conflicts: `stopAt`.
+ */
+export interface ConflictForecast {
+  files: string[]
+  stopAt?: { sha: string; summary: string; step: number; total: number }
+}
+
 export interface OperationState {
   kind: OperationKind
   step?: number

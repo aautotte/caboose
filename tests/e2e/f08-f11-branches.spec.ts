@@ -148,6 +148,8 @@ test('F09-E3 a merge that would overwrite local changes changes nothing', async 
   writeFileSync(join(repo, 'a.txt'), lines(6, ' (unsaved)'))
   const before = h.git(repo, 'rev-parse', 'HEAD')
   await menu(h.page, local(/^clash/).first(), /^Merge into main$/)
+  // It would conflict too: that's asked first (F89).
+  await dialog(h.page).getByRole('button', { name: 'Merge anyway' }).click()
   await expect(toasts().getByText(/Couldn’t merge clash/)).toBeVisible()
   expect(h.git(repo, 'rev-parse', 'HEAD')).toBe(before)
   expect(existsSync(join(repo, '.git', 'MERGE_HEAD'))).toBe(false)
@@ -159,6 +161,7 @@ test('F09-E3 a merge that would overwrite local changes changes nothing', async 
 test('F09-E2 / F10-E1 a conflicting merge pauses; Abort puts everything back', async () => {
   const before = h.git(repo, 'rev-parse', 'HEAD')
   await menu(h.page, local(/^clash/).first(), /^Merge into main$/)
+  await dialog(h.page).getByRole('button', { name: 'Merge anyway' }).click()
   await expect(h.page.getByRole('region', { name: 'Paused operation' })).toContainText('Merging')
   await h.page.getByRole('region', { name: 'Paused operation' }).getByRole('button', { name: 'Abort' }).click()
   await dialog(h.page).getByRole('button', { name: 'Abort' }).click()
@@ -171,6 +174,7 @@ test('F09-E2 / F10-E1 a conflicting merge pauses; Abort puts everything back', a
 
 test('F10-E2 one side deleted a file the other edited: keeping the deletion works', async () => {
   await menu(h.page, local(/^deleter/), /^Merge into main$/)
+  await dialog(h.page).getByRole('button', { name: 'Merge anyway' }).click()
   await openWip(h.page)
   await h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /del\.txt/ }).click()
   // The tool explains what happened instead of showing a three-way merge with a side missing.
@@ -185,6 +189,7 @@ test('F10-E2 one side deleted a file the other edited: keeping the deletion work
 
 test('F10-E3 a binary conflict offers whole-file choices', async () => {
   await menu(h.page, local(/^binbranch/), /^Merge into main$/)
+  await dialog(h.page).getByRole('button', { name: 'Merge anyway' }).click()
   await openWip(h.page)
   await h.page.getByRole('listbox', { name: /Not staged/ }).getByRole('option', { name: /bin\.dat/ }).click()
   await expect(h.page.getByText('bin.dat is a binary file')).toBeVisible()
@@ -266,6 +271,7 @@ test('F11-E1 a rebase that conflicts can skip the commit and finish', async () =
   // Wait until the app has noticed the switch, so its menu offers to rebase clash.
   await expect(local(/^clash/).first()).toHaveAttribute('aria-current', 'true')
   await menu(h.page, local(/^main/), /^Rebase clash onto main$/)
+  await dialog(h.page).getByRole('button', { name: 'Rebase anyway' }).click()
   await expect(h.page.getByRole('region', { name: 'Paused operation' })).toContainText('Rebasing')
   await h.page.getByRole('region', { name: 'Paused operation' }).getByRole('button', { name: 'Skip this commit' }).click()
   await expect.poll(() => existsSync(join(repo, '.git', 'rebase-merge'))).toBe(false)

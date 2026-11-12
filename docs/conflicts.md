@@ -8,12 +8,25 @@ buttons to finish.
 | --- | --- |
 | **Continue** | once every conflicted file is resolved and staged |
 | **Skip this commit** | during a rebase: leave out the commit that conflicts and go on |
+| **Abort** | put everything back as it was before the operation started |
 
 A rebase also stops at a commit marked [Edit](rewriting-history.md#stop-to-edit-a-commit). There's nothing to
 resolve: change the commit, then **Continue**.
-| **Abort** | put everything back as it was before the operation started |
 
 Conflicted files are marked **U** in the file list. Click one to open it in the merge tool.
+
+## Before you start
+
+Before a merge, a rebase onto another branch, or a pull that merges or rebases, Caboose works out whether it would
+conflict, with `git merge-tree`: nothing in your files changes. If it would, it says so first, and with which files:
+
+- a merge: *Merging feature into main will conflict. Both sides changed the same lines in app.ts and README.md.*
+- a rebase replays one commit at a time, so it says which commit it would stop at: *It would stop at “Raise the
+  timeout” (commit 2 of 5)*.
+- a pull works from the last fetch: anything newer on the remote is fetched first, and isn't in the forecast.
+
+**Merge anyway** (or **Rebase anyway**, **Pull anyway**) goes ahead, and the conflicts are resolved as below.
+**Cancel** leaves everything as it was. One that goes through cleanly doesn't ask.
 
 ## The merge tool
 
