@@ -55,8 +55,11 @@ export function eolOf(text: string): string {
   return text.includes('\r\n') ? '\r\n' : '\n'
 }
 
-/** The result text: picked sides in pick order; unpicked conflicts keep their markers so they can't be saved by accident. */
-export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; theirs: string }, eol: string): string {
+/**
+ * The result text: picked sides in pick order, or a conflict's own lines (`custom`: both sides' changes combined);
+ * unpicked conflicts keep their markers so they can't be saved by accident.
+ */
+export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; theirs: string }, eol: string, custom: Array<string[] | null> = []): string {
   const out: string[] = []
   let c = 0
   for (const s of segs) {
@@ -64,8 +67,10 @@ export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; 
       out.push(...s.lines)
       continue
     }
+    const own = custom[c]
     const pick = picks[c++] ?? []
-    if (pick.length === 0) {
+    if (own) out.push(...own)
+    else if (pick.length === 0) {
       out.push(`<<<<<<< ${labels.ours}`, ...s.ours, '=======', ...s.theirs, `>>>>>>> ${labels.theirs}`)
     } else {
       for (const side of pick) out.push(...(side === 'ours' ? s.ours : s.theirs))

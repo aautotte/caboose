@@ -30,6 +30,23 @@ The top shows **yours** (the branch you're on) and **theirs** (what's coming in)
   picks.
 - **Save result** writes the file and stages it. It's enabled once no conflict is left open.
 
+The words each side changed are highlighted: against the base when it's known, against the other side otherwise.
+
+### Suggestions
+
+When the answer is clear from the two sides and what they started from, a conflict says what to keep, and why:
+
+| Suggested | When |
+| --- | --- |
+| **keep it once** | both sides made the same change |
+| **keep yours** or **keep theirs** | the other side left these lines as they were, or only changed their spacing; or both made the same change apart from spacing |
+| **keep both, sorted** | both sides added lines to a sorted list, such as imports: they go in, in order, a line both added once |
+| **keep both** | both sides added lines at the same place (yours first), or changed different lines next to each other, which git counts as a conflict too |
+
+**Use suggestion** puts it in the result, and **Use *n* suggestions** in the header takes them all. Nothing is taken
+until you ask, and nothing is saved until **Save result**. Ticking a side by hand replaces a suggestion. A conflict
+where both sides changed the same lines differently gets no suggestion: that one takes a person.
+
 Some conflicts aren't about lines:
 
 - **Deleted on one side, changed on the other**: **Keep the edited file** or **Delete it**.
