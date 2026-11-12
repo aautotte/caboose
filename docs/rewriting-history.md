@@ -41,8 +41,8 @@ Merge commits don't move.
 A commit that does two things, or a change that went into the wrong commit: take it out. Pick what:
 
 - **a whole file**: right-click it in the commit's file list, in the details panel;
-- **a block, or some lines**: open the file's diff from the commit, pick lines by clicking their numbers
-  (Shift-click for a range, or the arrow keys and Space), then use the button on the block's bar, **Take block out**
+- **a hunk, or some lines**: open the file's diff from the commit, pick lines by clicking their numbers
+  (Shift-click for a range, or the arrow keys and Space), then use the button on the hunk's bar, **Take hunk out**
   or **Take *n* lines out**.
 
 Then choose:

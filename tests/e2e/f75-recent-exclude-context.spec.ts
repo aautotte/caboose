@@ -179,7 +179,7 @@ test('F75-H7: one line shows one line on each side; a block stages as shown; Set
   await aroundChanges(5, '1 line')
   await expect(blocks()).toHaveCount(2)
   await expect(view().getByRole('table', { name: /^@@ -4,3 \+4,3 @@/ })).toBeVisible()
-  await blocks().nth(1).getByRole('button', { name: 'Stage block' }).click()
+  await blocks().nth(1).getByRole('button', { name: 'Stage hunk' }).click()
   await expect.poll(() => h.git(repo, 'diff', '--cached', '--numstat')).toBe('1\t1\tctx.txt')
   expect(h.git(repo, 'show', ':ctx.txt')).toContain('LINE 14')
   expect(h.git(repo, 'show', ':ctx.txt')).not.toContain('LINE 5')

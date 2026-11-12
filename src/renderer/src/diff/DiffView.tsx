@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, SlidersHorizontal, Space, UnfoldVertical, UserSearch, WrapText, X } from 'lucide-react'
 import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
 import { Button, DropdownMenu, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
@@ -54,6 +54,8 @@ export function DiffView({
   const ignoreWs = useApp((s) => s.prefs.diffIgnoreWs)
   // The whole file has no lines around changes to set; staging asks for the same blocks as on screen.
   const context = useApp((s) => (s.prefs.diffMode === 'inline' ? undefined : s.prefs.diffContext))
+  // The whole file: its changes are cut into hunks as the Changes layout would show them.
+  const hunkContext = useApp((s) => s.prefs.diffContext)
   const wide = useApp((s) => s.diffWide)
   const status = useRepo(repoId, (r) => r.status)
   // A file can become conflicted while its diff is open (or be opened just before the status says so).
@@ -135,7 +137,8 @@ export function DiffView({
     return () => window.removeEventListener('keydown', onKey)
   }, [repoId, sel, embedded, findOpen])
 
-  const run = async (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard'): Promise<void> => {
+  /** `whole`: the lines are one hunk of the whole file, not a pick. */
+  const run = async (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard', whole = false): Promise<void> => {
     if (!diff || source.kind === 'commit') return
     const go = async (): Promise<void> => {
       setBusy(true)
@@ -145,8 +148,8 @@ export function DiffView({
     }
     if (action !== 'discard') return go()
     act.confirm({
-      title: lines ? `Discard ${plural(lines.length, 'line')}?` : 'Discard this block?',
-      body: `The ${lines ? 'selected lines go' : 'block goes'} back to how they were in the last commit, in ${name} on disk.`,
+      title: lines && !whole ? `Discard ${plural(lines.length, 'line')}?` : 'Discard this hunk?',
+      body: `${lines && !whole ? 'The selected lines go back to how they were' : 'The hunk goes back to how it was'} in the last commit, in ${name} on disk.`,
       confirmLabel: 'Discard',
       danger: true,
       undoable: true,
@@ -162,10 +165,12 @@ export function DiffView({
   const jump = (dirn: 1 | -1): void => {
     const el = scroller.current
     if (!el) return
-    const heads = [...el.querySelectorAll<HTMLElement>('[data-hunk]')]
+    // The whole file is one block: its changes are the stops.
+    const box = el.getBoundingClientRect().top - el.scrollTop
+    const heads = [...el.querySelectorAll<HTMLElement>(mode === 'inline' ? '[data-change]' : '[data-hunk]')].map((h) => h.getBoundingClientRect().top - box)
     const top = el.scrollTop + 4
-    const target = dirn === 1 ? heads.find((h) => h.offsetTop > top) : [...heads].reverse().find((h) => h.offsetTop < top - 8)
-    if (target) el.scrollTo({ top: target.offsetTop, behavior: 'smooth' })
+    const target = dirn === 1 ? heads.find((t) => t > top) : [...heads].reverse().find((t) => t < top - 8)
+    if (target !== undefined) el.scrollTo({ top: target, behavior: 'smooth' })
   }
 
   const blameRev = source.kind === 'commit' ? source.sha : null
@@ -182,7 +187,7 @@ export function DiffView({
         {embedded ? (
           <span className="flex-1" />
         ) : (
-          <div className="flex min-w-0 flex-1 items-baseline gap-1.5" title={path}>
+          <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden" title={path}>
             <span className="min-w-0 shrink-[10] truncate text-sm text-muted">{oldPath && oldPath !== path ? `${oldPath} → ` : dir}</span>
             <span className="min-w-0 truncate text-base font-medium text-text">{name}</span>
             <span className="shrink-0 text-xs text-muted">· {sourceLabel(source)}</span>
@@ -354,6 +359,7 @@ export function DiffView({
                   showHeader={mode !== 'inline' || diff.hunks.length > 1}
                   source={source}
                   partialOk={!diff.oldPath && canStage}
+                  perChange={mode === 'inline' && !diff.oldPath && canStage}
                   patchOk={!diff.oldPath && canPatch}
                   onPatch={runPatch}
                   newFile={diff.isNew && source.kind === 'worktree'}
@@ -365,7 +371,18 @@ export function DiffView({
                 {mode === 'split' ? (
                   <SplitHunk h={h} lang={lang} wrap={wrap} />
                 ) : (
-                  <UnifiedHunk h={h} index={i} lang={lang} wrap={wrap} selectable={(canStage || canPatch) && !diff.oldPath} sel={sel?.hunk === i ? sel : null} onSelect={setSel} onRun={run} source={source} />
+                  <UnifiedHunk
+                    h={h}
+                    index={i}
+                    lang={lang}
+                    wrap={wrap}
+                    selectable={(canStage || canPatch) && !diff.oldPath}
+                    sel={sel?.hunk === i ? sel : null}
+                    onSelect={setSel}
+                    onRun={run}
+                    source={source}
+                    changes={mode === 'inline' && !diff.oldPath && canStage ? { context: hunkContext, newFile: diff.isNew && source.kind === 'worktree', busy } : undefined}
+                  />
                 )}
               </section>
             ))}
@@ -387,6 +404,7 @@ function HunkBar({
   showHeader,
   source,
   partialOk,
+  perChange,
   patchOk,
   onPatch,
   newFile,
@@ -400,6 +418,8 @@ function HunkBar({
   showHeader: boolean
   source: DiffSource
   partialOk: boolean
+  /** The whole file, with buttons on each hunk: this bar only acts on picked lines. */
+  perChange: boolean
   /** A commit's block that can be taken out of it. */
   patchOk: boolean
   onPatch: (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage') => void
@@ -412,7 +432,8 @@ function HunkBar({
   if (!showHeader && source.kind === 'commit' && !patchOk) return null
   const lines = sel ? [...sel.lines].sort((a, b) => a - b) : null
   const n = lines?.length ?? 0
-  const what = n ? plural(n, 'line') : 'block'
+  if (perChange && !n && !showHeader) return null
+  const what = n ? plural(n, 'line') : 'hunk'
   return (
     <div className="sticky top-0 z-[1] flex min-h-7 items-center gap-2 bg-surface-raised px-3 py-0.5 font-sans">
       <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{showHeader ? h.header : ''}</span>
@@ -437,31 +458,61 @@ function HunkBar({
             ]}
           />
         </div>
-      ) : source.kind === 'commit' || !partialOk ? null : (
+      ) : source.kind === 'commit' || !partialOk || (perChange && !n) ? null : (
         <div className="flex shrink-0 items-center gap-1">
           {n ? (
             <Button size="sm" variant="ghost" onClick={onClear}>
               Clear
             </Button>
           ) : null}
-          {source.kind === 'worktree' ? (
-            <>
-              <Button size="sm" variant="ghost" className="text-danger" disabled={busy || newFile} onClick={() => onRun(index, lines, 'discard')}>
-                Discard {what}
-              </Button>
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun(index, lines, 'stage')}>
-                Stage {what}
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun(index, lines, 'unstage')}>
-              Unstage {what}
-            </Button>
-          )}
+          <HunkButtons what={what} source={source} newFile={newFile} busy={busy} onRun={(action) => onRun(index, lines, action)} />
         </div>
       )}
     </div>
   )
+}
+
+/** Discard and Stage, or Unstage, for a hunk or the picked lines. */
+function HunkButtons({
+  what,
+  source,
+  newFile,
+  busy,
+  onRun
+}: {
+  what: string
+  source: DiffSource
+  newFile: boolean
+  busy: boolean
+  onRun: (action: 'stage' | 'unstage' | 'discard') => void
+}): React.JSX.Element {
+  return source.kind === 'worktree' ? (
+    <>
+      <Button size="sm" variant="secondary" className="enabled:border-danger/60 enabled:text-danger" disabled={busy || newFile} onClick={() => onRun('discard')}>
+        Discard {what}
+      </Button>
+      <Button size="sm" variant="secondary" className="enabled:border-success/60 enabled:text-success" disabled={busy} onClick={() => onRun('stage')}>
+        Stage {what}
+      </Button>
+    </>
+  ) : (
+    <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun('unstage')}>
+      Unstage {what}
+    </Button>
+  )
+}
+
+/** The changed lines of a whole-file block, cut into hunks the way git does: changes with no more than twice `context` unchanged lines between them go together. */
+function hunksOf(lines: DiffLine[], context: number): number[][] {
+  const out: number[][] = []
+  let last = -Infinity
+  lines.forEach((l, i) => {
+    if (l.type === 'ctx') return
+    if (i - last - 1 > 2 * context || !out.length) out.push([])
+    out[out.length - 1].push(i)
+    last = i
+  })
+  return out
 }
 
 const lineBg = { add: 'bg-diff-add-bg', del: 'bg-diff-del-bg', ctx: '' }
@@ -490,7 +541,8 @@ function UnifiedHunk({
   sel,
   onSelect,
   onRun,
-  source
+  source,
+  changes
 }: {
   h: Hunk
   index: number
@@ -499,11 +551,15 @@ function UnifiedHunk({
   selectable: boolean
   sel: Selection | null
   onSelect: (s: Selection | null) => void
-  onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard') => void
+  onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard', whole?: boolean) => void
   source: DiffSource
+  /** The whole file: a bar with the hunk's buttons above each of its hunks. */
+  changes?: { context: number; newFile: boolean; busy: boolean }
 }): React.JSX.Element {
   const [cursor, setCursor] = useState<number | null>(null)
   const changed = useMemo(() => h.lines.map((l, i) => (l.type === 'ctx' ? -1 : i)).filter((i) => i >= 0), [h])
+  const hunks = useMemo(() => (changes ? hunksOf(h.lines, changes.context) : []), [h, changes?.context])
+  const hunkAt = new Map(hunks.map((x, k) => [x[0], k]))
 
   const toggle = (i: number, range: boolean): void => {
     if (!selectable || h.lines[i].type === 'ctx') return
@@ -520,7 +576,8 @@ function UnifiedHunk({
   }
 
   const onKey = (e: React.KeyboardEvent): void => {
-    if (!selectable || !changed.length) return
+    // Keys on a hunk's buttons are theirs.
+    if (!selectable || !changed.length || e.target !== e.currentTarget) return
     const pos = cursor === null ? -1 : changed.indexOf(cursor)
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
@@ -549,37 +606,46 @@ function UnifiedHunk({
       {h.lines.map((l, i) => {
         const picked = sel?.lines.has(i) ?? false
         const canPick = selectable && l.type !== 'ctx'
+        const k = hunkAt.get(i)
         return (
-          <div
-            role="row"
-            id={`dl-${index}-${i}`}
-            key={i}
-            aria-label={signLabel[l.type] || undefined}
-            aria-selected={canPick ? picked : undefined}
-            className={cn('flex', lineBg[l.type], picked && 'bg-diff-picked', cursor === i && 'outline-1 -outline-offset-1 outline-focus-ring')}
-          >
-            <span
-              role="cell"
-              onMouseDown={(e) => {
-                if (!canPick) return
-                e.preventDefault()
-                toggle(i, e.shiftKey)
-              }}
-              title={canPick ? 'Pick this line (Shift: a range)' : undefined}
-              className={cn('flex shrink-0 select-none', canPick && 'cursor-pointer hover:bg-row-hover')}
+          <Fragment key={i}>
+            {changes && k !== undefined ? (
+              <div role="row" data-change={k} aria-label={`Hunk ${k + 1} of ${hunks.length}`} className="flex border-y border-border bg-surface-raised font-sans">
+                <span role="cell" className="flex flex-1 items-center justify-end gap-1 px-3 py-0.5">
+                  <HunkButtons what="hunk" source={source} newFile={changes.newFile} busy={changes.busy} onRun={(action) => onRun(index, hunks[k], action, true)} />
+                </span>
+              </div>
+            ) : null}
+            <div
+              role="row"
+              id={`dl-${index}-${i}`}
+              aria-label={signLabel[l.type] || undefined}
+              aria-selected={canPick ? picked : undefined}
+              className={cn('flex', lineBg[l.type], picked && 'bg-diff-picked', cursor === i && 'outline-1 -outline-offset-1 outline-focus-ring')}
             >
-              <span aria-hidden className={cn('w-1 shrink-0', picked ? 'bg-accent' : '')} />
-              <span className="w-11 shrink-0 pr-2 text-right text-disabled">{l.oldNo ?? ''}</span>
-              <span className="w-12 shrink-0 pr-2 text-right text-disabled">{l.newNo ?? ''}</span>
-            </span>
-            <span aria-hidden className={cn('w-4 shrink-0 text-center select-none', l.type === 'add' ? 'text-success' : l.type === 'del' ? 'text-danger' : '')}>
-              {sign[l.type]}
-            </span>
-            <span role="cell" className="flex min-w-0 flex-1">
-              <Code text={l.text} lang={lang} wrap={wrap} />
-              {l.noNewline ? <span className="pr-2 font-sans text-xs text-muted">no newline at end</span> : null}
-            </span>
-          </div>
+              <span
+                role="cell"
+                onMouseDown={(e) => {
+                  if (!canPick) return
+                  e.preventDefault()
+                  toggle(i, e.shiftKey)
+                }}
+                title={canPick ? 'Pick this line (Shift: a range)' : undefined}
+                className={cn('flex shrink-0 select-none', canPick && 'cursor-pointer hover:bg-row-hover')}
+              >
+                <span aria-hidden className={cn('w-1 shrink-0', picked ? 'bg-accent' : '')} />
+                <span className="w-11 shrink-0 pr-2 text-right text-muted">{l.oldNo ?? ''}</span>
+                <span className="w-12 shrink-0 pr-2 text-right text-muted">{l.newNo ?? ''}</span>
+              </span>
+              <span aria-hidden className={cn('w-4 shrink-0 text-center select-none', l.type === 'add' ? 'text-success' : l.type === 'del' ? 'text-danger' : '')}>
+                {sign[l.type]}
+              </span>
+              <span role="cell" className="flex min-w-0 flex-1">
+                <Code text={l.text} lang={lang} wrap={wrap} />
+                {l.noNewline ? <span className="pr-2 font-sans text-xs text-muted">no newline at end</span> : null}
+              </span>
+            </div>
+          </Fragment>
         )
       })}
     </div>
@@ -609,7 +675,7 @@ function SplitHunk({ h, lang, wrap }: { h: Hunk; lang: string | null; wrap: bool
   const pairs = pairLines(h.lines)
   const cell = (l: DiffLine | null, side: 'old' | 'new'): React.JSX.Element => (
     <div role="cell" className={cn('flex min-w-0 flex-1', l ? lineBg[l.type] : 'bg-surface-sunken')}>
-      <span className="w-12 shrink-0 pr-2 text-right text-disabled select-none">{l ? (side === 'old' ? l.oldNo : l.newNo) : ''}</span>
+      <span className="w-12 shrink-0 pr-2 text-right text-muted select-none">{l ? (side === 'old' ? l.oldNo : l.newNo) : ''}</span>
       {l ? <Code text={l.text} lang={lang} wrap={wrap} /> : <span className="flex-1" />}
     </div>
   )

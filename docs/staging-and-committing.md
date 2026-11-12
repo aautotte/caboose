@@ -67,20 +67,23 @@ Some files get a different view:
 - **Large changes** wait for **Show anyway** before drawing thousands of lines.
 - **Only whitespace changed** says so when whitespace is hidden.
 
-## Staging blocks and lines
+## Staging hunks and lines
 
-In a diff of a file that isn't staged, each block of changes has **Stage block** and **Discard block** buttons. In
-a staged file, it has **Unstage block**.
+In a diff of a file that isn't staged, each hunk (a block of changes) has **Stage hunk** and **Discard hunk**
+buttons. In a staged file, it has **Unstage hunk**. The **File** layout shows the whole file, with the same
+buttons above each of its hunks: changes with no more than twice the [lines around changes](#diffs) between them
+make one hunk, as in the **Changes** layout.
 
-To stage only some lines, click their line numbers to pick them (Shift+click picks a range), then use the block's
+To stage only some lines, click their line numbers to pick them (Shift+click picks a range), then use the hunk's
 button, which now reads **Stage 2 lines** (for example): it acts on the picked lines only. **Clear** drops the pick.
+In the **File** layout, those buttons show at the top once lines are picked.
 
-With the keyboard: focus a block, then **↑ / ↓** move between changed lines, **Shift+↑ / ↓** picks as it moves,
-**Space** picks or unpicks a line, and **Enter** stages (or unstages) the pick, or the whole block when nothing is
-picked.
+With the keyboard: focus a diff, then **↑ / ↓** move between changed lines, **Shift+↑ / ↓** picks as it moves,
+**Space** picks or unpicks a line, and **Enter** stages (or unstages) the pick, or the whole hunk when nothing is
+picked (in the **Changes** layout).
 
 Lines can't be picked while whitespace changes are hidden, because the patch git applies has to match the file.
-The blocks you stage are always the ones on screen, however many lines around changes you show.
+The hunks you stage are always the ones on screen, however many lines around changes you show.
 
 When the open file is fully staged, the diff follows it to the Staged list, and back again when you unstage it.
 
