@@ -262,6 +262,13 @@ export interface ConflictFile {
   theirsLabel: string
 }
 
+/** The commits on one side that changed a conflict's lines since the two sides split, newest first. */
+export interface ConflictWhy {
+  commits: Array<{ sha: string; summary: string; author: string; time: number }>
+  /** More than these. */
+  more: boolean
+}
+
 export type PullMode = 'ff' | 'ff-only' | 'rebase'
 
 /** How the app treats a submodule once it's set up. */

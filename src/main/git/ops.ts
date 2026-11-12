@@ -17,6 +17,7 @@ import type {
   ResetMode,
   CommitRow,
   ConflictFile,
+  ConflictWhy,
   DiffSource,
   FileDiff,
   GraphFilter,
@@ -1463,6 +1464,35 @@ export class RepoOps {
     }
     await this.mut(['checkout', side === 'ours' ? '--ours' : '--theirs', '--', path])
     await this.mut(['add', '--', path])
+  }
+
+  /**
+   * Why each side has the lines it has: the commits on that side, since the two split, that changed them (git log
+   * -L). Ours is HEAD; theirs is what's being merged, replayed or picked. Null where it can't be told.
+   */
+  async conflictWhy(rawPath: string, ranges: Array<{ ours: [number, number] | null; theirs: [number, number] | null }>): Promise<Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }>> {
+    const path = this.safePath(rawPath)
+    const op = await this.opState()
+    const incoming = { merge: 'MERGE_HEAD', rebase: 'REBASE_HEAD', cherry_pick: 'CHERRY_PICK_HEAD' }[op.kind as string]
+    const theirs = incoming ? (await this.tryGit(['rev-parse', '--verify', '-q', incoming]))?.trim() : undefined
+    const base = theirs ? (await this.tryGit(['merge-base', 'HEAD', theirs]))?.trim() : undefined
+    if (!theirs || !base) return ranges.map(() => ({ ours: null, theirs: null }))
+    const log = async (tip: string, r: [number, number] | null): Promise<ConflictWhy | null> => {
+      if (!r) return null
+      const out = await this.tryGit(['log', '-s', '-n', '4', '--format=%H%x1f%s%x1f%an%x1f%at', `-L${r[0]},${r[1]}:${path}`, `${base}..${tip}`])
+      if (out === null) return null
+      const commits = out
+        .split('\n')
+        .filter((l) => l.includes('\x1f'))
+        .map((l) => {
+          const [sha, summary, author, at] = l.split('\x1f')
+          return { sha, summary, author, time: Number(at) }
+        })
+      return { commits: commits.slice(0, 3), more: commits.length > 3 }
+    }
+    const out: Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }> = []
+    for (const r of ranges) out.push({ ours: await log('HEAD', r.ours), theirs: await log(theirs, r.theirs) })
+    return out
   }
 
   async continueOp(): Promise<OpResult> {

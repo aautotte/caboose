@@ -79,6 +79,25 @@ export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; 
   return out.join(eol)
 }
 
+/**
+ * Where each block of lines sits in a file (1-based, inclusive), looking in order so that each one is found after
+ * the one before. Null for an empty block, or one that isn't there as it is.
+ */
+export function rangesIn(text: string, blocks: string[][]): Array<[number, number] | null> {
+  const lines = text.split(eolOf(text))
+  let from = 0
+  return blocks.map((b) => {
+    if (!b.length) return null
+    for (let i = from; i + b.length <= lines.length; i++) {
+      if (b.every((l, k) => lines[i + k] === l)) {
+        from = i + b.length
+        return [i + 1, i + b.length]
+      }
+    }
+    return null
+  })
+}
+
 export const hasMarkers = (text: string): boolean => /^(<<<<<<<|=======|>>>>>>>)( |$)/m.test(text)
 
 /**
