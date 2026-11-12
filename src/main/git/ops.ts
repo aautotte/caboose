@@ -18,6 +18,8 @@ import type {
   CommitRow,
   ConflictFile,
   ConflictWhy,
+  MergeAgain,
+  MergeAgainHow,
   DiffSource,
   FileDiff,
   GraphFilter,
@@ -1464,6 +1466,31 @@ export class RepoOps {
     }
     await this.mut(['checkout', side === 'ours' ? '--ours' : '--theirs', '--', path])
     await this.mut(['add', '--', path])
+  }
+
+  /**
+   * The file merged again from the same two sides, each other way git can (git merge-tree with a strategy option, in
+   * memory: the working tree and the index stay as they are). The markers keep the base's lines, diff3 style. For a
+   * rebase or a cherry-pick, the commit is merged against its parent, as git does.
+   */
+  async mergeAgain(rawPath: string): Promise<MergeAgain[]> {
+    const path = this.safePath(rawPath)
+    const op = await this.opState()
+    const incoming = { merge: 'MERGE_HEAD', rebase: 'REBASE_HEAD', cherry_pick: 'CHERRY_PICK_HEAD' }[op.kind as string]
+    const theirs = incoming ? (await this.tryGit(['rev-parse', '--verify', '-q', incoming]))?.trim() : undefined
+    if (!theirs) return []
+    const base = op.kind === 'merge' ? [] : [`--merge-base=${theirs}^`]
+    const options: Record<MergeAgainHow, string> = { 'ignore-space': 'ignore-space-change', patience: 'diff-algorithm=patience', histogram: 'diff-algorithm=histogram' }
+    const out: MergeAgain[] = []
+    for (const how of Object.keys(options) as MergeAgainHow[]) {
+      const args = ['-c', 'merge.conflictStyle=diff3', 'merge-tree', '--write-tree', '--no-messages', ...base, '-X', options[how], 'HEAD', theirs]
+      const r = await this.runner.run({ cwd: this.repo.path, repoId: this.repo.id, args, okCodes: [1] }).catch(() => null)
+      const tree = r?.stdout.split('\n')[0].trim()
+      const merged = tree ? await this.tryGit(['cat-file', '-p', `${tree}:${path}`]) : null
+      if (merged === null || merged.includes('\0')) continue
+      out.push({ how, merged, conflicts: (merged.match(/^<<<<<<<( |$)/gm) ?? []).length })
+    }
+    return out
   }
 
   /**

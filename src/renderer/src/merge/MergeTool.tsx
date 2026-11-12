@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, ChevronUp, Columns3, FileWarning, Lightbulb, RotateCcw, X } from 'lucide-react'
-import type { ConflictFile, ConflictWhy } from '../../../shared/types'
-import { Badge, Button, Checkbox, EmptyState, IconButton, Tooltip } from '@/ui'
+import { Check, ChevronDown, ChevronUp, Columns3, FileWarning, Lightbulb, RotateCcw, Shuffle, X } from 'lucide-react'
+import type { ConflictFile, ConflictWhy, MergeAgain, MergeAgainHow } from '../../../shared/types'
+import { Badge, Button, Checkbox, DropdownMenu, EmptyState, IconButton, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { plural, relativeTime, shortSha, splitPath } from '@/lib/format'
@@ -11,9 +11,23 @@ import * as act from '@/actions'
 import { baseLines, compose, eolOf, hasMarkers, parseConflicts, rangesIn, type Pick, type Segment } from './conflicts'
 import { suggest, wordMarks, type Marked, type Suggestion } from './suggest'
 
+const againName: Record<MergeAgainHow, string> = {
+  'ignore-space': 'Ignoring changes in spacing',
+  patience: 'With the patience algorithm',
+  histogram: 'With the histogram algorithm'
+}
+const againNote: Record<MergeAgainHow, string> = {
+  'ignore-space': 'Where one side only changed spacing, the other side’s lines win, spacing and all.',
+  patience: 'Lines are matched up differently, which can split, join or remove conflicts.',
+  histogram: 'Lines are matched up differently, which can split, join or remove conflicts.'
+}
+
 /** S10: pick lines from each side of every conflict, or edit the result directly, then save. */
 export function MergeTool({ repoId, path }: { repoId: string; path: string }): React.JSX.Element {
   const [file, setFile] = useState<ConflictFile | null>(null)
+  // The file merged again other ways, and the one in use instead of git's own merge.
+  const [again, setAgain] = useState<MergeAgain[]>([])
+  const [using, setUsing] = useState<MergeAgainHow | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picks, setPicks] = useState<Pick[]>([])
   // A conflict's own lines, from a suggestion that combines both sides.
@@ -31,6 +45,8 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
     let live = true
     setFile(null)
     setError(null)
+    setAgain([])
+    setUsing(null)
     call('conflict.get', { repoId, path })
       .then((f) => {
         if (!live) return
@@ -39,6 +55,11 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
         setCustom([])
         setEdited(false)
         setCurrent(0)
+        if (!f.binary && f.ours !== null && f.theirs !== null) {
+          void call('conflict.again', { repoId, path })
+            .then((a) => live && setAgain(a))
+            .catch(() => undefined)
+        }
       })
       .catch((e: Error) => live && setError(e.message))
     return () => {
@@ -46,14 +67,37 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
     }
   }, [repoId, path])
 
-  const segs: Segment[] = useMemo(() => (file ? parseConflicts(file.merged) : []), [file])
+  // What's being resolved: git's own merge, or the file merged again another way (in the file's own line endings).
+  const alt = using ? again.find((a) => a.how === using) : undefined
+  const merged = !file ? '' : alt ? alt.merged.replace(/\r?\n/g, eolOf(file.merged)) : file.merged
+  const segs: Segment[] = useMemo(() => parseConflicts(merged), [merged])
   const conflicts = segs.filter((s) => s.kind === 'conflict').length
-  // No ancestor version at all (both sides added the file): every conflict started from nothing.
+  // No ancestor version at all (both sides added the file): every conflict started from nothing. Merged again, the
+  // markers carry the base's lines themselves.
   const bases = useMemo(
-    () => (!file ? [] : file.base === null ? segs.filter((s) => s.kind === 'conflict').map(() => []) : baseLines(segs, file.diff3)),
-    [file, segs]
+    () => (!file ? [] : file.base === null ? segs.filter((s) => s.kind === 'conflict').map(() => []) : baseLines(segs, alt ? null : file.diff3)),
+    [file, segs, alt]
   )
   const eol = file ? eolOf(file.merged) : '\n'
+  const switchTo = (how: MergeAgainHow | null): void => {
+    setUsing(how)
+    setPicks([])
+    setCustom([])
+    setEdited(false)
+    setCurrent(0)
+  }
+  const againMenu: MenuEntry[] = [
+    ...again.map(
+      (a): MenuEntry => ({
+        type: 'item',
+        label: `${againName[a.how]}: ${a.conflicts ? `${plural(a.conflicts, 'conflict')} left` : 'no conflicts left'}`,
+        icon: using === a.how ? <Check size={14} /> : <Shuffle size={14} />,
+        disabled: using === a.how,
+        onSelect: () => switchTo(a.how)
+      })
+    ),
+    ...(using ? ([{ type: 'separator' }, { type: 'item', label: 'Back to git’s own merge', icon: <RotateCcw size={14} />, onSelect: () => switchTo(null) }] as MenuEntry[]) : [])
+  ]
   const labels = { ours: file?.oursLabel ?? 'yours', theirs: file?.theirsLabel ?? 'theirs' }
   // Per conflict: a suggested resolution when the answer is clear, and the words each side changed (from the base,
   // or from the other side when the base isn't known).
@@ -365,6 +409,17 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
             <Columns3 size={16} />
           </IconButton>
         </Tooltip>
+        {again.length ? (
+          <DropdownMenu
+            trigger={
+              <Button size="sm" variant="ghost">
+                Merge again
+                <ChevronDown size={14} aria-hidden />
+              </Button>
+            }
+            items={againMenu}
+          />
+        ) : null}
         <Tooltip content="Resolve this file in your own merge tool (Settings › External tools)">
           <Button size="sm" variant="ghost" onClick={() => act.externalTool(repoId, 'merge', path)}>
             Merge tool
@@ -389,6 +444,17 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           </IconButton>
         </Tooltip>
       </header>
+      {using ? (
+        <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-surface-sunken px-3 py-1 text-sm">
+          <Shuffle size={14} aria-hidden className="shrink-0 text-muted" />
+          <p className="min-w-0 flex-1">
+            <span className="text-text">Merged again: {againName[using].toLowerCase()}.</span> <span className="text-muted">{againNote[using]} Check the result before saving.</span>
+          </p>
+          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => switchTo(null)}>
+            Back to git’s own merge
+          </Button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 divide-x divide-border">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <h3 className="shrink-0 border-b border-border bg-surface px-3 py-1 text-sm text-muted">
