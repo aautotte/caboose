@@ -63,6 +63,20 @@ When the answer is clear from the two sides and what they started from, a confli
 until you ask, and nothing is saved until **Save result**. Ticking a side by hand replaces a suggestion. A conflict
 where both sides changed the same lines differently gets no suggestion: that one takes a person.
 
+### Merge again
+
+Some conflicts come from how git matched the lines up, not from what changed. **Merge again**, in the merge tool's
+header, redoes this file's merge from the same two sides, other ways, and says how many conflicts each one leaves:
+
+- **Ignoring changes in spacing**: reindented code or changed spaces stop conflicting. Where one side only changed
+  spacing, the other side's lines win, spacing and all.
+- **With the patience algorithm** or **the histogram algorithm**: lines are matched up differently, which helps
+  when blocks of code were moved, or when many lines look alike (blank lines, braces).
+
+Picking one puts it in the merge tool instead of git's own merge, with a note saying so: resolve what's left as
+usual, check the result, then **Save result**. Nothing is written before that. **Back to git's own merge** undoes
+the choice. During a rebase or a cherry-pick, the commit is merged again against its parent, as git does.
+
 Some conflicts aren't about lines:
 
 - **Deleted on one side, changed on the other**: **Keep the edited file** or **Delete it**.

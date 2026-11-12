@@ -262,6 +262,16 @@ export interface ConflictFile {
   theirsLabel: string
 }
 
+/** Other ways git can merge a file: leaving spacing-only changes aside, or matching lines up with another diff algorithm. */
+export type MergeAgainHow = 'ignore-space' | 'patience' | 'histogram'
+
+/** A conflicted file merged again: its text with conflict markers (the base's lines kept), and how many are left. */
+export interface MergeAgain {
+  how: MergeAgainHow
+  merged: string
+  conflicts: number
+}
+
 /** The commits on one side that changed a conflict's lines since the two sides split, newest first. */
 export interface ConflictWhy {
   commits: Array<{ sha: string; summary: string; author: string; time: number }>

@@ -40,6 +40,7 @@ import type {
   ConflictForecast,
   DiffSource,
   ConflictWhy,
+  MergeAgain,
   FileDiff,
   GraphPage,
   LfsState,
@@ -175,6 +176,8 @@ export interface Api {
   'conflict.forecast': { in: R & ({ kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean }); out: ConflictForecast }
   'conflict.resolve': { in: R & { path: string; content: string }; out: null }
   'conflict.take': { in: R & { path: string; side: 'ours' | 'theirs' }; out: null }
+  /** The file merged again each other way git can, from the same two sides; nothing is written. Empty when it can't be. */
+  'conflict.again': { in: R & { path: string }; out: MergeAgain[] }
   /** For each conflict: the commits on each side that changed its lines (1-based, inclusive, in that side's file). */
   'conflict.why': { in: R & { path: string; ranges: Array<{ ours: [number, number] | null; theirs: [number, number] | null }> }; out: Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }> }
   'op.continue': { in: R; out: OpResult }
