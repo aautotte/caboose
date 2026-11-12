@@ -88,7 +88,7 @@ test('F66-H2: picked lines are removed from the commit and from the commits afte
 test('F66-H3: a block moves out of the commit to the staged changes; undo puts it back in the commit', async () => {
   const before = h.git(repo, 'rev-parse', 'HEAD')
   await openCommitFile('Mixed work', 'a.txt')
-  await diff('a.txt').getByRole('button', { name: 'Take block out' }).first().click()
+  await diff('a.txt').getByRole('button', { name: 'Take hunk out' }).first().click()
   await h.page.getByRole('menuitem', { name: 'Move to staged changes' }).click()
   await expect(toasts().getByText(/^Moved the changes out of .*; they’re staged$/)).toBeVisible()
   expect(fileAt(shaOf('Mixed work'), 'a.txt')).toBe(original.trim())

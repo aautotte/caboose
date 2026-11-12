@@ -77,7 +77,7 @@ test('stage a single line, then unstage the block', async () => {
   expect(git('diff', '--', 'README.md')).toContain('+npm install -g skycast')
 
   await page.getByRole('listbox', { name: 'Staged', exact: true }).getByRole('option', { name: /README\.md/ }).click()
-  await page.getByRole('button', { name: 'Unstage block' }).click()
+  await page.getByRole('button', { name: 'Unstage hunk' }).click()
   await expect.poll(() => git('diff', '--cached', '--', 'README.md')).toBe('')
 })
 
