@@ -1618,8 +1618,11 @@ export async function push(repoId: string, opts: PushOpts = {}, subChecked = fal
       return
     }
   }
+  const before = useApp.getState().repos[repoId]?.refs
+  const branch = opts.branch ?? before?.head.branch ?? ''
+  // Where it goes, from before the push: the load after it may give way to a newer one still running.
+  const upstream = before?.refs.find((x) => x.kind === 'local' && x.short === branch)?.upstream
   const res = await remoteOp(repoId, 'push', 'Pushing', (opId) => call('remote.push', { repoId, opId, ...opts }), 'Push failed')
-  const branch = opts.branch ?? useApp.getState().repos[repoId]?.refs?.head.branch ?? ''
   if (res?.result === 'needsUpstream') openDialog({ kind: 'publish', repoId, branch })
   else if (res?.result === 'stale') {
     toast({ tone: 'error', title: 'Force push stopped', body: res.message, action: { label: 'Fetch now', onClick: () => void fetchAll(repoId) } })
@@ -1635,7 +1638,9 @@ export async function push(repoId: string, opts: PushOpts = {}, subChecked = fal
   } else if (res?.result === 'ok') {
     const where = opts.remote ? ` to ${opts.remote}` : ''
     await loadRepo(repoId, { keepSelection: true })
-    const offer = canOpenPull(repoId, branch, true)
+    const github = useApp.getState().repos[repoId]?.pulls
+    const toGitHub = github?.state === 'ok' && (opts.remote ? opts.remote === github.remote : !!upstream?.startsWith(`refs/remotes/${github.remote}/`))
+    const offer = toGitHub && canOpenPull(repoId, branch)
     toast({
       tone: 'success',
       title: opts.force ? `Force pushed ${branch}${where}` : `Pushed ${branch}${where}`,
