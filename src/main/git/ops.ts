@@ -673,7 +673,7 @@ export class RepoOps {
     // Those refs go to git on stdin, not the command line: hundreds of them would pass Windows' limit of about
     // 32,000 characters per command line, and git wouldn't start at all (an empty graph).
     const revs = view.soloed.length ? [...view.soloed, 'HEAD'] : view.hidden.length ? [...(await this.shownRefs(view.hidden)), 'HEAD'] : null
-    const which = revs ? ['--stdin'] : [...SHOWN, ...((await this.headSha()) ? ['HEAD'] : [])]
+    let which = revs ? ['--stdin'] : [...SHOWN, 'HEAD']
     const stdin = revs ? `${revs.join('\n')}\n` : undefined
     // Typed in the filter bar: "." is the whole repository, and a path outside it changes in none of its commits.
     const rel = filter.path ? relative(this.repo.path, resolve(this.repo.path, filter.path)) : ''
@@ -682,9 +682,12 @@ export class RepoOps {
     const author = filter.author ? ['-i', '--fixed-strings', `--author=${filter.author}`] : []
     const filtered = path.length > 0 || author.length > 0
     // --parents: with a path, git rewrites each commit's parents to the nearest commits that change it too.
-    const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...(filtered ? ['--parents'] : []), ...author, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--', ...path], {
-      stdin
-    })
+    const log = (w: string[]): Promise<string | null> =>
+      this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...(filtered ? ['--parents'] : []), ...author, ...w, `--skip=${skip}`, `--max-count=${limit + 1}`, '--', ...path], { stdin })
+    let out = await log(which)
+    // An unborn HEAD (no commit yet on the checked-out branch) isn't a revision: the branches alone. Tried after,
+    // not checked first, so loading the graph runs no extra git command.
+    if (out === null && !revs) out = await log((which = SHOWN))
     if (out === null) return { commits: [], hasMore: false } // unborn repo
     const commits = parseLog(out)
     const hasMore = commits.length > limit

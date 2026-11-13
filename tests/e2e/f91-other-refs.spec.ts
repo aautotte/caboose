@@ -60,3 +60,13 @@ test('F91-H2: checking out one of those commits shows it, as HEAD', async () => 
   await h.page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(commitRow(h.page, 'Checkpoint two')).toHaveCount(0)
 })
+
+test('F91-H3: on a branch with no commit yet, the graph still shows the other branches', async () => {
+  h.git(repo, 'switch', '-q', '--orphan', 'fresh')
+  await h.page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(h.page.getByRole('tree', { name: 'Local branches' }).getByRole('treeitem', { name: /^fresh(,|$)/ })).toHaveCount(0)
+  await expect.poll(shown).toEqual(['Only tagged', 'Second', 'Start'])
+  h.git(repo, 'switch', '-q', 'main')
+  await h.page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(commitRow(h.page, 'Second')).toBeVisible()
+})
