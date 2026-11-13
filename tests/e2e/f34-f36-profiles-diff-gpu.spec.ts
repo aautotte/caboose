@@ -104,7 +104,7 @@ test.describe('profiles and diff controls', () => {
     expect(author()).toBe('Wanda Work <wanda@work.example>')
     // Git's own config files are untouched; the settings ride along on the command, in plain sight in the log.
     expect(h.git(repo, 'config', '--get', 'user.email')).toBe('e2e@example.com')
-    const log = await invoke<Array<{ argv: string[] }>>(h.page, 'activity.list', { repoId: id, limit: 50 })
+    const log = await invoke<Array<{ argv: string[] }>>(h.page, 'activity.list', { repoId: id, limit: 1000 })
     const commit = log.ok ? log.value.find((e) => e.argv.includes('commit')) : undefined
     expect(commit?.argv).toEqual(expect.arrayContaining(['-c', 'user.email=wanda@work.example']))
     expect(commit?.argv.join(' ')).toMatch(/core\.sshcommand=ssh -i ".*\/\.ssh\/id_work" -o IdentitiesOnly=yes/)
@@ -155,9 +155,12 @@ test.describe('profiles and diff controls', () => {
 
   test('F35-H1: hide whitespace changes; blocks can’t be staged while they’re hidden', async () => {
     writeFileSync(join(repo, 'a.txt'), 'one\n    two\nthree changed\n')
-    await openDiffNow(h.page, id, 'a.txt', { kind: 'worktree' })
     const diff = h.page.getByRole('region', { name: 'Changes in a.txt' })
-    await expect(diff.getByRole('button', { name: /^Stage/ }).first()).toBeVisible()
+    // The previous test's commit can still be reloading the repository, which puts the graph back: open it again then.
+    await expect(async () => {
+      await openDiffNow(h.page, id, 'a.txt', { kind: 'worktree' })
+      await expect(diff.getByRole('button', { name: /^Stage/ }).first()).toBeVisible({ timeout: 2000 })
+    }).toPass()
     await diff.getByRole('button', { name: 'Hide whitespace changes' }).click()
     await expect(diff.getByText(/Whitespace changes are hidden/)).toBeVisible()
     // The re-indented line drops out of the changes; the real edit stays.

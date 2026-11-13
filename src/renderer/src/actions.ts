@@ -915,7 +915,7 @@ export async function findFixupTarget(repoId: string): Promise<void> {
   const res = await attempt(() => call('history.fixupTarget', { repoId }), 'Couldn’t look for the commit')
   if (!res) return
   const commits = useApp.getState().repos[repoId]?.commits ?? []
-  const label = (s: string): string => `${s.slice(0, 7)} ${commits.find((c) => c.sha === s)?.summary ?? ''}`.trim()
+  const label = (s: string): string => `${s.slice(0, 7)} ${commits.find((c) => c.sha === s)?.summary ?? res.summaries[s] ?? ''}`.trim()
   if (!res.shas.length) {
     toast({
       tone: 'info',

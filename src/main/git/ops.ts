@@ -2336,12 +2336,14 @@ export class RepoOps {
   /**
    * Which commits the lines being changed come from (lazygit's "find base commit for fixup"): the staged changes, or
    * the unstaged ones when nothing is staged, blamed in HEAD. Added lines with nothing removed say nothing; `addOnly`
-   * tells when some were left out for that.
+   * tells when some were left out for that. `summaries`: each commit's, from the blame, for when the graph hasn't
+   * loaded it yet.
    */
-  async fixupTarget(): Promise<{ shas: string[]; addOnly: boolean }> {
+  async fixupTarget(): Promise<{ shas: string[]; summaries: Record<string, string>; addOnly: boolean }> {
     const staged = await this.hasStaged()
     const raw = await this.git(['diff', ...(staged ? ['--cached'] : []), '-U0', '--no-color', '--no-ext-diff', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/'])
     const shas = new Set<string>()
+    const summaries: Record<string, string> = {}
     let addOnly = false
     let path: string | null = null
     for (const line of raw.split('\n')) {
@@ -2357,12 +2359,15 @@ export class RepoOps {
         continue
       }
       const out = (await this.tryGit(['blame', '--porcelain', '-L', `${h[1]},+${count}`, 'HEAD', '--', path])) ?? ''
+      let sha = ''
       for (const l of out.split('\n')) {
         const m = /^([0-9a-f]{40}) \d+ \d+/.exec(l)
+        if (m) sha = m[1]
         if (m && !/^0+$/.test(m[1])) shas.add(m[1])
+        else if (sha && l.startsWith('summary ')) summaries[sha] = l.slice(8)
       }
     }
-    return { shas: [...shas], addOnly }
+    return { shas: [...shas], summaries, addOnly }
   }
 
   async reword(sha: string, message: string, tmpDir: string, noVerify = false): Promise<OpResult> {
