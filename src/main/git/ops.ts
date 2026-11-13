@@ -112,6 +112,12 @@ function patchProblem(out: string): string {
 export const UNDO_REFS = 'refs/caboose/undo/'
 const OWN_REFS = ['refs/caboose/', 'refs/mergatroid/', 'refs/gitclone/']
 const EXCLUDE_OWN = OWN_REFS.map((r) => `--exclude=${r}*`)
+/**
+ * What the graph and the search show: branches, remote branches and tags, as the sidebar lists them. Other refs (a
+ * tool's checkpoints such as refs/cline/, notes, the stash, our own undo refs) don't bring commits in. A remote's HEAD
+ * is only an alias for one of its branches. HEAD itself is added when it points at a commit, for a detached HEAD.
+ */
+const SHOWN = ['--branches', '--exclude=*/HEAD', '--remotes', '--tags']
 
 /** The author filter's map of the history, per repository: rebuilt when a branch moves or the filter changes. */
 const nearestCache = new Map<string, { key: string; nearest: Map<string, string[]> }>()
@@ -667,7 +673,7 @@ export class RepoOps {
     // Those refs go to git on stdin, not the command line: hundreds of them would pass Windows' limit of about
     // 32,000 characters per command line, and git wouldn't start at all (an empty graph).
     const revs = view.soloed.length ? [...view.soloed, 'HEAD'] : view.hidden.length ? [...(await this.shownRefs(view.hidden)), 'HEAD'] : null
-    const which = revs ? ['--stdin'] : [...EXCLUDE_OWN, '--exclude=refs/stash', '--exclude=refs/remotes/*/HEAD', '--all']
+    const which = revs ? ['--stdin'] : [...SHOWN, ...((await this.headSha()) ? ['HEAD'] : [])]
     const stdin = revs ? `${revs.join('\n')}\n` : undefined
     // Typed in the filter bar: "." is the whole repository, and a path outside it changes in none of its commits.
     const rel = filter.path ? relative(this.repo.path, resolve(this.repo.path, filter.path)) : ''
@@ -1040,7 +1046,7 @@ export class RepoOps {
   async searchCommits(query: string): Promise<string[]> {
     const q = query.trim()
     if (!q) return []
-    const common = ['log', '--format=%H', ...EXCLUDE_OWN, '--exclude=refs/stash', '--all', '-n', '500']
+    const common = ['log', '--format=%H', ...SHOWN, ...((await this.headSha()) ? ['HEAD'] : []), '-n', '500']
     const [byMsg, byAuthor] = await Promise.all([
       this.git([...common, '-i', '--fixed-strings', `--grep=${q}`]),
       this.git([...common, '-i', '--fixed-strings', `--author=${q}`])

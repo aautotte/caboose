@@ -6,6 +6,10 @@ Every commit is a row, newest at the top. Each line of development gets its own 
 **Uncommitted changes**, is your working copy; it's there when you have changes. Stashes appear as rows too, next
 to the commit they were made on.
 
+The graph shows the commits of your branches, remote branches and tags, and the one checked out. Commits that only
+other refs keep are left out: the checkpoints a tool like Cline saves under `refs/cline/`, git notes, and so on.
+Search leaves them out too.
+
 Labels in the **Branch / tag** column show local branches, remote branches and tags. A local branch and its
 remote branch on the same commit share one label, with a cloud icon. `+1` means more labels on that commit; hover
 to see them, click for their menus.
