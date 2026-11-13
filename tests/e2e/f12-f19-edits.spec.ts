@@ -22,7 +22,10 @@ const toasts = () => h.page.getByRole('region', { name: /Notifications/ })
 const headSha = (): string => h.git(demo, 'rev-parse', 'HEAD')
 const subject = (rev = 'HEAD'): string => h.git(demo, 'log', '-1', '--format=%s', rev)
 async function dismissToasts(): Promise<void> {
-  for (const b of await toasts().getByRole('button', { name: 'Dismiss' }).all()) await b.click().catch(() => {})
+  // Always the first: dismissing one moves the others up, and they also leave on their own, so a list of them taken
+  // beforehand points at ones that are gone, and each click would wait out its timeout.
+  const dismiss = toasts().getByRole('button', { name: 'Dismiss' })
+  while (await dismiss.count()) await dismiss.first().click({ timeout: 1000 }).catch(() => {})
 }
 
 // ---------- F13 (uses the seed's uncommitted changes) ----------

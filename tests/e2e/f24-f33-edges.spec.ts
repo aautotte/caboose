@@ -68,7 +68,10 @@ const subjects = (): string => h.git(repo, 'log', '--first-parent', '--format=%s
 const local = (name: string | RegExp) => h.page.getByRole('tree', { name: 'Local branches' }).getByRole('treeitem', { name })
 const before = 'Top\nEdit line 1 again\nEdit line 1\nMerge side\nAdd f\nStart'
 async function dismissToasts(): Promise<void> {
-  for (const b of await toasts().getByRole('button', { name: 'Dismiss' }).all()) await b.click().catch(() => {})
+  // Always the first: dismissing one moves the others up, and they also leave on their own, so a list of them taken
+  // beforehand points at ones that are gone, and each click would wait out its timeout.
+  const dismiss = toasts().getByRole('button', { name: 'Dismiss' })
+  while (await dismiss.count()) await dismiss.first().click({ timeout: 1000 }).catch(() => {})
 }
 
 // ---------- F24 ----------
