@@ -267,7 +267,7 @@ export interface Api {
   /** git rebase --autosquash: every fixup!/squash!/amend! commit into the commit it names. */
   'history.autosquash': { in: R; out: OpResult }
   /** The commits the changed lines last came from (staged changes, else unstaged), and whether pure additions were left out. */
-  'history.fixupTarget': { in: R; out: { shas: string[]; addOnly: boolean } }
+  'history.fixupTarget': { in: R; out: { shas: string[]; summaries: Record<string, string>; addOnly: boolean } }
   /**
    * Takes a file (`part` null), a block or some lines out of a commit on the current branch: dropped (`remove`), into a
    * new commit right after it (`split`, with `message`), or staged on top (`stage`; `staged` false when they couldn't
