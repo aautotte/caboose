@@ -66,7 +66,11 @@ half of it kept) isn't marked, and neither is a line over 1,000 characters.
 
 Some files get a different view:
 
-- **Binary files** say only that they changed.
+- **Images** (PNG, JPEG, GIF, WebP, BMP, ICO, AVIF) show as pictures: **Before** and **After** side by side, each
+  with its size in pixels and bytes. **Swipe** puts the new version over the old, and the slider sets how much of
+  it shows; **Onion skin** fades it in. A new image shows its one version, and so does a deleted one. An image
+  over 20 MB shows its size only. SVG files are text, so they show as lines.
+- **Other binary files** say only that they changed.
 - **Git LFS files** say how the stored file changed, not the pointer text.
 - **Submodules** list the commits the pointer moves by. See [Submodules](submodules.md).
 - **Large changes** wait for **Show anyway** before drawing thousands of lines.

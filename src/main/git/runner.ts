@@ -26,6 +26,8 @@ export interface RunOptions {
 
 export interface RunResult {
   stdout: string
+  /** stdout as it came, for what isn't text (an image). */
+  bytes: Buffer
   stderr: string
   code: number
 }
@@ -179,7 +181,8 @@ export class GitRunner extends EventEmitter {
         set.delete(child)
         if (set.size === 0) this.children.delete(opId)
         if (tracksBusy) this.setBusy(opts.repoId!, -1)
-        const stdout = Buffer.concat(out).toString('utf8')
+        const bytes = Buffer.concat(out)
+        const stdout = bytes.toString('utf8')
         const killed = !spawnError && (code === null || stopped.has(child))
         const ok = !spawnError && code !== null && (code === 0 || (opts.okCodes ?? []).includes(code))
         const status = killed ? 'cancelled' : ok ? 'ok' : 'error'
@@ -193,7 +196,7 @@ export class GitRunner extends EventEmitter {
         } else if (!ok) {
           reject(gitError(opts.args, err, code ?? -1))
         } else {
-          resolve({ stdout, stderr: err, code: code ?? 0 })
+          resolve({ stdout, bytes, stderr: err, code: code ?? 0 })
         }
       }
       child.on('error', (e) => finish(null, e))

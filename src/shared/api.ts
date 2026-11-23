@@ -42,6 +42,7 @@ import type {
   ConflictWhy,
   MergeAgain,
   FileDiff,
+  ImageDiff,
   GraphPage,
   LfsState,
   Submodule,
@@ -92,6 +93,8 @@ export interface Api {
   'commit.messages': { in: R & { shas: string[] }; out: { sha: string; message: string }[] }
   /** `context`: lines shown around each change (git's default when unset); `full` shows the whole file instead. */
   'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean; context?: number }; out: FileDiff }
+  /** An image's two versions, for a diff that is binary. */
+  'diff.images': { in: R & { path: string; oldPath?: string; source: DiffSource }; out: ImageDiff }
   'search.commits': { in: R & { query: string }; out: string[] }
   'lfs.state': { in: R; out: LfsState }
   'lfs.turnOn': { in: R & { opId: string }; out: null }
