@@ -59,6 +59,8 @@ export async function boot(): Promise<void> {
   })
   on('repo:changed', (e) => {
     if (!useApp.getState().repos[e.repoId]) return
+    // A full load started since these changes (the action that made them, or the window's focus) shows them already.
+    if ((loadStarted.get(e.repoId) ?? 0) >= e.at) return
     if (e.what.includes('refs')) void loadRepo(e.repoId, { keepSelection: true })
     else void loadStatus(e.repoId)
   })
@@ -198,6 +200,11 @@ function followOpenFile(repoId: string, status: Status): void {
  * the file watcher saying so. A cheap look at the branches decides: changed, reload it all; else just the status.
  */
 export async function refreshOnReturn(repoId: string): Promise<void> {
+  const load = loads.get(repoId)
+  // One to come starts after now: it shows whatever happened outside.
+  if (load?.next) return load.next.done
+  // One under way may have read before a change made outside: compare with what it shows once done.
+  await load?.running
   const before = useApp.getState().repos[repoId]?.refs
   const now = await call('refs.list', { repoId }).catch(() => null)
   const sig = (r: typeof now): string => (r ? `${r.head.branch} ${r.head.sha}\n${r.refs.map((x) => `${x.name} ${x.sha}`).join('\n')}` : '')
@@ -498,7 +505,42 @@ export function dismissLfs(repoId: string): void {
   patchRepo(repoId, { lfsDismissed: true })
 }
 
-export async function loadRepo(repoId: string, opts: { keepSelection?: boolean } = {}): Promise<void> {
+/**
+ * One full load per repository at a time. Asked again while one runs (an action's own reload, the watcher, the window's
+ * focus), the next one starts when it ends, once for everyone who asked meanwhile: the one under way may have read too
+ * early for them, and two side by side would each run every command for the same answer.
+ */
+const loads = new Map<string, { running: Promise<void>; next: { keepSelection: boolean; done: Promise<void> } | null }>()
+/** When each repository's latest full load started (ms since the epoch). */
+const loadStarted = new Map<string, number>()
+
+export function loadRepo(repoId: string, opts: { keepSelection?: boolean } = {}): Promise<void> {
+  const keepSelection = !!opts.keepSelection
+  const load = loads.get(repoId)
+  if (!load) return startLoad(repoId, keepSelection)
+  // What the one under way read may be older than what the caller just changed (a branch hidden, say): it isn't shown.
+  next(repoSeq, repoId)
+  if (load.next) load.next.keepSelection &&= keepSelection
+  else {
+    const next = { keepSelection, done: Promise.resolve() }
+    next.done = load.running.then(() => startLoad(repoId, next.keepSelection))
+    load.next = next
+  }
+  return load.next.done
+}
+
+function startLoad(repoId: string, keepSelection: boolean): Promise<void> {
+  loadStarted.set(repoId, Date.now())
+  const running = readRepo(repoId, { keepSelection })
+    .catch(() => {})
+    .finally(() => {
+      if (!loads.get(repoId)?.next) loads.delete(repoId)
+    })
+  loads.set(repoId, { running, next: null })
+  return running
+}
+
+async function readRepo(repoId: string, opts: { keepSelection?: boolean }): Promise<void> {
   if (!useApp.getState().repos[repoId]) patchRepo(repoId, emptyRepo())
   patchRepo(repoId, { loading: true })
   if (!useApp.getState().repos[repoId].lfs) void checkLfs(repoId)
@@ -509,19 +551,19 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
   const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore, commitRules: rulesBefore } = useApp.getState().repos[repoId]
   try {
-    const [refs, status, undo, refView, columns, repoPrefs, flow] = await Promise.all([
+    const already = useApp.getState().repos[repoId]?.commits.length ?? 0
+    const filter = graphFilter(useApp.getState().repos[repoId])
+    loadedFilter.set(repoId, JSON.stringify(filter ?? null))
+    const [refs, status, undo, refView, columns, repoPrefs, flow, page] = await Promise.all([
       call('refs.list', { repoId }),
       call('status.get', { repoId }),
       call('undo.peek', { repoId }),
       call('refView.get', { repoId }),
       call('graph.getColumns', { repoId }),
       call('repoPrefs.get', { repoId }),
-      call('flow.config', { repoId }).catch(() => null)
+      call('flow.config', { repoId }).catch(() => null),
+      call('graph.load', { repoId, skip: 0, limit: Math.max(PAGE, already), filter })
     ])
-    const already = useApp.getState().repos[repoId]?.commits.length ?? 0
-    const filter = graphFilter(useApp.getState().repos[repoId])
-    loadedFilter.set(repoId, JSON.stringify(filter ?? null))
-    const page = await call('graph.load', { repoId, skip: 0, limit: Math.max(PAGE, already), filter })
     const layout = await layoutFor(page.commits, status.changes.length > 0, refs, refView.pinned, !!filter)
     if (!isLatest(repoSeq, repoId, seq)) return // a newer full load is on its way
     const freshStatus = isLatest(statusSeq, repoId, sseq)

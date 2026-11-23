@@ -177,7 +177,6 @@ export interface CommitDetails {
   body: string
   coAuthors: Person[]
   files: FileChange[]
-  isHead: boolean
   /** null when the commit isn't signed. */
   signature: CommitSignature | null
 }
@@ -392,6 +391,8 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: GcError }
 export interface RepoChangedEvent {
   repoId: string
   what: Array<'refs' | 'index' | 'worktree'>
+  /** When the last of these changes was seen (ms since the epoch): anything read after it shows them all. */
+  at: number
 }
 
 export interface ProgressEvent {

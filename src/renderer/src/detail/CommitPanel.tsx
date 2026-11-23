@@ -12,6 +12,17 @@ import { FileList } from './FileList'
 import { toStatus } from './FileList'
 import { filterPathEntry } from '@/graph/FilterBar'
 
+/** A commit never changes, so its details are read once: the last ones looked at, by repository and SHA. */
+const seen = new Map<string, CommitDetails>()
+const remember = (key: string, d: CommitDetails): void => {
+  seen.delete(key)
+  seen.set(key, d)
+  if (seen.size > 200) seen.delete(seen.keys().next().value!)
+}
+/** A selection that moves again within this long of the last one waits as long before reading the commit. */
+const SETTLE_MS = 120
+let lastAsked = 0
+
 /** S06: one commit (or stash): who, when, message, and the files it changed. */
 export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): React.JSX.Element {
   const [d, setD] = useState<CommitDetails | null>(null)
@@ -32,16 +43,29 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
 
   useEffect(() => {
     let live = true
-    setD(null)
     setErr(null)
     setEditing(false)
-    call('commit.details', { repoId, sha })
-      .then((v) => live && setD(v))
-      .catch((e: Error) => live && setErr(e.message))
+    const key = `${repoId} ${sha}`
+    const known = seen.get(key)
+    setD(known ?? null)
+    if (known) return remember(key, known)
+    // Going down the graph with the keyboard, the commits passed over aren't read: only the one it stops on.
+    const now = Date.now()
+    const wait = now - lastAsked < SETTLE_MS ? SETTLE_MS : 0
+    lastAsked = now
+    const timer = setTimeout(() => {
+      call('commit.details', { repoId, sha })
+        .then((v) => {
+          remember(key, v)
+          if (live) setD(v)
+        })
+        .catch((e: Error) => live && setErr(e.message))
+    }, wait)
     return () => {
       live = false
+      clearTimeout(timer)
     }
-  }, [repoId, sha, headSha])
+  }, [repoId, sha])
 
   // The graph's "Edit message…" asks for the editor once this commit has loaded.
   useEffect(() => {
@@ -66,22 +90,23 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
 
   // Planning a rebase or a copy: the commits are only looked at here, not rewritten under the plan.
   const planning = center.kind === 'rebase' || center.kind === 'cherry'
+  const isHead = d.sha === headSha
   const openPath = center.kind === 'diff' ? center.path : planning && rebaseFile?.source.kind === 'commit' && rebaseFile.source.sha === d.sha ? rebaseFile.path : null
   // Any commit on the checked-out branch's line can get a new message: the newest by amending, older ones by a reword.
   void commitCount
   void status
   const onLine = act.headLine(repoId).includes(d.sha)
   // Not while the graph is filtered: the commits it hides would be rewritten unseen.
-  const canEdit = !planning && !stash && !filtered && d.parents.length <= 1 && (d.isHead || (onLine && d.parents.length === 1))
+  const canEdit = !planning && !stash && !filtered && d.parents.length <= 1 && (isHead || (onLine && d.parents.length === 1))
   const pushed = canEdit && act.alreadyPushed(repoId, [d.sha])
   // Older commits are reworded by a rebase: not past a merge (it would be flattened), and not with work in the way.
-  const behindMerge = canEdit && !d.isHead && act.mergeAbove(repoId, d.sha)
-  const blocker = canEdit && !d.isHead ? act.rewriteBlocker(repoId) : null
+  const behindMerge = canEdit && !isHead && act.mergeAbove(repoId, d.sha)
+  const blocker = canEdit && !isHead ? act.rewriteBlocker(repoId) : null
   // Whole files can be taken out of a commit of the checked-out branch (blocks and lines, from the diff).
   const canPatch = !planning && !stash && act.patchProblem(repoId, d.sha) === null
   const saveMessage = async (): Promise<void> => {
     if (!summary.trim()) return
-    if (d.isHead) {
+    if (isHead) {
       const ok = await act.commit(repoId, { summary, body, amend: true, noVerify: skipHooks, push: false, messageOnly: true })
       if (ok) setEditing(false)
       return
@@ -122,11 +147,11 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
             <TextInput aria-label="Commit summary" value={summary} onChange={(e) => setSummary(e.target.value)} autoFocus />
             <TextArea aria-label="Commit description" value={body} onChange={(e) => setBody(e.target.value)} />
             <Checkbox label="Skip hooks" checked={skipHooks} onCheckedChange={setSkipHooks} />
-            {!d.isHead || pushed ? (
+            {!isHead || pushed ? (
               <p className="flex items-start gap-1.5 text-sm text-muted">
                 {pushed ? <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0 text-warning" /> : null}
                 <span>
-                  {d.isHead ? '' : 'This commit and the ones after it get new IDs. Undo puts them back. '}
+                  {isHead ? '' : 'This commit and the ones after it get new IDs. Undo puts them back. '}
                   {pushed ? 'It’s already on a remote, so the next push will need to be a force push.' : ''}
                 </span>
               </p>
@@ -179,7 +204,7 @@ export function CommitPanel({ repoId, sha }: { repoId: string; sha: string }): R
               {shortSha(p)}
             </button>
           ))}
-          {d.isHead ? <Badge tone="accent">HEAD</Badge> : null}
+          {isHead ? <Badge tone="accent">HEAD</Badge> : null}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
