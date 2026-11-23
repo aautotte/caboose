@@ -122,6 +122,12 @@ const SHOWN = ['--branches', '--exclude=*/HEAD', '--remotes', '--tags']
 /** The author filter's map of the history, per repository: rebuilt when a branch moves or the filter changes. */
 const nearestCache = new Map<string, { key: string; nearest: Map<string, string[]> }>()
 
+/**
+ * The branches being read right now, per repository: a full refresh asks twice at once (the list, and the graph for
+ * its tips), and both get the one answer. Never across one of our own changes: a read started before it is stale.
+ */
+const refsReading = new Map<string, { writes: number; refs: Promise<Refs> }>()
+
 /** Git operations for one repository. Mutating calls go through the runner's per-repo queue. */
 /** What one of your commands may print before the rest is left out. */
 const CUSTOM_OUTPUT = 1024 * 1024
@@ -774,17 +780,30 @@ export class RepoOps {
     }))
   }
 
-  async refs(): Promise<Refs> {
-    const [remotesOut, symbolic, head, stashOut, moves] = await Promise.all([
+  refs(): Promise<Refs> {
+    const writes = this.runner.writes(this.repo.id)
+    const reading = refsReading.get(this.repo.path)
+    if (reading?.writes === writes) return reading.refs
+    const refs = this.readRefs()
+    refsReading.set(this.repo.path, { writes, refs })
+    const done = (): void => {
+      if (refsReading.get(this.repo.path)?.refs === refs) refsReading.delete(this.repo.path)
+    }
+    refs.then(done, done)
+    return refs
+  }
+
+  private async readRefs(): Promise<Refs> {
+    const [remotesOut, symbolic, head, stashOut, moves, refsOut] = await Promise.all([
       this.git(['remote']),
       this.tryGit(['symbolic-ref', '-q', 'HEAD']),
       this.headSha(),
       this.tryGit(['stash', 'list', `--format=${STASH_FORMAT}`]),
       // The last switches, from this worktree's HEAD reflog (none yet in a new repository).
-      this.tryGit(['log', '-g', '--format=%gs', '--grep-reflog=checkout: moving from ', '-n', '300', 'HEAD'])
+      this.tryGit(['log', '-g', '--format=%gs', '--grep-reflog=checkout: moving from ', '-n', '300', 'HEAD']),
+      this.git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags'])
     ])
     const remotes = remotesOut.split('\n').filter(Boolean)
-    const refsOut = await this.git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags'])
     const branch = symbolic?.trim().replace(/^refs\/heads\//, '') || null
     const refs = parseRefs(refsOut, remotes).map((r) => (r.worktree ? { ...r, worktree: resolve(r.worktree) } : r))
     const local = new Set(refs.filter((r) => r.kind === 'local').map((r) => r.short))
@@ -948,7 +967,7 @@ export class RepoOps {
   async details(sha: string): Promise<CommitDetails> {
     this.safeRev(sha)
     const fmt = ['%H', '%P', '%an', '%ae', '%at', '%ai', '%cn', '%ce', '%ct', '%G?', '%GS', '%GK', '%B'].join('%x1f')
-    const [out, head] = await Promise.all([this.git(['show', '-s', `--format=${fmt}`, sha, '--']), this.headSha()])
+    const out = await this.git(['show', '-s', `--format=${fmt}`, sha, '--'])
     const [full, parents, an, ae, at, ai, cn, ce, ct, sig, signer, sigKey, ...bodyParts] = out.split(US)
     const message = bodyParts.join(US).replace(/\n+$/, '')
     const [summary, ...rest] = message.split('\n')
@@ -967,7 +986,6 @@ export class RepoOps {
       body: rest.join('\n').trim(),
       coAuthors: parseCoAuthors(message),
       files: lfs.size ? files.map((f) => (lfs.has(f.path) ? { ...f, lfs: true } : f)) : files,
-      isHead: full === head,
       signature: parseSignature(sig, signer, sigKey)
     }
   }
