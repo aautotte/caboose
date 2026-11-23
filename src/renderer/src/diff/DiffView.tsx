@@ -16,7 +16,9 @@ function lfsChange({ old, new: now }: NonNullable<FileDiff['lfs']>): string {
 import { DIFF_CONTEXT_STEPS, setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { useKey } from '@/lib/keys'
-import { highlightLine, languageFor } from './highlight'
+import { highlightLine, languageFor, markChanged } from './highlight'
+import { wordChanges } from './words'
+import type { Marked } from '@/merge/suggest'
 import { SubmoduleDiff } from './SubmoduleDiff'
 import { FindBar, useFindInView } from './FindBar'
 
@@ -519,11 +521,15 @@ const lineBg = { add: 'bg-diff-add-bg', del: 'bg-diff-del-bg', ctx: '' }
 const sign = { add: '+', del: '−', ctx: ' ' }
 const signLabel = { add: 'added', del: 'removed', ctx: '' }
 
-const Code = memo(function Code({ text, lang, wrap }: { text: string; lang: string | null; wrap: boolean }) {
+/** The words that changed, a shade stronger than their line. */
+const wordBg = { add: 'rounded-xs bg-diff-add-emph text-inherit inset-ring inset-ring-success/50', del: 'rounded-xs bg-diff-del-emph text-inherit inset-ring inset-ring-danger/50', ctx: '' }
+
+const Code = memo(function Code({ text, lang, wrap, marks, type }: { text: string; lang: string | null; wrap: boolean; marks?: Marked; type?: DiffLine['type'] }) {
+  const html = highlightLine(text, lang)
   return (
     <span
       className={cn('hljs-line flex-1 px-2', wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre')}
-      dangerouslySetInnerHTML={{ __html: highlightLine(text, lang) || ' ' }}
+      dangerouslySetInnerHTML={{ __html: (marks && type ? markChanged(html, marks, wordBg[type]) : html) || ' ' }}
     />
   )
 })
@@ -559,6 +565,7 @@ function UnifiedHunk({
   const [cursor, setCursor] = useState<number | null>(null)
   const changed = useMemo(() => h.lines.map((l, i) => (l.type === 'ctx' ? -1 : i)).filter((i) => i >= 0), [h])
   const hunks = useMemo(() => (changes ? hunksOf(h.lines, changes.context) : []), [h, changes?.context])
+  const words = useMemo(() => wordChanges(h.lines), [h])
   const hunkAt = new Map(hunks.map((x, k) => [x[0], k]))
 
   const toggle = (i: number, range: boolean): void => {
@@ -641,7 +648,7 @@ function UnifiedHunk({
                 {sign[l.type]}
               </span>
               <span role="cell" className="flex min-w-0 flex-1">
-                <Code text={l.text} lang={lang} wrap={wrap} />
+                <Code text={l.text} lang={lang} wrap={wrap} marks={words.get(l)} type={l.type} />
                 {l.noNewline ? <span className="pr-2 font-sans text-xs text-muted">no newline at end</span> : null}
               </span>
             </div>
@@ -673,10 +680,11 @@ function pairLines(lines: DiffLine[]): Array<[DiffLine | null, DiffLine | null]>
 
 function SplitHunk({ h, lang, wrap }: { h: Hunk; lang: string | null; wrap: boolean }): React.JSX.Element {
   const pairs = pairLines(h.lines)
+  const words = useMemo(() => wordChanges(h.lines), [h])
   const cell = (l: DiffLine | null, side: 'old' | 'new'): React.JSX.Element => (
     <div role="cell" className={cn('flex min-w-0 flex-1', l ? lineBg[l.type] : 'bg-surface-sunken')}>
       <span className="w-12 shrink-0 pr-2 text-right text-muted select-none">{l ? (side === 'old' ? l.oldNo : l.newNo) : ''}</span>
-      {l ? <Code text={l.text} lang={lang} wrap={wrap} /> : <span className="flex-1" />}
+      {l ? <Code text={l.text} lang={lang} wrap={wrap} marks={words.get(l)} type={l.type} /> : <span className="flex-1" />}
     </div>
   )
   return (

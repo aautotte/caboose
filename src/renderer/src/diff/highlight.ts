@@ -46,6 +46,48 @@ export function highlightLine(text: string, lang: string | null): string {
   }
 }
 
+/**
+ * Wraps the changed pieces of a line in `<mark class>` inside its highlighted HTML. A mark that meets one of the
+ * highlighter's tags closes before it and opens again after, so the two never overlap.
+ */
+export function markChanged(html: string, parts: Array<[string, boolean]>, className: string): string {
+  const ranges: Array<[number, number]> = []
+  let pos = 0
+  for (const [t, changed] of parts) {
+    if (changed && t) ranges.push([pos, pos + t.length])
+    pos += t.length
+  }
+  if (!ranges.length) return html
+  const open = `<mark class="${className}">`
+  let out = ''
+  let at = 0 // characters of text so far, an entity (&lt;) counting as one
+  let r = 0
+  let inside = false
+  for (let i = 0; i < html.length; ) {
+    if (html[i] === '<') {
+      const end = html.indexOf('>', i) + 1
+      const tag = html.slice(i, end)
+      out += inside ? `</mark>${tag}${open}` : tag
+      i = end
+      continue
+    }
+    if (inside && at === ranges[r][1]) {
+      out += '</mark>'
+      inside = false
+      r++
+    }
+    if (!inside && r < ranges.length && at === ranges[r][0]) {
+      out += open
+      inside = true
+    }
+    const len = html[i] === '&' ? html.indexOf(';', i) + 1 - i : 1
+    out += html.slice(i, i + len)
+    i += len
+    at++
+  }
+  return inside ? `${out}</mark>` : out
+}
+
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

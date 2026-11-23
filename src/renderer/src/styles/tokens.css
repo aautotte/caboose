@@ -113,9 +113,9 @@
   --gc-color-warning: #e6b85c;
   --gc-color-info: #6bb8f2;
   --gc-color-diff-add-bg: #15302a;
-  --gc-color-diff-add-emph: #1a4134;
+  --gc-color-diff-add-emph: #1e4237;
   --gc-color-diff-del-bg: #3a1c22;
-  --gc-color-diff-del-emph: #4b2129;
+  --gc-color-diff-del-emph: #5f2d34;
   --gc-color-diff-picked: #1d3452;
   --gc-color-conflict-ours-bg: #172c45;
   --gc-color-conflict-theirs-bg: #3a2d14;
@@ -167,9 +167,9 @@
   --gc-color-warning: #8f5d00;
   --gc-color-info: #1f6ca8;
   --gc-color-diff-add-bg: #e3f6ea;
-  --gc-color-diff-add-emph: #cdeedb;
+  --gc-color-diff-add-emph: #cbe7d7;
   --gc-color-diff-del-bg: #fbe6e8;
-  --gc-color-diff-del-emph: #f9d9dc;
+  --gc-color-diff-del-emph: #f7d9dc;
   --gc-color-diff-picked: #d3e2f6;
   --gc-color-conflict-ours-bg: #e2eefb;
   --gc-color-conflict-theirs-bg: #fbf0d9;
@@ -222,9 +222,9 @@
     --gc-color-warning: #8f5d00;
     --gc-color-info: #1f6ca8;
     --gc-color-diff-add-bg: #e3f6ea;
-    --gc-color-diff-add-emph: #cdeedb;
+    --gc-color-diff-add-emph: #cbe7d7;
     --gc-color-diff-del-bg: #fbe6e8;
-    --gc-color-diff-del-emph: #f9d9dc;
+    --gc-color-diff-del-emph: #f7d9dc;
     --gc-color-diff-picked: #d3e2f6;
     --gc-color-conflict-ours-bg: #e2eefb;
     --gc-color-conflict-theirs-bg: #fbf0d9;

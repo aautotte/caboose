@@ -59,6 +59,11 @@ The header of a diff has:
 
 Your choices are remembered. The default layout, code size and tab width are in [Settings](settings.md#diffs-and-code).
 
+In a changed line, the words that changed are marked, a shade stronger than the line and outlined: rename a
+variable and you see that name, on the removed line and on the added one. Removed lines pair with the added lines
+that follow them, in order, as the side-by-side layout shows them. A line rewritten from scratch (less than about
+half of it kept) isn't marked, and neither is a line over 1,000 characters.
+
 Some files get a different view:
 
 - **Binary files** say only that they changed.

@@ -178,7 +178,8 @@ export function wordMarks(lines: string[], ref: string[]): Marked[] {
   return out
 }
 
-function markWords(line: string, ref: string): Marked {
+/** `line` in pieces, the words `ref` doesn't have marked. */
+export function markWords(line: string, ref: string): Marked {
   const a = tokens(line)
   const b = tokens(ref)
   const keepIdx = new Set((lcs(a, b) ?? []).map(([i]) => i))
