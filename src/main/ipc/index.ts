@@ -293,6 +293,20 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     }),
     ({ repoId, path, oldPath, source, force, full, ignoreWs, context }) => ops(repoId).diff(path, oldPath, source, force, full, ignoreWs, context)
   )
+  handle(
+    'diff.images',
+    z.object({
+      ...R,
+      path: z.string().min(1).max(4096),
+      oldPath: z.string().max(4096).optional(),
+      source: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('worktree') }),
+        z.object({ kind: z.literal('index') }),
+        z.object({ kind: z.literal('commit'), sha: ref, parent: ref.optional() })
+      ])
+    }),
+    ({ repoId, path, oldPath, source }) => ops(repoId).images(path, oldPath, source)
+  )
   handle('search.commits', z.object({ ...R, query: z.string().max(400) }), ({ repoId, query }) => ops(repoId).searchCommits(query))
 
   // ---------- staging and commits ----------

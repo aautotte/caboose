@@ -22,6 +22,8 @@ import type {
   MergeAgainHow,
   DiffSource,
   FileDiff,
+  ImageDiff,
+  ImageSide,
   GraphFilter,
   PatchPreview,
   PatchSource,
@@ -42,6 +44,7 @@ import type {
   BisectState,
   Worktree
 } from '../../shared/types'
+import { IMAGE_TYPES } from '../../shared/types'
 import { GcFail, invalid } from '../errors'
 import type { GitRunner, RunOptions, RunResult } from './runner'
 import { buildPartialPatch } from './patch'
@@ -88,6 +91,8 @@ const shq = (p: string): string => "'" + p.split('\\').join('/').split("'").join
 /** "Name <email>", as git's --author and a Co-authored-by trailer want it. */
 const PERSON = /^[^<>\n]+ <[^<>\s]+>$/
 
+/** An image larger than this shows its size only: base64 through IPC, it would hold the window up. */
+const MAX_IMAGE_BYTES = 20_000_000
 const MAX_DIFF_BYTES = 1_000_000
 const MAX_DIFF_LINES = 20_000
 /** --unified for a diff: the whole file, or `context` lines around each change (git's own default when unset). */
@@ -1020,6 +1025,41 @@ export class RepoOps {
     const pointers = submodulePointers(d.hunks)
     if (pointers) d.submodule = await this.submoduleChange(path, pointers)
     return d
+  }
+
+  /**
+   * An image's two versions, for its binary diff, as the diff compares them: the staged one and the file on disk,
+   * HEAD's and the staged one, or the commit's parent's and the commit's. One too large to show comes with its size.
+   */
+  async images(rawPath: string, rawOld: string | undefined, source: DiffSource): Promise<ImageDiff> {
+    const path = this.safePath(rawPath)
+    const old = rawOld ? this.safePath(rawOld) : path
+    const mime = IMAGE_TYPES[path.split('.').pop()?.toLowerCase() ?? '']
+    if (!mime) throw invalid(`Caboose can’t show ${path} as an image.`)
+    const side = (bytes: Buffer): ImageSide => (bytes.length > MAX_IMAGE_BYTES ? { size: bytes.length } : { size: bytes.length, data: bytes.toString('base64') })
+    // A version that isn't there (a new file has no old one) is a failed read, not an error.
+    const blob = async (spec: string): Promise<ImageSide | null> => {
+      const r = await this.raw(['cat-file', 'blob', spec])
+      return r.code === 0 ? side(r.bytes) : null
+    }
+    const onDisk = (): ImageSide | null => {
+      try {
+        const full = join(this.repo.path, path)
+        const size = statSync(full).size
+        return size > MAX_IMAGE_BYTES ? { size } : side(readFileSync(full))
+      } catch {
+        return null
+      }
+    }
+    if (source.kind === 'worktree') return { mime, old: await blob(`:0:${path}`), new: onDisk() }
+    if (source.kind === 'index') {
+      const [before, after] = await Promise.all([blob(`HEAD:${old}`), blob(`:0:${path}`)])
+      return { mime, old: before, new: after }
+    }
+    const sha = this.safeRev(source.sha)
+    const parent = source.parent ? this.safeRev(source.parent) : `${sha}^`
+    const [before, after] = await Promise.all([blob(`${parent}:${old}`), blob(`${sha}:${path}`)])
+    return { mime, old: before, new: after }
   }
 
   /**

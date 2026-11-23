@@ -205,6 +205,31 @@ export interface Hunk {
   lines: DiffLine[]
 }
 
+/** Images a diff shows as pictures, by extension (SVG is text, so it diffs as lines). */
+export const IMAGE_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  avif: 'image/avif'
+}
+
+/** One version of an image. `data` (base64) is left out when it's larger than the app shows. */
+export interface ImageSide {
+  size: number
+  data?: string
+}
+
+/** An image's two versions, for a binary diff; null on the side where the file isn't (added, deleted). */
+export interface ImageDiff {
+  mime: string
+  old: ImageSide | null
+  new: ImageSide | null
+}
+
 export interface FileDiff {
   path: string
   oldPath?: string

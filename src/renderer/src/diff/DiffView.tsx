@@ -1,6 +1,6 @@
 import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, SlidersHorizontal, Space, UnfoldVertical, UserSearch, WrapText, X } from 'lucide-react'
-import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
+import { IMAGE_TYPES, type DiffLine, type DiffSource, type FileDiff, type Hunk } from '../../../shared/types'
 import { Button, DropdownMenu, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
@@ -18,6 +18,7 @@ import * as act from '@/actions'
 import { useKey } from '@/lib/keys'
 import { highlightLine, languageFor } from './highlight'
 import { SubmoduleDiff } from './SubmoduleDiff'
+import { ImageDiff } from './ImageDiff'
 import { FindBar, useFindInView } from './FindBar'
 
 function sourceLabel(s: DiffSource): string {
@@ -317,6 +318,8 @@ export function DiffView({
           <SubmoduleDiff repoId={repoId} path={path} change={diff.submodule} source={source} />
         ) : diff.lfs ? (
           <EmptyState icon={HardDrive} title="Stored in Git LFS" body={lfsChange(diff.lfs)} />
+        ) : diff.binary && IMAGE_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ? (
+          <ImageDiff repoId={repoId} path={path} oldPath={oldPath} source={source} reload={diff} />
         ) : diff.binary ? (
           <EmptyState icon={FileWarning} title="Binary file" body="This file isn’t text, so there are no lines to compare. All Caboose can say is that it changed." />
         ) : diff.tooLarge ? (
