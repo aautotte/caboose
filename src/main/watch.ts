@@ -69,6 +69,25 @@ function notRead(what: What | null, full: string): What | null {
   }
 }
 
+/** Older than this, a modification time says nothing about the change seen now (a file copied in with its old date). */
+const RECENT_MS = 2000
+
+/**
+ * When a change was made: the file's modification time when it's recent, else now. Windows can report a write a
+ * moment late, after a reload that already read it has started (our own action's reload, say); by the time it
+ * arrives, that reload would look older than the change and the same change would load twice.
+ */
+function madeAt(full: string | undefined): number {
+  const now = Date.now()
+  if (!full) return now
+  try {
+    const m = statSync(full).mtimeMs
+    return m <= now && now - m < RECENT_MS ? m : now
+  } catch {
+    return now // gone: deleted
+  }
+}
+
 /**
  * One recursive fs.watch per open repo (native on Windows and macOS, no extra dependency).
  * Changes are debounced, and held back while our own git commands run, then flushed once.
@@ -97,12 +116,14 @@ export class Watcher {
 
   start(repoId: string, path: string): void {
     if (this.watchers.has(repoId)) return
-    const note = (what: What | null): void => {
+    const note = (what: What | null, full?: string): void => {
       if (!what) return
       const set = this.pending.get(repoId) ?? new Set<What>()
       set.add(what)
       this.pending.set(repoId, set)
-      this.lastSeen.set(repoId, Date.now())
+      // Only git's own files are dated (a few): a checkout can change thousands of the others, each one an event.
+      const when = what === 'worktree' ? Date.now() : madeAt(full)
+      this.lastSeen.set(repoId, Math.max(this.lastSeen.get(repoId) ?? 0, when))
       if (!this.runner.isBusy(repoId)) this.schedule(repoId)
     }
     const list: FSWatcher[] = []
@@ -113,7 +134,7 @@ export class Watcher {
       return
     }
     try {
-      const w = watch(path, { recursive: true }, (_event, file) => file && note(notRead(classify(String(file)), join(path, String(file)))))
+      const w = watch(path, { recursive: true }, (_event, file) => file && note(notRead(classify(String(file)), join(path, String(file))), join(path, String(file))))
       // A watch can fail (on Windows, a folder it covers gets deleted by a checkout, say): watching stopped for good
       // then, and nothing done outside the app showed. Start again, and refresh everything once.
       w.on('error', () => this.restart(repoId, path))
@@ -122,7 +143,7 @@ export class Watcher {
       // rebase state live there, and refs in the folder it shares with the main worktree.
       const dirs = linkedGitDirs(path)
       if (dirs) {
-        const own = watch(dirs.gitDir, { recursive: true }, (_event, file) => file && note(notRead(classify(`.git/${String(file)}`), join(dirs.gitDir, String(file)))))
+        const own = watch(dirs.gitDir, { recursive: true }, (_event, file) => file && note(notRead(classify(`.git/${String(file)}`), join(dirs.gitDir, String(file))), join(dirs.gitDir, String(file))))
         own.on('error', () => {})
         list.push(own)
         if (dirs.commonDir) {
@@ -130,7 +151,7 @@ export class Watcher {
             const f = file ? String(file).split('\\').join('/') : ''
             // What every worktree shares, and the other worktrees' HEADs (which branch is checked out where); their
             // index and files are their own business.
-            if (f.startsWith('refs') || f === 'packed-refs' || f === 'HEAD' || /^worktrees\/[^/]+\/HEAD$/.test(f)) note(notRead('refs', join(dirs.commonDir!, f)))
+            if (f.startsWith('refs') || f === 'packed-refs' || f === 'HEAD' || /^worktrees\/[^/]+\/HEAD$/.test(f)) note(notRead('refs', join(dirs.commonDir!, f)), join(dirs.commonDir!, f))
           })
           shared.on('error', () => {})
           list.push(shared)
@@ -220,8 +241,10 @@ export class Watcher {
       repoId,
       setTimeout(() => {
         const set = this.pending.get(repoId)
+        const at = this.lastSeen.get(repoId) ?? Date.now()
         this.pending.delete(repoId)
-        if (set && set.size) this.emit({ repoId, what: [...set], at: this.lastSeen.get(repoId) ?? Date.now() })
+        this.lastSeen.delete(repoId)
+        if (set && set.size) this.emit({ repoId, what: [...set], at })
       }, DEBOUNCE_MS)
     )
   }

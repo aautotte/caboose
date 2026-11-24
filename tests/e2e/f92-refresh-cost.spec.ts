@@ -73,7 +73,14 @@ test('F92-H3 going down the graph with the keyboard reads only the commit it sto
   await commitRow(h.page, 'Commit 29').click()
   await ranSince(Date.now())
   const t = Date.now()
-  for (let i = 0; i < 10; i++) await h.page.keyboard.press('ArrowDown')
+  // Quickly, as a held key sends them: pressed through Playwright one by one, a busy machine can space them out past
+  // the wait. Each waits only for the window to take the one before.
+  await h.page.evaluate(async () => {
+    for (let i = 0; i < 10; i++) {
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+      await new Promise((r) => setTimeout(r, 0))
+    }
+  })
   await expect(commitRow(h.page, 'Commit 19')).toHaveAttribute('aria-selected', 'true')
   const reads = detailReads(await ranSince(t))
   expect(reads.length, reads.map((a) => a.at(-2)).join(' ')).toBeLessThanOrEqual(2)
