@@ -1,7 +1,8 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
+  AuthorChange,
   Blame,
   CommitDetails,
   CommitSignature,
@@ -9,21 +10,33 @@ import type {
   FileHistoryEntry,
   RebasePreview,
   RebaseRow,
+  ConflictForecast,
   RebaseStep,
   RefViewState,
   Remote,
   ResetMode,
   CommitRow,
   ConflictFile,
+  ConflictWhy,
+  MergeAgain,
+  MergeAgainHow,
   DiffSource,
   FileDiff,
+  ImageDiff,
+  ImageSide,
+  GraphFilter,
+  PatchPreview,
+  PatchSource,
+  PatchTarget,
   GraphPage,
   LfsState,
   Submodule,
   SubmoduleMode,
   SubmoduleChange,
   OperationState,
+  CleanPreview,
   OpResult,
+  PullDraft,
   PullMode,
   ReflogEntry,
   Refs,
@@ -31,10 +44,12 @@ import type {
   BisectState,
   Worktree
 } from '../../shared/types'
+import { IMAGE_TYPES } from '../../shared/types'
 import { GcFail, invalid } from '../errors'
-import type { GitRunner, RunOptions } from './runner'
+import type { GitRunner, RunOptions, RunResult } from './runner'
 import { buildPartialPatch } from './patch'
 import { HOST_NAMES, webRepo, webUrl, type HostKind, type WebTarget } from './hosting'
+import { githubRepo } from '../github'
 import {
   HISTORY_FORMAT,
   LOG_FORMAT,
@@ -48,6 +63,8 @@ import {
   parseFileHistory,
   parseLog,
   parseNameStatus,
+  parseCheckouts,
+  parseMailbox,
   parseRefs,
   parseStashes,
   parseStatus,
@@ -69,15 +86,57 @@ export interface RepoCtx {
 /** A step of a rebase the app builds itself: `exec` runs shell commands right after the commit is picked. */
 type Step = RebaseStep & { exec?: string[] }
 
+/** One argument for git's shell (sh) in a rebase exec line, single-quoted; backslashes in paths become slashes. */
+const shq = (p: string): string => "'" + p.split('\\').join('/').split("'").join("'\\''") + "'"
+/** "Name <email>", as git's --author and a Co-authored-by trailer want it. */
+const PERSON = /^[^<>\n]+ <[^<>\s]+>$/
+
+/** An image larger than this shows its size only: base64 through IPC, it would hold the window up. */
+const MAX_IMAGE_BYTES = 20_000_000
 const MAX_DIFF_BYTES = 1_000_000
 const MAX_DIFF_LINES = 20_000
+/** --unified for a diff: the whole file, or `context` lines around each change (git's own default when unset). */
+const unified = (full: boolean | undefined, context: number | undefined): string[] =>
+  full ? ['--unified=1000000'] : context === undefined ? [] : [`--unified=${context}`]
+const MAX_PATCH_BYTES = 50_000_000
+/** git's empty tree: what "all changes" are diffed against before the first commit. */
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
+/** git apply's or git am's complaint, without the noise: which file, and why. */
+function patchProblem(out: string): string {
+  const own = /^error: (.+): does not match index$/m.exec(out)
+  if (own) return `${own[1]} has changes of its own. Commit or stash them first.`
+  const lines = out
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^(error|fatal): /, '').trim())
+    .filter((l) => l && !/^(hint:|Patch failed at|Use 'git am|When you have resolved|If you prefer|To restore the original|The copy of the patch)/.test(l))
+  return lines.length ? `It doesn’t apply: ${lines.slice(0, 2).join('. ')}.`.replace(/\.\./g, '.') : 'It doesn’t apply here.'
+}
 
 /** Where undo safety refs live. Refs from before the renames (refs/mergatroid/, refs/gitclone/) are still hidden and pruned. */
 export const UNDO_REFS = 'refs/caboose/undo/'
 const OWN_REFS = ['refs/caboose/', 'refs/mergatroid/', 'refs/gitclone/']
 const EXCLUDE_OWN = OWN_REFS.map((r) => `--exclude=${r}*`)
+/**
+ * What the graph and the search show: branches, remote branches and tags, as the sidebar lists them. Other refs (a
+ * tool's checkpoints such as refs/cline/, notes, the stash, our own undo refs) don't bring commits in. A remote's HEAD
+ * is only an alias for one of its branches. HEAD itself is added when it points at a commit, for a detached HEAD.
+ */
+const SHOWN = ['--branches', '--exclude=*/HEAD', '--remotes', '--tags']
+
+/** The author filter's map of the history, per repository: rebuilt when a branch moves or the filter changes. */
+const nearestCache = new Map<string, { key: string; nearest: Map<string, string[]> }>()
+
+/**
+ * The branches being read right now, per repository: a full refresh asks twice at once (the list, and the graph for
+ * its tips), and both get the one answer. Never across one of our own changes: a read started before it is stale.
+ */
+const refsReading = new Map<string, { writes: number; refs: Promise<Refs> }>()
 
 /** Git operations for one repository. Mutating calls go through the runner's per-repo queue. */
+/** What one of your commands may print before the rest is left out. */
+const CUSTOM_OUTPUT = 1024 * 1024
+
 export class RepoOps {
   private gitDir: string | null = null
 
@@ -101,6 +160,11 @@ export class RepoOps {
 
   mut(args: string[], opts: Partial<RunOptions> = {}): Promise<string> {
     return this.git(args, { mutating: true, ...opts })
+  }
+
+  /** Runs git and hands back its output and exit code whatever they are, for reading git's own messages. */
+  private raw(args: string[], opts: Partial<RunOptions> = {}): Promise<RunResult> {
+    return this.runner.run({ cwd: this.repo.path, repoId: this.repo.id, args, okCodes: Array.from({ length: 128 }, (_, i) => i + 1), ...opts })
   }
 
   // ---------- validation ----------
@@ -612,7 +676,7 @@ export class RepoOps {
     return (await this.tryGit(['rev-parse', '-q', '--verify', 'HEAD^{commit}']))?.trim() || null
   }
 
-  async graph(skip: number, limit: number, stashes: Refs['stashes'], view: RefViewState = { hidden: [], soloed: [], pinned: null }): Promise<GraphPage> {
+  async graph(skip: number, limit: number, stashes: Refs['stashes'], view: RefViewState = { hidden: [], soloed: [], pinned: null }, filter: GraphFilter = {}): Promise<GraphPage> {
     // Soloed branches replace "everything"; hidden ones are left out of it. HEAD always shows.
     // A remote's HEAD (origin/HEAD) is only an alias for one of its branches, so it never brings commits in itself:
     // otherwise hiding that branch would leave all its commits on screen. Likewise, while anything is hidden, tags
@@ -620,14 +684,36 @@ export class RepoOps {
     // Those refs go to git on stdin, not the command line: hundreds of them would pass Windows' limit of about
     // 32,000 characters per command line, and git wouldn't start at all (an empty graph).
     const revs = view.soloed.length ? [...view.soloed, 'HEAD'] : view.hidden.length ? [...(await this.shownRefs(view.hidden)), 'HEAD'] : null
-    const which = revs ? ['--stdin'] : [...EXCLUDE_OWN, '--exclude=refs/stash', '--exclude=refs/remotes/*/HEAD', '--all']
-    const out = await this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...which, `--skip=${skip}`, `--max-count=${limit + 1}`, '--'], {
-      stdin: revs ? `${revs.join('\n')}\n` : undefined
-    })
+    let which = revs ? ['--stdin'] : [...SHOWN, 'HEAD']
+    const stdin = revs ? `${revs.join('\n')}\n` : undefined
+    // Typed in the filter bar: "." is the whole repository, and a path outside it changes in none of its commits.
+    const rel = filter.path ? relative(this.repo.path, resolve(this.repo.path, filter.path)) : ''
+    if (rel.startsWith('..') || isAbsolute(rel)) return { commits: [], hasMore: false }
+    const path = rel ? [this.safePath(rel)] : []
+    const author = filter.author ? ['-i', '--fixed-strings', `--author=${filter.author}`] : []
+    const filtered = path.length > 0 || author.length > 0
+    // --parents: with a path, git rewrites each commit's parents to the nearest commits that change it too.
+    const log = (w: string[]): Promise<string | null> =>
+      this.tryGit(['log', '--topo-order', `--format=${LOG_FORMAT}`, ...(filtered ? ['--parents'] : []), ...author, ...w, `--skip=${skip}`, `--max-count=${limit + 1}`, '--', ...path], { stdin })
+    let out = await log(which)
+    // An unborn HEAD (no commit yet on the checked-out branch) isn't a revision: the branches alone. Tried after,
+    // not checked first, so loading the graph runs no extra git command.
+    if (out === null && !revs) out = await log((which = SHOWN))
     if (out === null) return { commits: [], hasMore: false } // unborn repo
     const commits = parseLog(out)
     const hasMore = commits.length > limit
     if (hasMore) commits.pop()
+    if (filtered) {
+      // Git doesn't rewrite parents for an author: those come from the whole history, nearest shown commits first.
+      // The graph draws these; everything else (menus, revert, the details) keeps the real parents.
+      const nearest = author.length ? await this.nearestShown(which, stdin, path, author) : null
+      const real = await this.realParents(commits.map((c) => c.sha))
+      for (const c of commits) {
+        c.drawn = nearest ? [...new Set(c.parents.flatMap((p) => nearest.get(p) ?? []))] : c.parents
+        c.parents = real.get(c.sha) ?? []
+      }
+      return { commits, hasMore } // stashes sit on commits the filter may leave out
+    }
     // Stashes are drawn as their own rows, right above the commit they were made on.
     const byBase = new Map<string, CommitRow[]>()
     for (const s of stashes) {
@@ -662,21 +748,78 @@ export class RepoOps {
       .map(([name]) => name)
   }
 
-  async refs(): Promise<Refs> {
-    const [remotesOut, symbolic, head, stashOut] = await Promise.all([
+  /**
+   * For every commit of the history (with a path, of the commits that change it), the nearest commits at or below it
+   * that the author matches. Read whole once, then kept until a branch moves or the filter changes.
+   */
+  private async nearestShown(which: string[], stdin: string | undefined, path: string[], author: string[]): Promise<Map<string, string[]>> {
+    const tips = await this.git(['for-each-ref', '--format=%(objectname)'])
+    const key = JSON.stringify([which, stdin, path, author, tips, await this.headSha()])
+    const cached = nearestCache.get(this.repo.path)
+    if (cached?.key === key) return cached.nearest
+    const [topo, matched] = await Promise.all([
+      this.git(['rev-list', '--topo-order', '--parents', ...which, '--', ...path], { stdin }),
+      this.git(['rev-list', ...author, ...which, '--', ...path], { stdin })
+    ])
+    const shown = new Set(matched.split('\n').filter(Boolean))
+    const rows = topo.split('\n').filter(Boolean)
+    const nearest = new Map<string, string[]>()
+    // Oldest first, so each commit's parents are already done; a commit with one parent shares its list.
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const [sha, ...parents] = rows[i].split(' ')
+      if (shown.has(sha)) nearest.set(sha, [sha])
+      else if (parents.length === 1) nearest.set(sha, nearest.get(parents[0]) ?? [])
+      else nearest.set(sha, [...new Set(parents.flatMap((p) => nearest.get(p) ?? []))])
+    }
+    nearestCache.set(this.repo.path, { key, nearest })
+    return nearest
+  }
+
+  /** The parents of these commits as they really are. */
+  private async realParents(shas: string[]): Promise<Map<string, string[]>> {
+    if (!shas.length) return new Map()
+    const out = await this.git(['log', '--no-walk=unsorted', '--format=%H %P', '--stdin'], { stdin: `${shas.join('\n')}\n` })
+    return new Map(out.split('\n').filter(Boolean).map((line) => {
+      const [sha, ...parents] = line.trim().split(' ')
+      return [sha, parents.filter(Boolean)]
+    }))
+  }
+
+  refs(): Promise<Refs> {
+    const writes = this.runner.writes(this.repo.id)
+    const reading = refsReading.get(this.repo.path)
+    if (reading?.writes === writes) return reading.refs
+    const refs = this.readRefs()
+    refsReading.set(this.repo.path, { writes, refs })
+    const done = (): void => {
+      if (refsReading.get(this.repo.path)?.refs === refs) refsReading.delete(this.repo.path)
+    }
+    refs.then(done, done)
+    return refs
+  }
+
+  private async readRefs(): Promise<Refs> {
+    const [remotesOut, symbolic, head, stashOut, moves, refsOut] = await Promise.all([
       this.git(['remote']),
       this.tryGit(['symbolic-ref', '-q', 'HEAD']),
       this.headSha(),
-      this.tryGit(['stash', 'list', `--format=${STASH_FORMAT}`])
+      this.tryGit(['stash', 'list', `--format=${STASH_FORMAT}`]),
+      // The last switches, from this worktree's HEAD reflog (none yet in a new repository).
+      this.tryGit(['log', '-g', '--format=%gs', '--grep-reflog=checkout: moving from ', '-n', '300', 'HEAD']),
+      this.git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags'])
     ])
     const remotes = remotesOut.split('\n').filter(Boolean)
-    const refsOut = await this.git(['for-each-ref', `--format=${REF_FORMAT}`, 'refs/heads', 'refs/remotes', 'refs/tags'])
     const branch = symbolic?.trim().replace(/^refs\/heads\//, '') || null
+    const refs = parseRefs(refsOut, remotes).map((r) => (r.worktree ? { ...r, worktree: resolve(r.worktree) } : r))
+    const local = new Set(refs.filter((r) => r.kind === 'local').map((r) => r.short))
+    const left = parseCheckouts(moves ?? '').filter((x) => x !== branch && x !== head && (local.has(x) || /^[0-9a-f]{40}$/.test(x)))
     return {
       head: { branch, sha: head, detached: !branch && !!head, unborn: !!branch && !head },
-      refs: parseRefs(refsOut, remotes).map((r) => (r.worktree ? { ...r, worktree: resolve(r.worktree) } : r)),
+      refs,
       stashes: stashOut ? parseStashes(stashOut) : [],
-      remotes
+      remotes,
+      recent: [...new Set(left.filter((x) => local.has(x)))].slice(0, 10),
+      previous: left[0] ?? null
     }
   }
 
@@ -693,7 +836,13 @@ export class RepoOps {
       if (existsSync(join(dir, d))) {
         const step = Number(read(`${d}/msgnum`) ?? read(`${d}/next`) ?? 0)
         const total = Number(read(`${d}/end`) ?? read(`${d}/last`) ?? 0)
-        return { kind: 'rebase', step, total, onto: read(`${d}/onto`), head: read(`${d}/head-name`)?.replace(/^refs\/heads\//, '') }
+        const state: OperationState = { kind: 'rebase', step, total, onto: read(`${d}/onto`), head: read(`${d}/head-name`)?.replace(/^refs\/heads\//, '') }
+        // Stopped by an Edit step (git writes `amend` for those, not for conflicts), and nothing conflicts.
+        const amend = read(`${d}/amend`)
+        if (amend && /^[0-9a-f]{40}$/.test(amend) && !(await this.tryGit(['ls-files', '-u']))?.trim()) {
+          state.edit = { sha: amend, summary: (await this.tryGit(['log', '-1', '--format=%s', amend]))?.trim() ?? '' }
+        }
+        return state
       }
     }
     if (existsSync(join(dir, 'MERGE_HEAD'))) return { kind: 'merge', head: read('MERGE_MSG')?.split('\n')[0] }
@@ -786,6 +935,17 @@ export class RepoOps {
     await this.mut(['bisect', 'run', 'sh', '-c', command], { opId, onOutput, timeoutMs: 12 * 60 * 60_000 })
   }
 
+  /**
+   * One of your own commands (Settings › Your commands), as the arguments it was split into: no shell. Waits up to
+   * an hour, lets you cancel it, and hands back what it printed whatever its exit code.
+   */
+  async runCustom(args: string[], opId: string, onOutput: (line: string) => void): Promise<{ code: number; stdout: string; stderr: string }> {
+    if (!args.length) throw invalid('Give the command to run.')
+    const r = await this.raw(args, { mutating: true, opId, onOutput, stdin: '', timeoutMs: 60 * 60_000 })
+    const cap = (t: string): string => (t.length > CUSTOM_OUTPUT ? `${t.slice(0, CUSTOM_OUTPUT)}\n… (cut short: it printed more than 1 MB)` : t)
+    return { code: r.code, stdout: cap(r.stdout), stderr: cap(r.stderr) }
+  }
+
   /** Ends the bisect and checks out what was checked out when it started. */
   async bisectReset(): Promise<void> {
     await this.mut(['bisect', 'reset'], { timeoutMs: 30 * 60_000 })
@@ -812,7 +972,7 @@ export class RepoOps {
   async details(sha: string): Promise<CommitDetails> {
     this.safeRev(sha)
     const fmt = ['%H', '%P', '%an', '%ae', '%at', '%ai', '%cn', '%ce', '%ct', '%G?', '%GS', '%GK', '%B'].join('%x1f')
-    const [out, head] = await Promise.all([this.git(['show', '-s', `--format=${fmt}`, sha, '--']), this.headSha()])
+    const out = await this.git(['show', '-s', `--format=${fmt}`, sha, '--'])
     const [full, parents, an, ae, at, ai, cn, ce, ct, sig, signer, sigKey, ...bodyParts] = out.split(US)
     const message = bodyParts.join(US).replace(/\n+$/, '')
     const [summary, ...rest] = message.split('\n')
@@ -831,17 +991,16 @@ export class RepoOps {
       body: rest.join('\n').trim(),
       coAuthors: parseCoAuthors(message),
       files: lfs.size ? files.map((f) => (lfs.has(f.path) ? { ...f, lfs: true } : f)) : files,
-      isHead: full === head,
       signature: parseSignature(sig, signer, sigKey)
     }
   }
 
-  async diff(rawPath: string, rawOld: string | undefined, source: DiffSource, force = false, full = false, ignoreWs = false): Promise<FileDiff> {
+  async diff(rawPath: string, rawOld: string | undefined, source: DiffSource, force = false, full = false, ignoreWs = false, context?: number): Promise<FileDiff> {
     const path = this.safePath(rawPath)
     const old = rawOld ? this.safePath(rawOld) : undefined
     const specs = old && old !== path ? ['--', old, path] : ['--', path]
     // --submodule=short whatever diff.submodule says: a submodule's diff is then its two commits, read below.
-    const base = ['--no-color', '--no-ext-diff', '--submodule=short', '-M', '--src-prefix=a/', '--dst-prefix=b/', ...(full ? ['--unified=1000000'] : []), ...(ignoreWs ? ['-w'] : [])]
+    const base = ['--no-color', '--no-ext-diff', '--submodule=short', '-M', '--src-prefix=a/', '--dst-prefix=b/', ...unified(full, context), ...(ignoreWs ? ['-w'] : [])]
     let out: string
     if (source.kind === 'worktree') {
       const tracked = (await this.git(['ls-files', '-z', '--', path])).length > 0
@@ -866,6 +1025,41 @@ export class RepoOps {
     const pointers = submodulePointers(d.hunks)
     if (pointers) d.submodule = await this.submoduleChange(path, pointers)
     return d
+  }
+
+  /**
+   * An image's two versions, for its binary diff, as the diff compares them: the staged one and the file on disk,
+   * HEAD's and the staged one, or the commit's parent's and the commit's. One too large to show comes with its size.
+   */
+  async images(rawPath: string, rawOld: string | undefined, source: DiffSource): Promise<ImageDiff> {
+    const path = this.safePath(rawPath)
+    const old = rawOld ? this.safePath(rawOld) : path
+    const mime = IMAGE_TYPES[path.split('.').pop()?.toLowerCase() ?? '']
+    if (!mime) throw invalid(`Caboose can’t show ${path} as an image.`)
+    const side = (bytes: Buffer): ImageSide => (bytes.length > MAX_IMAGE_BYTES ? { size: bytes.length } : { size: bytes.length, data: bytes.toString('base64') })
+    // A version that isn't there (a new file has no old one) is a failed read, not an error.
+    const blob = async (spec: string): Promise<ImageSide | null> => {
+      const r = await this.raw(['cat-file', 'blob', spec])
+      return r.code === 0 ? side(r.bytes) : null
+    }
+    const onDisk = (): ImageSide | null => {
+      try {
+        const full = join(this.repo.path, path)
+        const size = statSync(full).size
+        return size > MAX_IMAGE_BYTES ? { size } : side(readFileSync(full))
+      } catch {
+        return null
+      }
+    }
+    if (source.kind === 'worktree') return { mime, old: await blob(`:0:${path}`), new: onDisk() }
+    if (source.kind === 'index') {
+      const [before, after] = await Promise.all([blob(`HEAD:${old}`), blob(`:0:${path}`)])
+      return { mime, old: before, new: after }
+    }
+    const sha = this.safeRev(source.sha)
+    const parent = source.parent ? this.safeRev(source.parent) : `${sha}^`
+    const [before, after] = await Promise.all([blob(`${parent}:${old}`), blob(`${sha}:${path}`)])
+    return { mime, old: before, new: after }
   }
 
   /**
@@ -913,7 +1107,7 @@ export class RepoOps {
   async searchCommits(query: string): Promise<string[]> {
     const q = query.trim()
     if (!q) return []
-    const common = ['log', '--format=%H', ...EXCLUDE_OWN, '--exclude=refs/stash', '--all', '-n', '500']
+    const common = ['log', '--format=%H', ...SHOWN, ...((await this.headSha()) ? ['HEAD'] : []), '-n', '500']
     const [byMsg, byAuthor] = await Promise.all([
       this.git([...common, '-i', '--fixed-strings', `--grep=${q}`]),
       this.git([...common, '-i', '--fixed-strings', `--author=${q}`])
@@ -952,20 +1146,31 @@ export class RepoOps {
   }
 
   /**
-   * Discards changes by stashing them (untracked files included) and dropping the stash entry,
-   * so the user's stash list stays clean but the snapshot can be restored by undo.
+   * Discards changes by stashing them (untracked files included, and ignored ones with `ignored`) and dropping the
+   * stash entry, so the user's stash list stays clean but the snapshot can be restored by undo.
    * Returns the snapshot commit, or null if there was nothing to discard.
    */
-  async discard(paths: string[] | 'all', snapshotRef: string): Promise<string | null> {
+  async discard(paths: string[] | 'all', snapshotRef: string, ignored = false): Promise<string | null> {
     const before = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
-    const spec = paths === 'all' ? [] : ['--', ...this.safePaths(paths)]
-    await this.mut(['stash', 'push', '--include-untracked', '-q', '-m', 'Caboose: discarded changes', ...spec])
+    // Paths go on stdin: a long list would overflow the command line.
+    const spec = paths === 'all' ? [] : ['--pathspec-from-file=-', '--pathspec-file-nul']
+    const stdin = paths === 'all' ? undefined : this.safePaths(paths).join('\0')
+    await this.mut(['stash', 'push', ignored ? '--all' : '--include-untracked', '-q', '-m', 'Caboose: discarded changes', ...spec], { stdin })
     const after = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     if (!after || after === before) return null
     const sha = after.trim()
     await this.mut(['update-ref', snapshotRef, sha])
     await this.mut(['stash', 'drop', '-q', 'stash@{0}'])
     return sha
+  }
+
+  /** What cleaning up the working tree would remove: changed tracked files, untracked files, ignored files. */
+  async cleanPreview(): Promise<CleanPreview> {
+    const st = await this.status()
+    const tracked = st.changes.filter((c) => c.worktree !== '?').flatMap((c) => (c.origPath ? [c.path, c.origPath] : [c.path]))
+    const untracked = st.changes.filter((c) => c.worktree === '?').map((c) => c.path)
+    const ignored = (await this.git(['ls-files', '-z', '-o', '-i', '--exclude-standard', '--directory'])).split('\0').filter(Boolean)
+    return { tracked, untracked, ignored, conflicted: st.changes.some((c) => c.conflicted) }
   }
 
   async restoreSnapshot(sha: string): Promise<void> {
@@ -978,11 +1183,10 @@ export class RepoOps {
 
   // ---------- branches ----------
 
-  async createBranch(name: string, at: string, checkout: boolean): Promise<void> {
+  async createBranch(name: string, at: string): Promise<void> {
     await this.safeBranchName(name)
     this.safeRev(at)
     await this.mut(['branch', name, at])
-    if (checkout) await this.mut(['switch', name])
   }
 
   /** Accepts a local branch, a remote branch (creates a tracking branch), a tag or a sha (detached). */
@@ -1043,16 +1247,57 @@ export class RepoOps {
     await this.mut(['push', remote, '--delete', ...names.map((n) => `refs/heads/${n}`)], { opId, timeoutMs: 300_000 })
   }
 
-  async merge(source: string): Promise<OpResult> {
+  /** `noFf`: a merge commit even when the branch could just move forward. */
+  async merge(source: string, noFf = false): Promise<OpResult> {
     this.safeRev(source)
     try {
-      const out = await this.mut(['merge', '--no-edit', source])
+      const out = await this.mut(['merge', '--no-edit', ...(noFf ? ['--no-ff'] : []), source])
       if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
       return { result: 'ok' }
     } catch (e) {
       if ((await this.opState()).kind === 'merge') return { result: 'conflicts' }
       throw e
     }
+  }
+
+  /** The commits a merge of `source` into `target` brings in, oldest first, merges left out. */
+  async mergePreview(source: string, target: string): Promise<RebaseRow[]> {
+    return this.rangeRows(['--no-merges', `${this.safeRev(target)}..${this.safeRev(source)}`])
+  }
+
+  /**
+   * Squash merge: everything `source` brings in, as one new commit on the current branch (one parent, so the branch
+   * isn't marked merged). Conflicts put everything back: with no merge in progress, there'd be nothing to continue.
+   */
+  async squashMerge(source: string, message: string, noVerify: boolean): Promise<OpResult> {
+    this.safeRev(source)
+    if (!message.trim()) throw invalid('Add a summary first.')
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes before a squash merge.')
+    // A commit clears git's squash message; going back has to, or the next commit in a terminal would start with it.
+    const back = async (): Promise<void> => {
+      await this.mut(['reset', '-q', '--hard', 'HEAD'])
+      rmSync(join(await this.absGitDir(), 'SQUASH_MSG'), { force: true })
+    }
+    try {
+      const out = await this.mut(['merge', '--squash', source])
+      if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
+    } catch (e) {
+      if (!(await this.tryGit(['ls-files', '-u']))?.trim()) throw e
+      await back()
+      throw invalid(`${source} conflicts with this branch, so nothing changed. Merge it normally to sort the conflicts out, or rebase it first.`)
+    }
+    if ((await this.tryGit(['diff', '--cached', '--quiet'])) !== null) {
+      await back()
+      return { result: 'nothing', message: 'Those changes are already on this branch.' }
+    }
+    try {
+      await this.mut(['commit', '-F', '-', '--cleanup=strip', ...(noVerify ? ['--no-verify'] : [])], { stdin: message.trim() + '\n' })
+    } catch (e) {
+      await back()
+      throw e
+    }
+    return { result: 'ok' }
   }
 
   /** Rebases `branch` (named explicitly, so a checkout from elsewhere in between can't change which branch moves). */
@@ -1091,12 +1336,8 @@ export class RepoOps {
       if (/Already up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
       return { result: 'ok' }
     } catch (e) {
-      if (e instanceof GcFail && /would be overwritten by (merge|checkout)|cannot pull with rebase|commit your changes or stash them|You have unstaged changes/i.test(e.detail ?? '')) {
-        // git lists the files it would overwrite, one per line, indented with a tab.
-        const files = [...(e.detail ?? '').matchAll(/^\t(.+)$/gm)].map((m) => m[1].trim())
-        const what = files.length ? (files.length > 5 ? `${files.slice(0, 5).join(', ')} and ${files.length - 5} more` : files.join(', ')) : 'Some files'
-        return { result: 'dirty', message: `${what} ${files.length === 1 ? 'has' : 'have'} uncommitted changes the pull would overwrite.` }
-      }
+      const blocked = e instanceof GcFail ? blockingFiles(e.detail ?? '') : null
+      if (blocked) return { result: 'dirty', message: inTheWay(blocked, 'the pull') }
       const op = await this.opState()
       if (op.kind === 'merge' || op.kind === 'rebase') return { result: 'conflicts' }
       if (e instanceof GcFail && /no tracking information/i.test(e.detail ?? '')) {
@@ -1215,6 +1456,47 @@ export class RepoOps {
     return { path, binary, base, ours, theirs, merged, diff3, oursLabel, theirsLabel }
   }
 
+  /**
+   * The files a merge of `theirs` into `ours` (commits, or a tree for `ours`) would leave conflicted, and the tree it
+   * makes otherwise, from git merge-tree: nothing is written to the working tree or the index.
+   */
+  private async mergeTree(ours: string, theirs: string, base?: string): Promise<{ tree: string; files: string[] }> {
+    const args = ['merge-tree', '--write-tree', '--name-only', '--no-messages', ...(base ? [`--merge-base=${base}`] : []), ours, theirs]
+    const r = await this.runner.run({ cwd: this.repo.path, repoId: this.repo.id, args, okCodes: [1] })
+    const [tree, ...rest] = r.stdout.split('\n')
+    const end = rest.indexOf('')
+    return { tree: tree.trim(), files: r.code === 1 ? [...new Set(end < 0 ? rest : rest.slice(0, end))] : [] }
+  }
+
+  /** Commits a rebase of `branch` onto `onto` replays one by one, as far as the first that conflicts. */
+  private async rebaseForecast(branch: string, onto: string): Promise<ConflictForecast> {
+    const out = await this.git(['rev-list', '--reverse', '--no-merges', '--cherry-pick', '--right-only', `${onto}...${branch}`])
+    const shas = out.split('\n').filter(Boolean)
+    // A very long branch: what it would look like all at once.
+    if (shas.length > 200) return { files: (await this.mergeTree(onto, branch)).files }
+    let cur = onto
+    for (const [i, sha] of shas.entries()) {
+      const parent = (await this.tryGit(['rev-parse', '--verify', '-q', `${sha}^`]))?.trim()
+      if (!parent) continue
+      const r = await this.mergeTree(cur, sha, parent)
+      if (r.files.length) {
+        const summary = (await this.git(['log', '-1', '--format=%s', sha])).trim()
+        return { files: r.files, stopAt: { sha, summary, step: i + 1, total: shas.length } }
+      }
+      cur = r.tree
+    }
+    return { files: [] }
+  }
+
+  async forecast(p: { kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean }): Promise<ConflictForecast> {
+    if (p.kind === 'merge') return { files: (await this.mergeTree(this.safeRev(p.into), this.safeRev(p.from))).files }
+    if (p.kind === 'rebase') return this.rebaseForecast(this.safeRev(p.branch), this.safeRev(p.onto))
+    // As of the last fetch: the remote branch as it was then.
+    const up = (await this.tryGit(['rev-parse', '--verify', '-q', '@{upstream}']))?.trim()
+    if (!up) return { files: [] }
+    return p.rebase ? this.rebaseForecast('HEAD', up) : { files: (await this.mergeTree('HEAD', up)).files }
+  }
+
   /** Re-merges the three versions in a temp folder with the ancestor's lines kept (git merge-file --diff3). */
   private async diff3(base: string, ours: string, theirs: string): Promise<string | null> {
     const dir = mkdtempSync(join(tmpdir(), 'caboose-merge-'))
@@ -1253,6 +1535,60 @@ export class RepoOps {
     await this.mut(['add', '--', path])
   }
 
+  /**
+   * The file merged again from the same two sides, each other way git can (git merge-tree with a strategy option, in
+   * memory: the working tree and the index stay as they are). The markers keep the base's lines, diff3 style. For a
+   * rebase or a cherry-pick, the commit is merged against its parent, as git does.
+   */
+  async mergeAgain(rawPath: string): Promise<MergeAgain[]> {
+    const path = this.safePath(rawPath)
+    const op = await this.opState()
+    const incoming = { merge: 'MERGE_HEAD', rebase: 'REBASE_HEAD', cherry_pick: 'CHERRY_PICK_HEAD' }[op.kind as string]
+    const theirs = incoming ? (await this.tryGit(['rev-parse', '--verify', '-q', incoming]))?.trim() : undefined
+    if (!theirs) return []
+    const base = op.kind === 'merge' ? [] : [`--merge-base=${theirs}^`]
+    const options: Record<MergeAgainHow, string> = { 'ignore-space': 'ignore-space-change', patience: 'diff-algorithm=patience', histogram: 'diff-algorithm=histogram' }
+    const out: MergeAgain[] = []
+    for (const how of Object.keys(options) as MergeAgainHow[]) {
+      const args = ['-c', 'merge.conflictStyle=diff3', 'merge-tree', '--write-tree', '--no-messages', ...base, '-X', options[how], 'HEAD', theirs]
+      const r = await this.runner.run({ cwd: this.repo.path, repoId: this.repo.id, args, okCodes: [1] }).catch(() => null)
+      const tree = r?.stdout.split('\n')[0].trim()
+      const merged = tree ? await this.tryGit(['cat-file', '-p', `${tree}:${path}`]) : null
+      if (merged === null || merged.includes('\0')) continue
+      out.push({ how, merged, conflicts: (merged.match(/^<<<<<<<( |$)/gm) ?? []).length })
+    }
+    return out
+  }
+
+  /**
+   * Why each side has the lines it has: the commits on that side, since the two split, that changed them (git log
+   * -L). Ours is HEAD; theirs is what's being merged, replayed or picked. Null where it can't be told.
+   */
+  async conflictWhy(rawPath: string, ranges: Array<{ ours: [number, number] | null; theirs: [number, number] | null }>): Promise<Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }>> {
+    const path = this.safePath(rawPath)
+    const op = await this.opState()
+    const incoming = { merge: 'MERGE_HEAD', rebase: 'REBASE_HEAD', cherry_pick: 'CHERRY_PICK_HEAD' }[op.kind as string]
+    const theirs = incoming ? (await this.tryGit(['rev-parse', '--verify', '-q', incoming]))?.trim() : undefined
+    const base = theirs ? (await this.tryGit(['merge-base', 'HEAD', theirs]))?.trim() : undefined
+    if (!theirs || !base) return ranges.map(() => ({ ours: null, theirs: null }))
+    const log = async (tip: string, r: [number, number] | null): Promise<ConflictWhy | null> => {
+      if (!r) return null
+      const out = await this.tryGit(['log', '-s', '-n', '4', '--format=%H%x1f%s%x1f%an%x1f%at', `-L${r[0]},${r[1]}:${path}`, `${base}..${tip}`])
+      if (out === null) return null
+      const commits = out
+        .split('\n')
+        .filter((l) => l.includes('\x1f'))
+        .map((l) => {
+          const [sha, summary, author, at] = l.split('\x1f')
+          return { sha, summary, author, time: Number(at) }
+        })
+      return { commits: commits.slice(0, 3), more: commits.length > 3 }
+    }
+    const out: Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }> = []
+    for (const r of ranges) out.push({ ours: await log('HEAD', r.ours), theirs: await log(theirs, r.theirs) })
+    return out
+  }
+
   async continueOp(): Promise<OpResult> {
     const op = await this.opState()
     const st = await this.status()
@@ -1264,13 +1600,22 @@ export class RepoOps {
       revert: ['revert', '--continue']
     }
     if (op.kind === 'none') return { result: 'nothing' }
+    // Stopped to edit a commit: git would only say to resolve conflicts there aren't.
+    if (op.edit && (await this.tryGit(['diff', '--quiet'])) === null) {
+      throw invalid('Stage or discard your changes first. Staged changes go into this commit when you continue.')
+    }
     try {
       await this.mut(cmd[op.kind])
     } catch (e) {
-      if ((await this.opState()).kind !== 'none') return { result: 'conflicts' }
+      if ((await this.opState()).kind !== 'none') return this.stopped()
       throw e
     }
-    return (await this.opState()).kind === 'none' ? { result: 'ok' } : { result: 'conflicts' }
+    return (await this.opState()).kind === 'none' ? { result: 'ok' } : this.stopped()
+  }
+
+  /** A rebase that stopped again: at a commit to edit, or on conflicts. */
+  private async stopped(): Promise<OpResult> {
+    return (await this.opState()).edit ? { result: 'paused' } : { result: 'conflicts' }
   }
 
   async abortOp(): Promise<void> {
@@ -1290,23 +1635,23 @@ export class RepoOps {
     try {
       await this.mut(['rebase', '--skip'])
     } catch (e) {
-      if ((await this.opState()).kind !== 'none') return { result: 'conflicts' }
+      if ((await this.opState()).kind !== 'none') return this.stopped()
       throw e
     }
-    return (await this.opState()).kind === 'none' ? { result: 'ok' } : { result: 'conflicts' }
+    return (await this.opState()).kind === 'none' ? { result: 'ok' } : this.stopped()
   }
 
   // ---------- partial staging and ignore ----------
 
   /** Stages, unstages or discards one hunk or some of its lines. Returns the patch applied (for undo). */
-  async applyPartial(input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }): Promise<string> {
+  async applyPartial(input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean; context?: number }): Promise<string> {
     const path = this.safePath(input.path)
     if ((input.action === 'unstage') !== (input.source === 'index')) throw invalid('Stage and discard work on unstaged changes; unstage works on staged ones.')
     const untracked = input.source === 'worktree' && (await this.git(['ls-files', '-z', '--', path])).length === 0
     if (untracked && input.action === 'discard') throw invalid('This file is new, so there’s no earlier version to go back to. Discard the whole file instead.')
     // A new file needs an (empty) index entry before part of it can be staged.
     if (untracked) await this.mut(['add', '-N', '--', path])
-    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...(input.full ? ['--unified=1000000'] : [])]
+    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...unified(input.full, input.context)]
     const raw = await this.git(input.source === 'index' ? ['diff', '--cached', ...base, '--', path] : ['diff', ...base, '--', path])
     const undoIntent = async (): Promise<void> => {
       if (untracked) await this.mut(['rm', '--cached', '-q', '--', path])
@@ -1347,6 +1692,25 @@ export class RepoOps {
     else writeFileSync(file, text)
   }
 
+  /** .git/info/exclude: ignore rules for this copy of the repository only (shared by its worktrees), never committed. */
+  private async excludeFile(): Promise<string> {
+    return resolve(this.repo.path, (await this.git(['rev-parse', '--git-path', 'info/exclude'])).trim())
+  }
+
+  async readExclude(): Promise<string | null> {
+    const file = await this.excludeFile()
+    return existsSync(file) ? readFileSync(file, 'utf8') : null
+  }
+
+  async writeExclude(text: string | null): Promise<void> {
+    const file = await this.excludeFile()
+    if (text === null) rmSync(file, { force: true })
+    else {
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, text)
+    }
+  }
+
   /** Tracked files that the ignore rules cover (files someone added on purpose, or that are about to stop being tracked). */
   private async trackedIgnored(): Promise<Set<string>> {
     return new Set((await this.git(['ls-files', '-z', '-c', '-i', '--exclude-standard'])).split('\0').filter(Boolean))
@@ -1379,23 +1743,129 @@ export class RepoOps {
   /**
    * Adds lines to the root .gitignore, then stops tracking the tracked files they now cover: without that,
    * .gitignore doesn't apply to them. Returns what an undo needs to put both back.
+   * `local`: to .git/info/exclude instead, for this computer only. Tracked files stay tracked: untracking them
+   * would be committed, and reach everyone.
    */
-  async ignore(patterns: string[]): Promise<{ before: string | null; after: string; untracked: string[]; index: string }> {
+  async ignore(patterns: string[], local = false): Promise<{ before: string | null; after: string; untracked: string[]; index: string }> {
     const lines = patterns.map((p) => p.trim())
     if (!lines.length || lines.some((p) => !p || /[\r\n\0]/.test(p))) throw invalid('Enter one pattern per line.')
-    const before = this.readGitignore()
+    const name = local ? '.git/info/exclude' : '.gitignore'
+    const before = local ? await this.readExclude() : this.readGitignore()
     const cur = before ?? ''
     const have = new Set(cur.split(/\r?\n/))
     const add = [...new Set(lines)].filter((p) => !have.has(p))
-    if (!add.length) throw invalid(lines.length === 1 ? `.gitignore already has “${lines[0]}”.` : '.gitignore already has those lines.')
+    if (!add.length) throw invalid(lines.length === 1 ? `${name} already has “${lines[0]}”.` : `${name} already has those lines.`)
     const eol = cur.includes('\r\n') ? '\r\n' : '\n'
     const after = cur + (cur && !cur.endsWith('\n') ? eol : '') + add.map((p) => p + eol).join('')
+    if (local) {
+      await this.writeExclude(after)
+      return { before, after, untracked: [], index: '' }
+    }
     const already = await this.trackedIgnored()
     this.writeGitignore(after)
     const untracked = [...(await this.trackedIgnored())].filter((p) => !already.has(p))
     const index = await this.indexEntries(untracked)
     await this.untrack(untracked)
     return { before, after, untracked, index }
+  }
+
+  // ---------- patches ----------
+
+  /** These commits as one mailbox of patches (git format-patch), oldest first, each with its author and message. */
+  async formatPatch(shas: string[]): Promise<string> {
+    const revs = shas.map((s) => this.safeRev(s))
+    if ((await this.git(['rev-list', '--no-walk', '--merges', ...revs])).trim()) throw invalid('Merge commits can’t be made into patches.')
+    // One commit alone would mean "everything since it": -1 says just it.
+    return this.git(['format-patch', '--stdout', '--binary', ...(revs.length === 1 ? ['-1'] : ['--no-walk']), ...revs])
+  }
+
+  /** Uncommitted changes as a plain diff: the staged ones, the rest (new files included), or all of them. */
+  async changesPatch(scope: 'staged' | 'unstaged' | 'all', paths?: string[]): Promise<string> {
+    const spec = paths ? ['--', ...this.safePaths(paths).map((p) => `:(literal)${p}`)] : []
+    const base = ['--no-color', '--no-ext-diff', '--binary', '-M', '--src-prefix=a/', '--dst-prefix=b/']
+    // Before the first commit, "all" is everything against an empty tree.
+    const head = (await this.headSha()) ?? EMPTY_TREE
+    let out = await this.git(scope === 'staged' ? ['diff', '--cached', ...base, ...spec] : scope === 'all' ? ['diff', ...base, head, ...spec] : ['diff', ...base, ...spec])
+    if (scope !== 'staged') {
+      const untracked = (await this.git(['ls-files', '-z', '--others', '--exclude-standard', ...spec])).split('\0').filter(Boolean)
+      for (const p of untracked) out += await this.git(['diff', ...base, '--no-index', '--', '/dev/null', p], { okCodes: [1] })
+    }
+    if (!out.trim()) throw invalid('There are no changes there to make a patch of.')
+    return out
+  }
+
+  /**
+   * The patch's text. git writes its own lines (diff --git, From <sha>) with LF; when those end in CRLF, something
+   * on the way (a browser, an editor, the Windows clipboard) turned every line into CRLF, and it's turned back.
+   */
+  private patchText(source: PatchSource): string {
+    const text = source.kind === 'text' ? source.text : this.readPatchFile(source.path)
+    return /^(diff --git |From [0-9a-f]{40} )[^\n]*\r\n/m.test(text) ? text.replace(/\r\n/g, '\n') : text
+  }
+
+  private readPatchFile(path: string): string {
+    let size: number
+    try {
+      size = statSync(path).size
+    } catch {
+      throw invalid(`Couldn’t read ${path}.`)
+    }
+    if (size > MAX_PATCH_BYTES) throw invalid('That file is too big for a patch (over 50 MB).')
+    return readFileSync(path, 'utf8')
+  }
+
+  /** What a patch changes, and whether it applies to `target` as things are now. */
+  async patchCheck(source: PatchSource, target: PatchTarget): Promise<PatchPreview> {
+    const text = this.patchText(source)
+    const commits = parseMailbox(text)
+    const stat = await this.raw(['apply', '--numstat', '-'], { stdin: text })
+    const files = stat.code
+      ? []
+      : stat.stdout
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => {
+            const [a, r, ...p] = l.split('\t')
+            return { path: p.join('\t'), added: a === '-' ? null : Number(a), removed: r === '-' ? null : Number(r) }
+          })
+    if (!files.length) return { files, commits, problem: 'This isn’t a patch git can read.' }
+    if (target === 'commits') {
+      if (!commits.length) return { files, commits, problem: 'This patch has no commits in it, only changes. Apply it to your working files instead.' }
+      const op = await this.opState()
+      if (op.kind !== 'none') return { files, commits, problem: `Finish or abort the ${op.kind.replace('_', '-')} first.` }
+      if (await this.headSha()) {
+        const staged = await this.raw(['diff', '--cached', '--quiet'])
+        if (staged.code) return { files, commits, problem: 'Commit or unstage your staged changes first: the patch’s commits are made from a clean index.' }
+      }
+    }
+    const check = await this.raw(['apply', '--check', ...(target === 'worktree' ? [] : ['--index']), '-'], { stdin: text })
+    return { files, commits, problem: check.code ? patchProblem(check.stderr) : null }
+  }
+
+  /**
+   * Applies a patch: to the working files, to the staged changes and the files, or as new commits with their
+   * authors and messages (git am; stopped and undone if one doesn't apply). Returns the text applied, for undo.
+   */
+  async applyPatchSource(source: PatchSource, target: PatchTarget): Promise<{ text: string; commits: number }> {
+    const text = this.patchText(source)
+    const pre = await this.patchCheck({ kind: 'text', text }, target)
+    if (pre.problem) throw invalid(pre.problem)
+    if (target !== 'commits') {
+      await this.mut(['apply', ...(target === 'index' ? ['--index'] : []), '--whitespace=nowarn', '-'], { stdin: text })
+      return { text, commits: 0 }
+    }
+    // Without --keep-cr, git am drops every line's CR, which breaks patches to CRLF files (patchText fixed any CRLF mailbox).
+    const r = await this.raw(['am', '--quiet', '--whitespace=nowarn', '--keep-cr'], { stdin: text, mutating: true })
+    if (r.code) {
+      await this.tryGit(['am', '--abort'], { mutating: true })
+      throw invalid(patchProblem(`${r.stderr}\n${r.stdout}`))
+    }
+    return { text, commits: pre.commits.length }
+  }
+
+  /** Takes an applied patch back out (undo), or puts it in again (redo). */
+  async reapplyPatch(text: string, cached: boolean, reverse: boolean): Promise<void> {
+    await this.mut(['apply', ...(cached ? ['--index'] : []), ...(reverse ? ['--reverse'] : []), '--whitespace=nowarn', '-'], { stdin: text })
   }
 
   // ---------- stash ----------
@@ -1409,18 +1879,22 @@ export class RepoOps {
   }
 
   /**
-   * Stashes the uncommitted changes. With `paths`, only those files (staged and unstaged parts, new files too,
-   * since they were picked); `stagedOnly` and `includeUntracked` then don't apply.
+   * Stashes the uncommitted changes. With `paths`, only those files; the stash is then narrowed so it holds only
+   * them (see narrowStash).
    */
-  async stashSave(message: string, stagedOnly: boolean, includeUntracked: boolean, paths?: string[]): Promise<OpResult> {
+  async stashSave(message: string, stagedOnly: boolean, includeUntracked: boolean, paths?: string[], keepIndex = false): Promise<OpResult> {
     const before = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     const args = ['stash', 'push', '-q']
     if (message.trim()) args.push('-m', message.trim())
-    if (paths) args.push('--include-untracked', '--', ...this.safePaths(paths))
-    else if (stagedOnly) args.push('--staged')
-    else if (includeUntracked) args.push('--include-untracked')
-    // Picked paths are file names, not patterns: a "*" or ":" in one means only itself.
-    await this.mut(args, paths ? { extraEnv: { GIT_LITERAL_PATHSPECS: '1' } } : {})
+    if (stagedOnly) args.push('--staged')
+    else {
+      if (includeUntracked) args.push('--include-untracked')
+      if (keepIndex) args.push('--keep-index')
+    }
+    // Paths go on stdin: a long list would overflow the command line. They're file names, not patterns: a "*" or
+    // ":" in one means only itself.
+    if (paths) args.push('--pathspec-from-file=-', '--pathspec-file-nul')
+    await this.mut(args, paths ? { stdin: this.safePaths(paths).join('\0'), extraEnv: { GIT_LITERAL_PATHSPECS: '1' } } : undefined)
     const after = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     if (!after || after === before) return { result: 'nothing', message: paths ? 'Those files have no changes to stash.' : stagedOnly ? 'Nothing staged to stash.' : 'No changes to stash.' }
     if (paths) await this.narrowStash(after.trim(), this.safePaths(paths))
@@ -1470,14 +1944,15 @@ export class RepoOps {
    * the lines applied, in a temporary index. That needs the file's index to match HEAD, so a file with staged
    * changes, or a new one, is stashed whole instead.
    */
-  async stashLines(input: { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; message: string }): Promise<OpResult> {
+  async stashLines(input: { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; context?: number; message: string }): Promise<OpResult> {
     const path = this.safePath(input.path)
     const head = (await this.headSha()) ?? null
     if (!head) throw invalid('There’s no commit yet to stash against. Make the first commit, then stash.')
     if ((await this.git(['ls-files', '-z', '--', path])).length === 0) throw invalid('This file is new, so only all of it can be stashed. Stash the whole file from its menu.')
     if ((await this.tryGit(['diff', '--cached', '--quiet', '--no-ext-diff', 'HEAD', '--', path])) === null)
       throw invalid('Part of this file is staged, so only all of it can be stashed. Unstage it first, or stash the whole file from its menu.')
-    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...(input.full ? ['--unified=1000000'] : [])]
+    // The same diff the window shows, so the hunk and its lines are the ones picked.
+    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...unified(input.full, input.context)]
     const raw = await this.git(['diff', ...base, '--', path])
     if (/^(new file mode|rename from|Binary files|GIT binary patch)/m.test(raw)) throw invalid('New, renamed and binary files can only be stashed as a whole.')
     const forward = buildPartialPatch(raw, input.hunk, input.lines, false)
@@ -1512,6 +1987,15 @@ export class RepoOps {
       throw e
     }
     return { result: 'ok' }
+  }
+
+  /** git stash branch: a new branch at the commit the stash was made on, checked out, the stash applied and deleted. */
+  async stashBranch(sha: string, name: string): Promise<void> {
+    await this.safeBranchName(name)
+    const index = await this.stashIndex(sha)
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes first: the new branch starts from an older commit.')
+    await this.mut(['stash', 'branch', name, `stash@{${index}}`])
   }
 
   async stashApply(sha: string, pop: boolean): Promise<OpResult> {
@@ -1711,6 +2195,23 @@ export class RepoOps {
       })
   }
 
+  /** The rows with their size: files changed, lines added and removed. */
+  async withStats(rows: RebaseRow[]): Promise<RebaseRow[]> {
+    const stats = new Map<string, RebaseRow['stat']>()
+    // A few hundred commits at a time keep the command line short.
+    for (let i = 0; i < rows.length; i += 200) {
+      const out = await this.git(['log', '--no-walk=unsorted', '--format=%x1e%H', '--shortstat', ...rows.slice(i, i + 200).map((r) => r.sha), '--'])
+      for (const part of out.split(RS)) {
+        const [sha, ...rest] = part.trim().split('\n')
+        if (!sha) continue
+        const line = rest.join(' ')
+        const n = (re: RegExp): number => Number(re.exec(line)?.[1] ?? 0)
+        stats.set(sha.trim(), { files: n(/(\d+) files? changed/), adds: n(/(\d+) insertions?\(\+\)/), dels: n(/(\d+) deletions?\(-\)/) })
+      }
+    }
+    return rows.map((r) => ({ ...r, stat: stats.get(r.sha) ?? { files: 0, adds: 0, dels: 0 } }))
+  }
+
   /** Commits on `tip` that HEAD doesn't have, oldest first, merges left out. */
   async cherryPreview(tip: string): Promise<RebaseRow[]> {
     this.safeRev(tip)
@@ -1721,7 +2222,57 @@ export class RepoOps {
     this.safeRev(onto)
     const st = await this.status()
     const merges = Number((await this.git(['rev-list', '--count', '--min-parents=2', `${onto}..HEAD`])).trim())
-    return { branch: st.branch, onto, rows: await this.rangeRows(['--no-merges', `${onto}..HEAD`]), merges }
+    const rows = await this.rangeRows(['--no-merges', `${onto}..HEAD`])
+    const updateRefs = (await this.tryGit(['config', '--type=bool', 'rebase.updateRefs']))?.trim() === 'true'
+    return { branch: st.branch, onto, rows, merges, stacked: await this.stackedOn(rows, st.branch), updateRefs }
+  }
+
+  /**
+   * Local branches other than `current` whose tips are among `rows`: stacked on those commits. One checked out in
+   * another worktree is left out, as git leaves it.
+   */
+  private async stackedOn(rows: RebaseRow[], current: string | null): Promise<Array<{ name: string; sha: string }>> {
+    const shas = new Set(rows.map((r) => r.sha))
+    const out = await this.git(['for-each-ref', '--format=%(refname:short)%00%(objectname)%00%(worktreepath)', 'refs/heads'])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split('\0'))
+      .filter(([name, sha, wt]) => name !== current && shas.has(sha) && !wt)
+      .map(([name, sha]) => ({ name, sha }))
+  }
+
+  /** Local branch tips but `except`'s (the one being rebased), for undo to put back any a rebase moved along. */
+  async branchTips(except: string | null): Promise<Array<{ name: string; sha: string }>> {
+    const out = await this.git(['for-each-ref', '--format=%(refname:short)%00%(objectname)', 'refs/heads'])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.split('\0'))
+      .filter(([name]) => name !== except)
+      .map(([name, sha]) => ({ name, sha }))
+  }
+
+  /**
+   * Moves the commits after `from` (an older commit on the current branch) onto `onto`: git rebase --onto. With
+   * `updateRefs`, branches stacked on those commits move along.
+   */
+  async rebaseFrom(from: string, onto: string, updateRefs: boolean): Promise<OpResult> {
+    this.safeRev(from)
+    this.safeRev(onto)
+    const st = await this.status()
+    if (!st.branch) throw invalid('Check out a branch first: these commits move with it.')
+    if (st.op.kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if ((await this.tryGit(['merge-base', '--is-ancestor', from, 'HEAD'])) === null) throw invalid(`That commit isn’t on ${st.branch}.`)
+    if (await this.hasTrackedChanges()) throw invalid('Commit or stash your changes before rebasing.')
+    try {
+      const out = await this.mut(['rebase', updateRefs ? '--update-refs' : '--no-update-refs', '--onto', onto, from, st.branch])
+      if (/is up to date/i.test(out)) return { result: 'nothing', message: 'Already up to date.' }
+      return { result: 'ok' }
+    } catch (e) {
+      if ((await this.opState()).kind === 'rebase') return { result: 'conflicts' }
+      throw e
+    }
   }
 
   /**
@@ -1730,7 +2281,7 @@ export class RepoOps {
    * pre-commit and commit-msg on a reword) unless `noVerify`, as for a commit; one that refuses stops it all, and the
    * branch is put back as it was.
    */
-  async rebaseInteractive(onto: string, plan: Step[], tmpDir: string, noVerify = false, autostash = false): Promise<OpResult> {
+  async rebaseInteractive(onto: string, plan: Step[], tmpDir: string, noVerify = false, autostash = false, updateRefs = false): Promise<OpResult> {
     this.safeRev(onto)
     const preview = await this.rebasePreview(onto)
     if (preview.merges) throw invalid('This range has merge commits. Interactive rebase here would flatten them, so it isn’t offered.')
@@ -1744,10 +2295,10 @@ export class RepoOps {
     }
     if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
     if (!autostash && (await this.hasTrackedChanges())) throw invalid('Commit or stash your changes before rebasing.')
+    // Each stacked branch moves to wherever its commit ends up (our todo replaces git's, so its own update-ref lines too).
+    const stacked = updateRefs ? preview.stacked : []
     rmSync(tmpDir, { recursive: true, force: true })
     mkdirSync(tmpDir, { recursive: true })
-    // Paths for git's shell (sh), single-quoted.
-    const shq = (p: string): string => "'" + p.split('\\').join('/').split("'").join("'\\''") + "'"
     const lines: string[] = []
     plan.forEach((s, i) => {
       if (s.action === 'reword') {
@@ -1756,12 +2307,14 @@ export class RepoOps {
         lines.push(`pick ${s.sha}`, `exec git commit --amend --only -q ${noVerify ? '--no-verify ' : ''}--cleanup=strip -F ${shq(msgFile)}`)
       } else lines.push(`${s.action} ${s.sha}`)
       for (const c of s.exec ?? []) lines.push(`exec ${c}`)
+      for (const b of stacked) if (b.sha === s.sha) lines.push(`update-ref refs/heads/${b.name}`)
     })
     const todo = join(tmpDir, 'todo.txt')
     writeFileSync(todo, lines.join('\n') + '\n')
     try {
       await this.mut(['rebase', '-i', ...(noVerify ? ['--no-verify'] : []), ...(autostash ? ['--autostash'] : []), onto], { extraEnv: { GIT_SEQUENCE_EDITOR: `cp ${shq(todo)}`, GIT_EDITOR: 'true' }, timeoutMs: 300_000 })
-      return { result: 'ok' }
+      // An Edit step stops the rebase without failing.
+      return (await this.opState()).kind === 'rebase' ? { result: 'paused' } : { result: 'ok' }
     } catch (e) {
       const detail = e instanceof GcFail ? (e.detail ?? '') : ''
       // What the hook itself printed, without git's own lines around it.
@@ -1839,7 +2392,7 @@ export class RepoOps {
    * it out of the commit and `git apply` puts it back on top of what's left. Needs a clean working copy.
    */
   async patchOut(
-    input: { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null; action: 'remove' | 'split' | 'stage'; message?: string },
+    input: { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean; context?: number } | null; action: 'remove' | 'split' | 'stage'; message?: string },
     tmpDir: string
   ): Promise<OpResult & { staged?: boolean }> {
     const { full, onto } = await this.rewritable(input.sha)
@@ -1855,7 +2408,7 @@ export class RepoOps {
       patch = await this.git(['diff', ...base, '--binary', onto, full, ...specs])
       if (!patch.trim()) throw invalid(`This commit doesn’t change ${path}.`)
     } else {
-      const raw = await this.git(['diff', ...base, ...(input.part.full ? ['--unified=1000000'] : []), onto, full, ...specs])
+      const raw = await this.git(['diff', ...base, ...unified(input.part.full, input.part.context), onto, full, ...specs])
       if (/^(rename from|Binary files|GIT binary patch)/m.test(raw)) throw invalid('Renamed and binary files can only be taken out as a whole.')
       const built = buildPartialPatch(raw, input.part.hunk, input.part.lines, true)
       if (!built || built.header !== input.part.header) throw new GcFail('changed_outside', 'This commit changed since it was shown. Look at it again, then retry.')
@@ -1992,12 +2545,14 @@ export class RepoOps {
   /**
    * Which commits the lines being changed come from (lazygit's "find base commit for fixup"): the staged changes, or
    * the unstaged ones when nothing is staged, blamed in HEAD. Added lines with nothing removed say nothing; `addOnly`
-   * tells when some were left out for that.
+   * tells when some were left out for that. `summaries`: each commit's, from the blame, for when the graph hasn't
+   * loaded it yet.
    */
-  async fixupTarget(): Promise<{ shas: string[]; addOnly: boolean }> {
+  async fixupTarget(): Promise<{ shas: string[]; summaries: Record<string, string>; addOnly: boolean }> {
     const staged = await this.hasStaged()
     const raw = await this.git(['diff', ...(staged ? ['--cached'] : []), '-U0', '--no-color', '--no-ext-diff', '--no-renames', '--src-prefix=a/', '--dst-prefix=b/'])
     const shas = new Set<string>()
+    const summaries: Record<string, string> = {}
     let addOnly = false
     let path: string | null = null
     for (const line of raw.split('\n')) {
@@ -2013,12 +2568,15 @@ export class RepoOps {
         continue
       }
       const out = (await this.tryGit(['blame', '--porcelain', '-L', `${h[1]},+${count}`, 'HEAD', '--', path])) ?? ''
+      let sha = ''
       for (const l of out.split('\n')) {
         const m = /^([0-9a-f]{40}) \d+ \d+/.exec(l)
+        if (m) sha = m[1]
         if (m && !/^0+$/.test(m[1])) shas.add(m[1])
+        else if (sha && l.startsWith('summary ')) summaries[sha] = l.slice(8)
       }
     }
-    return { shas: [...shas], addOnly }
+    return { shas: [...shas], summaries, addOnly }
   }
 
   async reword(sha: string, message: string, tmpDir: string, noVerify = false): Promise<OpResult> {
@@ -2034,6 +2592,38 @@ export class RepoOps {
     const onto = await this.parentOf(full)
     if (!onto) throw invalid('The very first commit can’t be reworded here.')
     return this.rewrite(onto, tmpDir, (rows) => rows.map((r) => (r.sha === full ? { sha: r.sha, action: 'reword', message: m } : { sha: r.sha, action: 'pick' })), noVerify)
+  }
+
+  /**
+   * Changes who commits on the current branch are by: you as the author (as the next commit would be, dated now),
+   * someone else, or a co-author added to the message (not twice). The newest commit alone is amended, which leaves
+   * staged changes out; otherwise everything after the oldest one is replayed with an amend after each of them.
+   * Hooks don't run: the changes and the message stay as they were.
+   */
+  async setAuthorship(shas: string[], change: AuthorChange, tmpDir: string): Promise<OpResult> {
+    if (change.kind !== 'reset' && !PERSON.test(change.author.trim())) throw invalid('Write it as Name <email>.')
+    if (change.kind === 'reset' && (await this.tryGit(['var', 'GIT_AUTHOR_IDENT'])) === null) throw invalid('Set your name and email in Settings first.')
+    const amend = ['commit', '--amend', '--only', '--no-edit', '--no-verify', '--allow-empty', '-q']
+    if (change.kind === 'reset') amend.push('--reset-author')
+    else if (change.kind === 'set') amend.push(`--author=${change.author.trim()}`)
+    else {
+      amend.unshift('-c', 'trailer.ifexists=addIfDifferent')
+      amend.push('--trailer', `Co-authored-by: ${change.author.trim()}`)
+    }
+    const line = await this.headLine()
+    const full = await Promise.all(shas.map(async (s) => (await this.git(['rev-parse', '--verify', `${this.safeRev(s)}^{commit}`])).trim()))
+    const idx = full.map((s) => line.indexOf(s)).sort((a, b) => a - b)
+    if (!idx.length || idx[0] < 0) throw invalid('Only commits on the current branch’s own line of history can be changed.')
+    if ((await this.opState()).kind !== 'none') throw invalid('Finish or abort the operation in progress first.')
+    if (idx.length === 1 && idx[0] === line.length - 1) {
+      await this.mut(amend)
+      return { result: 'ok' }
+    }
+    const onto = await this.parentOf(line[idx[0]])
+    if (!onto) throw invalid('The very first commit can’t be changed here.')
+    const chosen = new Set(full)
+    const exec = `git ${amend.map(shq).join(' ')}`
+    return this.rewrite(onto, tmpDir, (rows) => rows.map((r) => ({ sha: r.sha, action: 'pick', ...(chosen.has(r.sha) ? { exec: [exec] } : {}) })))
   }
 
   /** Squashes commits that sit next to each other on the current branch into one, with the given message. */
@@ -2083,6 +2673,79 @@ export class RepoOps {
 
   // ---------- remotes ----------
 
+  /** The remote on github.com that pull requests come from: origin if it's there, else the first; its fetch or push URL. */
+  async githubRemote(): Promise<{ remote: string; repo: string } | null> {
+    // The URLs as written too, before url.<base>.insteadOf rewrites them: a mirror or a local copy can stand in for GitHub.
+    const written = new Map<string, string[]>()
+    for (const line of ((await this.tryGit(['config', '--get-regexp', '^remote\\..*\\.(url|pushurl)$'])) ?? '').split('\n')) {
+      const m = /^remote\.(.+)\.(?:url|pushurl) (.+)$/.exec(line.trim())
+      if (m) written.set(m[1], [...(written.get(m[1]) ?? []), m[2]])
+    }
+    const found = (await this.remotes())
+      .map((r) => ({ remote: r.name, repo: [r.fetchUrl, r.pushUrl, ...(written.get(r.name) ?? [])].map(githubRepo).find(Boolean) ?? null }))
+      .filter((r): r is { remote: string; repo: string } => !!r.repo)
+    return found.find((r) => r.remote === 'origin') ?? found[0] ?? null
+  }
+
+  /**
+   * A pull request's branch, fetched: from this repository, its remote branch (remote/head); from a fork, GitHub's
+   * refs/pull/<n>/head into a local pr/<n>. That one only moves forward: commits made on it here are never dropped.
+   */
+  async fetchPull(remote: string, n: number, head: string, fork: boolean): Promise<{ ref: string; fork: boolean }> {
+    this.safeRev(remote)
+    if (!fork) {
+      await this.safeBranchName(head)
+      await this.mut(['fetch', '--no-tags', remote, `+refs/heads/${head}:refs/remotes/${remote}/${head}`], { timeoutMs: 300_000 })
+      return { ref: `${remote}/${head}`, fork: false }
+    }
+    const local = `pr/${n}`
+    try {
+      if ((await this.status()).branch === local) {
+        await this.mut(['fetch', '--no-tags', remote, `refs/pull/${n}/head`], { timeoutMs: 300_000 })
+        await this.mut(['merge', '--ff-only', '-q', 'FETCH_HEAD'])
+      } else await this.mut(['fetch', '--no-tags', remote, `refs/pull/${n}/head:refs/heads/${local}`], { timeoutMs: 300_000 })
+    } catch (e) {
+      if (e instanceof GcFail && /non-fast-forward|rejected|Not possible to fast-forward/i.test(e.detail ?? '')) throw invalid(`${local} has commits of its own that the pull request doesn’t. Rename or delete ${local} to check the pull request out fresh.`)
+      throw e
+    }
+    return { ref: local, fork: true }
+  }
+
+  /**
+   * A new pull request for `branch` into `base`: with one commit, its message; with several, a title from the
+   * branch's name and their subjects as a list. Also whether the branch is on `remote` yet, and up to date there.
+   */
+  async pullDraft(remote: string, branch: string, base: string): Promise<PullDraft> {
+    this.safeRev(remote)
+    await this.safeBranchName(branch)
+    await this.safeBranchName(base)
+    const up = (await this.tryGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`]))?.trim() ?? ''
+    const there = up.startsWith(`${remote}/`) && !!(await this.tryGit(['rev-parse', '-q', '--verify', `refs/remotes/${up}`]))
+    const push = !there ? 'none' : Number((await this.git(['rev-list', '--count', `refs/remotes/${up}..refs/heads/${branch}`])).trim()) > 0 ? 'ahead' : 'pushed'
+    const baseRef = (await this.tryGit(['rev-parse', '-q', '--verify', `refs/remotes/${remote}/${base}`])) ? `refs/remotes/${remote}/${base}` : `refs/heads/${base}`
+    const log = (await this.tryGit(['log', '--no-merges', '--reverse', '--format=%s%x1f%b%x1e', `${baseRef}..refs/heads/${branch}`])) ?? ''
+    const commits = log
+      .split('\x1e')
+      .map((c) => c.trim())
+      .filter(Boolean)
+      .map((c) => {
+        const [subject, body = ''] = c.split('\x1f')
+        return { subject: subject.trim(), body: body.trim() }
+      })
+    const fromName = (): string => {
+      const words = (branch.split('/').pop() ?? branch).replace(/[-_]+/g, ' ').trim()
+      return words ? words[0].toUpperCase() + words.slice(1) : branch
+    }
+    return {
+      title: commits.length === 1 ? commits[0].subject : fromName(),
+      body: commits.length === 1 ? commits[0].body : commits.map((c) => `- ${c.subject}`).join('\n'),
+      commits: commits.length,
+      push,
+      head: there ? up.slice(remote.length + 1) : branch,
+      track: !up
+    }
+  }
+
   async remotes(): Promise<Remote[]> {
     const out = await this.git(['remote', '-v'])
     const m = new Map<string, Remote>()
@@ -2097,15 +2760,46 @@ export class RepoOps {
     return [...m.values()]
   }
 
-  async addRemote(name: string, url: string, pushUrl?: string): Promise<void> {
+  private async safeRemoteName(name: string): Promise<void> {
     if (!name || name.startsWith('-') || (await this.tryGit(['check-ref-format', `refs/remotes/${name}/x`])) === null) {
       throw invalid(`“${name}” isn’t a valid remote name.`)
     }
-    const u = url.trim()
-    if (!u || u.startsWith('-') || /[\s\0]/.test(u)) throw invalid('That doesn’t look like a repository URL or path.')
     if ((await this.remotes()).some((r) => r.name === name)) throw invalid(`There’s already a remote called “${name}”.`)
+  }
+
+  async addRemote(name: string, url: string, pushUrl?: string): Promise<void> {
+    await this.safeRemoteName(name)
+    const u = this.safeUrl(url)
     await this.mut(['remote', 'add', '--', name, u])
     if (pushUrl && pushUrl !== u) await this.mut(['remote', 'set-url', '--push', '--', name, pushUrl])
+  }
+
+  /**
+   * Renames a remote (git moves its remote branches, and the branches tracking them follow) and sets its URLs. A push
+   * URL that's the fetch URL, or empty, is dropped, so pushes go to the fetch URL. Returns the remote as it was.
+   */
+  async editRemote(name: string, next: Remote): Promise<Remote> {
+    const r = (await this.remotes()).find((x) => x.name === name)
+    if (!r) throw invalid(`No remote called “${name}”.`)
+    const url = this.safeUrl(next.fetchUrl)
+    const push = next.pushUrl.trim() ? this.safeUrl(next.pushUrl) : url
+    if (next.name !== name) {
+      await this.safeRemoteName(next.name)
+      await this.mut(['remote', 'rename', '--', name, next.name])
+    }
+    if (url !== r.fetchUrl) await this.mut(['remote', 'set-url', '--', next.name, url])
+    if (push !== url) {
+      if (push !== r.pushUrl || url !== r.fetchUrl) await this.mut(['remote', 'set-url', '--push', '--', next.name, push])
+    } else if ((await this.tryGit(['config', '--get-all', `remote.${next.name}.pushurl`])) !== null) {
+      await this.mut(['config', '--unset-all', `remote.${next.name}.pushurl`])
+    }
+    return r
+  }
+
+  /** Fetches one remote, pruning remote branches deleted there. */
+  async fetchRemote(name: string, opId: string, onProgress: RunOptions['onProgress']): Promise<void> {
+    if (!(await this.remotes()).some((r) => r.name === name)) throw invalid(`No remote called “${name}”.`)
+    await this.mut(['fetch', '--prune', '--progress', '--', name], { opId, onProgress, timeoutMs: 300_000 })
   }
 
   async removeRemote(name: string): Promise<Remote> {
@@ -2204,6 +2898,25 @@ export class RepoOps {
   }
 
   /** The commit message template from git config (commit.template), without comment lines. */
+  /**
+   * The last messages written on this branch, newest first, each once: to start a new one from. Merges and
+   * fixup! / squash! / amend! commits are left out.
+   */
+  async recentMessages(limit: number): Promise<{ summary: string; body: string }[]> {
+    const out = (await this.tryGit(['log', '--no-merges', '-n', String(limit * 3), '--format=%B%x00', 'HEAD'])) ?? ''
+    const seen = new Set<string>()
+    const list: { summary: string; body: string }[] = []
+    for (const raw of out.split('\0')) {
+      const message = raw.trim()
+      if (!message || seen.has(message) || /^(fixup|squash|amend)! /.test(message)) continue
+      seen.add(message)
+      const [summary, ...rest] = message.split('\n')
+      list.push({ summary, body: rest.join('\n').trim() })
+      if (list.length === limit) break
+    }
+    return list
+  }
+
   async commitTemplate(): Promise<string | null> {
     const file = (await this.tryGit(['config', '--type=path', '--get', 'commit.template']))?.trim()
     if (!file) return null
@@ -2314,6 +3027,25 @@ export class RepoOps {
     const st = await this.status()
     return st.changes.some((c) => c.worktree !== '?' || c.index !== '.')
   }
+}
+
+/**
+ * The files git says are in the way of a checkout, merge or pull: it lists them one per line, indented with a tab.
+ * `untracked` when they're files git doesn't track (git's "untracked working tree files would be overwritten").
+ */
+export function blockingFiles(detail: string): { what: string; count: number; untracked: boolean } | null {
+  if (!/would be overwritten by (merge|checkout)|cannot pull with rebase|commit your changes or stash them|You have unstaged changes/i.test(detail)) return null
+  const files = [...detail.matchAll(/^\t(.+)$/gm)].map((m) => m[1].trim())
+  const what = files.length ? (files.length > 5 ? `${files.slice(0, 5).join(', ')} and ${files.length - 5} more` : files.join(', ')) : 'Some files'
+  return { what, count: files.length, untracked: /untracked working tree files? would be/i.test(detail) }
+}
+
+/** "a.txt has uncommitted changes the pull would overwrite." or, for files git doesn't track, what to do with them. */
+export function inTheWay(b: { what: string; count: number; untracked: boolean }, by: string): string {
+  const one = b.count === 1
+  return b.untracked
+    ? `${b.what} ${one ? 'isn’t' : 'aren’t'} tracked, and ${by} would overwrite ${one ? 'it' : 'them'}. Move or delete ${one ? 'it' : 'them'} first.`
+    : `${b.what} ${one ? 'has' : 'have'} uncommitted changes ${by} would overwrite.`
 }
 
 const SIG: Record<string, CommitSignature['status']> = { G: 'good', U: 'untrusted', B: 'bad', E: 'unknown', X: 'expired', Y: 'expired', R: 'revoked' }

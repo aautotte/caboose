@@ -22,7 +22,10 @@ const toasts = () => h.page.getByRole('region', { name: /Notifications/ })
 const headSha = (): string => h.git(demo, 'rev-parse', 'HEAD')
 const subject = (rev = 'HEAD'): string => h.git(demo, 'log', '-1', '--format=%s', rev)
 async function dismissToasts(): Promise<void> {
-  for (const b of await toasts().getByRole('button', { name: 'Dismiss' }).all()) await b.click().catch(() => {})
+  // Always the first: dismissing one moves the others up, and they also leave on their own, so a list of them taken
+  // beforehand points at ones that are gone, and each click would wait out its timeout.
+  const dismiss = toasts().getByRole('button', { name: 'Dismiss' })
+  while (await dismiss.count()) await dismiss.first().click({ timeout: 1000 }).catch(() => {})
 }
 
 // ---------- F13 (uses the seed's uncommitted changes) ----------
@@ -30,7 +33,7 @@ async function dismissToasts(): Promise<void> {
 test('F13-E1 stash only the staged changes', async () => {
   await toolbar('Stash your changes').click()
   await dialog(h.page).getByLabel('Name (optional)').fill('staged only')
-  await dialog(h.page).getByRole('checkbox', { name: /Only staged changes/ }).click()
+  await dialog(h.page).getByRole('radio', { name: /^Staged only/ }).click()
   await dialog(h.page).getByRole('button', { name: 'Stash', exact: true }).click()
   // The seed already has a stash; wait for this one.
   await expect.poll(h.gitOr(demo, 'log', '-1', '-g', '--format=%gs', 'stash@{0}')).toContain('staged only')
@@ -61,22 +64,26 @@ test('F12-E1 a range with merge commits is refused, with the reason', async () =
   await toGraph(h.page)
 })
 
-test('F12-E2 the first kept commit can’t be squashed', async () => {
+test('F12-E2 the oldest kept commit can’t be squashed', async () => {
   await menu(h.page, commitRow(h.page, 'Update the changelog (4)'), /^Rewrite main after this commit/)
-  const rows = h.page.getByRole('list', { name: 'Commits, oldest first' }).getByRole('listitem')
-  await rows.nth(0).getByRole('radio', { name: 'Squash' }).click()
+  const rows = h.page.getByRole('list', { name: 'Commits, newest first' }).getByRole('listitem')
+  // Newest at the top: the oldest is the last row.
+  await rows.last().getByRole('radio', { name: 'Squash' }).click()
   await expect(h.page.getByRole('alert')).toContainText('can’t be squashed')
   await expect(h.page.getByRole('button', { name: 'Start rebase' })).toBeDisabled()
-  await rows.nth(0).getByRole('radio', { name: 'Keep' }).click()
+  await rows.last().getByRole('radio', { name: 'Keep' }).click()
 })
 
 test('F12-E3 a reorder that conflicts pauses the rebase; Abort puts the branch back', async () => {
   const before = headSha()
-  const rows = h.page.getByRole('list', { name: 'Commits, oldest first' }).getByRole('listitem')
-  // (5) and (6) both append to CHANGELOG.md: swapping them conflicts. Keyboard only: focus row 2, Alt+Up.
-  await rows.nth(1).focus()
+  const rows = h.page.getByRole('list', { name: 'Commits, newest first' }).getByRole('listitem')
+  // (5) and (6) both append to CHANGELOG.md: swapping them conflicts. Keyboard only: newest at the top, so (5) is the
+  // bottom row; focus it, Alt+Up.
+  const oldest = rows.last()
+  await expect(oldest).toContainText('Update the changelog (5)')
+  await oldest.focus()
   await h.page.keyboard.press('Alt+ArrowUp')
-  await expect(rows.nth(0)).toContainText('Update the changelog (6)')
+  await expect(rows.last()).toContainText('Update the changelog (6)')
   await h.page.getByRole('button', { name: 'Start rebase' }).click()
   await expect(h.page.getByRole('region', { name: 'Paused operation' })).toContainText('Rebasing')
   await h.page.getByRole('region', { name: 'Paused operation' }).getByRole('button', { name: 'Abort' }).click()
@@ -89,7 +96,7 @@ test('F12-E4 dropping a commit with the D key removes it; Undo brings it back', 
   const before = headSha()
   await toGraph(h.page)
   await menu(h.page, commitRow(h.page, 'Update the changelog (6)'), /^Rewrite main after this commit/)
-  const row = h.page.getByRole('list', { name: 'Commits, oldest first' }).getByRole('listitem').first()
+  const row = h.page.getByRole('list', { name: 'Commits, newest first' }).getByRole('listitem').first()
   await row.focus()
   await h.page.keyboard.press('d')
   await expect(row.getByRole('radio', { name: 'Drop' })).toHaveAttribute('aria-checked', 'true')

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Copy, KeyRound, X } from 'lucide-react'
-import type { GitConfigKey, GitIdentity, GpuState, PullMode, SshKey, SubmoduleMode, SubmoduleSettings } from '../../../shared/types'
-import { Button, Field, IconButton, Select, Switch, TextInput } from '@/ui'
+import { Copy, KeyRound, MoreHorizontal, X } from 'lucide-react'
+import type { AgentState, GitConfigKey, GitIdentity, GpuState, PullMode, SshHost, SshKey, SshTest, SubmoduleMode, SubmoduleSettings } from '../../../shared/types'
+import { Badge, Button, DropdownMenu, Field, IconButton, Select, Switch, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { setPrefs, useApp, type DiffMode } from '@/store'
+import { DIFF_CONTEXT_STEPS, setPrefs, useApp, type DiffMode } from '@/store'
 import * as act from '@/actions'
 import { toast } from '@/ui/toastBus'
+import { CommandsGroup, ShortcutsGroup } from './KeysPrefs'
+import { DEFAULT_RULES, ISSUE_KEY, hasRules, patternProblem, type CommitRules } from '@/lib/commitRules'
 
 const sections = [
   { id: 'general', label: 'General' },
@@ -16,8 +18,12 @@ const sections = [
   { id: 'identity', label: 'Your name and email' },
   { id: 'signing', label: 'Commit signing' },
   { id: 'tools', label: 'External tools' },
+  { id: 'commands', label: 'Your commands' },
+  { id: 'shortcuts', label: 'Keyboard shortcuts' },
   { id: 'ssh', label: 'SSH keys' },
+  { id: 'github', label: 'GitHub' },
   { id: 'repo', label: 'This repository' },
+  { id: 'commit-rules', label: 'Commit rules' },
   { id: 'submodules', label: 'Submodules' }
 ] as const
 
@@ -49,10 +55,12 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu],[data-radix-popper-content-wrapper]')) act.setCenter(repoId, { kind: 'graph' })
+      // Not while a menu is open, or while a shortcut is being recorded: there, Esc is for them.
+      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu],[data-radix-popper-content-wrapper],#prefs-shortcuts [aria-pressed=true]')) act.setCenter(repoId, { kind: 'graph' })
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // Ahead of the menus (capture): by the time Esc reaches the window, a menu it closed is already gone.
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [repoId])
 
   return (
@@ -127,6 +135,9 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
               <Row label="Push after committing" help="Ticks the box under the commit message by default.">
                 <Switch hideLabel label="Push after committing" checked={prefs.pushAfterCommit} onCheckedChange={(v) => setPrefs({ pushAfterCommit: v })} />
               </Row>
+              <Row label="Wrap the description when committing" help="At 72 characters, as git log shows best. Code, quotes, tables and lines like Co-authored-by stay as typed. Wrap, under the message, does it on the spot.">
+                <Switch hideLabel label="Wrap the description when committing" checked={prefs.wrapOnCommit} onCheckedChange={(v) => setPrefs({ wrapOnCommit: v })} />
+              </Row>
               <Row label="Stash new files" help="Include files Git isn’t tracking yet when you stash.">
                 <Switch hideLabel label="Stash new files" checked={prefs.stashUntracked} onCheckedChange={(v) => setPrefs({ stashUntracked: v })} />
               </Row>
@@ -146,6 +157,14 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
                     { value: 'inline', label: 'Whole file' },
                     { value: 'split', label: 'Side by side' }
                   ]}
+                />
+              </Row>
+              <Row label="Lines around changes" help="Unchanged lines shown above and below each change. With more, changes close together join into one block. Diff options, on a diff, changes it too.">
+                <Select
+                  label="Lines around changes"
+                  value={String(prefs.diffContext)}
+                  onValueChange={(v) => setPrefs({ diffContext: Number(v) })}
+                  options={DIFF_CONTEXT_STEPS.map((n) => ({ value: String(n), label: `${n}${n === 3 ? ' (default)' : ''}` }))}
                 />
               </Row>
               <Row label="Hide whitespace changes" help="Leaves out lines where only spaces, tabs or line endings changed. Lines can’t be staged from the diff while it’s on.">
@@ -182,13 +201,25 @@ export function PrefsView({ repoId }: { repoId: string }): React.JSX.Element {
               <ConfigRow label="Merge tool" configKey="merge.tool" help="Used by “Open in merge tool” on a conflicted file." />
             </Group>
 
+            <CommandsGroup />
+
+            <ShortcutsGroup />
+
             <Group id="ssh" title="SSH keys" note="Public keys in your .ssh folder. Add one to your Git host to push and pull over SSH.">
               <SshKeys />
+            </Group>
+
+            <Group id="github" title="GitHub" note="Signed in, Caboose lists each repository’s pull requests with their checks and reviews. The sign-in is this profile’s, kept encrypted on this computer. Pushing and fetching still use your git sign-in.">
+              <GitHubAccount />
             </Group>
 
             <Group id="repo" title={`This repository: ${tab?.alias ?? tab?.name ?? ''}`} note="Overrides your global name and email for commits in this repository only, for example a work address. Leave both empty to use the global ones.">
               <IdentityForm repoId={repoId} />
               <SigningForm repoId={repoId} />
+            </Group>
+
+            <Group id="commit-rules" title="Commit rules" note="For this repository, on this computer. The commit box checks your message as you type. Merge, revert and fixup! messages aren’t checked.">
+              <CommitRulesForm repoId={repoId} />
             </Group>
 
             {hasSubmodules ? <SubmoduleGroup repoId={repoId} /> : null}
@@ -310,7 +341,7 @@ function ProfileGroup(): React.JSX.Element {
   )
 }
 
-function Group({ id, title, note, children }: { id: string; title: string; note?: string; children: React.ReactNode }): React.JSX.Element {
+export function Group({ id, title, note, children }: { id: string; title: string; note?: string; children: React.ReactNode }): React.JSX.Element {
   return (
     <section id={`prefs-${id}`} aria-labelledby={`prefs-${id}-h`} className="scroll-mt-4">
       <h3 id={`prefs-${id}-h`} className="text-lg text-text">
@@ -502,6 +533,81 @@ function SigningForm({ repoId }: { repoId: string | undefined }): React.JSX.Elem
   )
 }
 
+/** This repository's commit message rules, which the commit box checks as you type. */
+function CommitRulesForm({ repoId }: { repoId: string }): React.JSX.Element {
+  const saved = useApp((s) => s.repos[repoId]?.commitRules ?? null)
+  const rules = saved ?? DEFAULT_RULES
+  const change = (patch: Partial<CommitRules>): void => void act.setCommitRules(repoId, { ...rules, ...patch })
+  return (
+    <>
+      <Row label="Summary length" help="The longest summary allowed. The count next to the summary turns red past it.">
+        <Select
+          label="Summary length"
+          value={String(rules.summaryMax ?? 0)}
+          onValueChange={(v) => change({ summaryMax: Number(v) || null })}
+          options={[0, 50, 72, 100].map((n) => ({ value: String(n), label: n ? `${n} characters` : 'No limit' }))}
+        />
+      </Row>
+      <Row label="Conventional Commits" help="The summary starts with a type, then a colon: “feat: add search”, “fix(api): time out after 5 s”, “feat!: …” for a breaking change.">
+        <Switch hideLabel label="Conventional Commits" checked={rules.conventional} onCheckedChange={(v) => change({ conventional: v })} />
+      </Row>
+      {rules.conventional ? (
+        <Row label="Types" help="The ones this repository uses, separated by commas.">
+          <TextSetting
+            label="Types"
+            mono
+            value={rules.types.join(', ')}
+            onSave={(v) => {
+              const types = v.split(/[\s,]+/).filter(Boolean)
+              if (!types.length || types.some((t) => !/^[a-z][a-z0-9-]*$/.test(t))) return toast({ tone: 'error', title: 'Types are lowercase words', body: 'Like feat, fix, docs, separated by commas.' })
+              change({ types: [...new Set(types)] })
+            }}
+          />
+        </Row>
+      ) : null}
+      <Row label="Mention an issue" help="The message has to name one, like ABC-123.">
+        <Select
+          label="Mention an issue"
+          value={rules.issue?.where ?? 'off'}
+          onValueChange={(v) => change({ issue: v === 'off' ? null : { pattern: rules.issue?.pattern ?? ISSUE_KEY, where: v as 'summary' | 'anywhere' } })}
+          options={[
+            { value: 'off', label: 'Not needed' },
+            { value: 'summary', label: 'In the summary' },
+            { value: 'anywhere', label: 'Anywhere in the message' }
+          ]}
+        />
+      </Row>
+      {rules.issue ? (
+        <Row label="Issue pattern" help="A regular expression. The usual one matches keys like ABC-123; #\d+ matches GitHub’s #42.">
+          <TextSetting
+            label="Issue pattern"
+            mono
+            value={rules.issue.pattern}
+            onSave={(v) => {
+              const problem = v ? patternProblem(v) : 'Write a pattern, or choose Not needed above.'
+              if (problem) return toast({ tone: 'error', title: 'Couldn’t use that pattern', body: problem })
+              change({ issue: { ...rules.issue!, pattern: v } })
+            }}
+          />
+        </Row>
+      ) : null}
+      {hasRules(saved) ? (
+        <Row label="When a message doesn’t fit" help="Warn says what’s wrong under the message. Hold back the commit also keeps the Commit button off until it fits.">
+          <Select
+            label="When a message doesn’t fit"
+            value={rules.enforce}
+            onValueChange={(v) => change({ enforce: v as CommitRules['enforce'] })}
+            options={[
+              { value: 'warn', label: 'Warn' },
+              { value: 'block', label: 'Hold back the commit' }
+            ]}
+          />
+        </Row>
+      ) : null}
+    </>
+  )
+}
+
 function CommandRow({ label, prefKey, repoId, target }: { label: string; prefKey: 'terminalCommand' | 'editorCommand'; repoId: string; target: 'terminal' | 'editor' }): React.JSX.Element {
   const value = useApp((s) => s.prefs[prefKey])
   return (
@@ -527,13 +633,54 @@ function ConfigRow({ label, configKey, help }: { label: string; configKey: GitCo
   )
 }
 
+function GitHubAccount(): React.JSX.Element {
+  const gh = useApp((s) => s.github)
+  useEffect(() => void act.loadGitHub(), [])
+  if (!gh) return <p className="py-3 text-sm text-muted">Loading…</p>
+  return (
+    <div className="flex flex-col gap-2 py-3">
+      {gh.user ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="status" aria-label="GitHub account" className="min-w-0 flex-1 text-base text-text">
+            Signed in as <span className="font-medium">{gh.user.login}</span>
+            {gh.user.name ? <span className="text-muted"> ({gh.user.name})</span> : null}
+          </p>
+          <Button size="sm" onClick={() => void act.signOutOfGitHub()}>
+            Sign out
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p role="status" aria-label="GitHub account" className="text-sm text-muted">
+            Not signed in. Signing in opens GitHub in your browser, where you authorize Caboose: no password or token to copy.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="primary" onClick={() => act.openDialog({ kind: 'githubSignIn' })}>
+              Sign in to GitHub…
+            </Button>
+            <Button size="sm" onClick={() => void act.useGhCliSignIn()}>
+              Use the gh CLI’s sign-in
+            </Button>
+          </div>
+        </>
+      )}
+      {!gh.canKeep ? <p className="text-sm text-warning">This computer can’t encrypt the sign-in, so it lasts until Caboose quits.</p> : null}
+    </div>
+  )
+}
+
 function SshKeys(): React.JSX.Element {
   const [keys, setKeys] = useState<SshKey[] | null>(null)
   const [name, setName] = useState('id_ed25519')
   const [label, setLabel] = useState('')
   const [pass, setPass] = useState('')
   const [busy, setBusy] = useState(false)
-  const load = useCallback(() => void call('ssh.keys', {}).then(setKeys).catch((e) => act.fail(e, 'Couldn’t read your SSH keys')), [])
+  const [agent, setAgent] = useState<AgentState | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)
+  const load = useCallback(() => {
+    void call('ssh.keys', {}).then(setKeys).catch((e) => act.fail(e, 'Couldn’t read your SSH keys'))
+    void call('ssh.agent', {}).then(setAgent).catch(() => setAgent({ running: false, keys: [] }))
+  }, [])
   useEffect(load, [load])
   const create = async (): Promise<void> => {
     setBusy(true)
@@ -549,8 +696,36 @@ function SshKeys(): React.JSX.Element {
       setBusy(false)
     }
   }
+  const addToAgent = async (name: string): Promise<void> => {
+    setAdding(name)
+    try {
+      await call('ssh.addToAgent', { name })
+      toast({ tone: 'success', title: `Added ${name} to ssh-agent`, body: 'Git can use it without asking for its passphrase until you sign out.' })
+      load()
+    } catch (err) {
+      act.fail(err, `Couldn’t add ${name} to ssh-agent`)
+    } finally {
+      setAdding(null)
+    }
+  }
+  const toHost = async (name: string, host: SshHost): Promise<void> => {
+    try {
+      await call('ssh.addToHost', { name, host })
+      toast({ tone: 'success', title: `Opened ${HOSTS[host].label}’s page for a new SSH key`, body: 'The public key is on your clipboard: paste it there and save.' })
+    } catch (err) {
+      act.fail(err, 'Couldn’t open the page')
+    }
+  }
+  const inAgent = (k: SshKey): boolean => !!agent?.keys.includes(k.publicKey.trim().split(/\s+/).slice(0, 2).join(' '))
   return (
     <div className="flex flex-col gap-3 py-3">
+      {agent ? (
+        <p role="status" aria-label="ssh-agent" className={cn('text-sm', agent.running ? 'text-muted' : 'text-warning')}>
+          {agent.running
+            ? `ssh-agent is running, with ${agent.keys.length === 1 ? '1 key' : `${agent.keys.length} keys`}. A key with a passphrase asks for it once there, not on every fetch.`
+            : 'ssh-agent isn’t running, so a key with a passphrase asks for it every time. Start the agent to add keys to it.'}
+        </p>
+      ) : null}
       {keys === null ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : keys.length === 0 ? (
@@ -566,12 +741,30 @@ function SshKeys(): React.JSX.Element {
                   {k.type} {k.comment}
                 </p>
               </div>
+              {inAgent(k) ? <Badge tone="success">In ssh-agent</Badge> : null}
               <Button
                 size="sm"
                 onClick={() => void navigator.clipboard.writeText(k.publicKey).then(() => toast({ tone: 'success', title: 'Public key copied' }))}
               >
                 <Copy size={14} aria-hidden /> Copy public key
               </Button>
+              <DropdownMenu
+                trigger={
+                  <IconButton size="sm" label={`More for ${k.name}`}>
+                    <MoreHorizontal size={14} />
+                  </IconButton>
+                }
+                items={[
+                  {
+                    type: 'item',
+                    label: inAgent(k) ? 'Already in ssh-agent' : adding === k.name ? 'Adding to ssh-agent…' : 'Add to ssh-agent',
+                    disabled: inAgent(k) || !agent?.running || adding !== null,
+                    onSelect: () => void addToAgent(k.name)
+                  },
+                  { type: 'separator' },
+                  ...(Object.keys(HOSTS) as SshHost[]).map((h) => ({ type: 'item' as const, label: `Add to ${HOSTS[h].label}…`, onSelect: () => void toHost(k.name, h) }))
+                ]}
+              />
             </li>
           ))}
         </ul>
@@ -592,6 +785,78 @@ function SshKeys(): React.JSX.Element {
           </Button>
         </div>
       </form>
+      <SshTestForm keys={keys ?? []} />
     </div>
+  )
+}
+
+const HOSTS: Record<SshHost, { label: string; host: string }> = {
+  github: { label: 'GitHub', host: 'github.com' },
+  gitlab: { label: 'GitLab', host: 'gitlab.com' },
+  bitbucket: { label: 'Bitbucket', host: 'bitbucket.org' },
+  azure: { label: 'Azure DevOps', host: 'ssh.dev.azure.com' }
+}
+
+/** ssh -T to a host: does it know one of your keys, and as whom. */
+function SshTestForm({ keys }: { keys: SshKey[] }): React.JSX.Element {
+  const [host, setHost] = useState<string>('github.com')
+  const [other, setOther] = useState('')
+  const [key, setKey] = useState('any')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<SshTest | null>(null)
+  const target = host === 'other' ? other.trim() : host
+  const test = async (): Promise<void> => {
+    if (!target || busy) return
+    setBusy(true)
+    setResult(null)
+    try {
+      setResult(await call('ssh.test', { target, key: key === 'any' ? null : key }))
+    } catch (err) {
+      act.fail(err, 'Couldn’t test the connection')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form
+      aria-label="Test an SSH connection"
+      className="flex flex-col gap-2 border-t border-border pt-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void test()
+      }}
+    >
+      <p className="text-base font-medium text-text">Test a connection</p>
+      <p className="text-sm text-muted">Signs in to a Git host over SSH, the way a fetch does, and says whose key it is. It never asks for anything: add a key with a passphrase to ssh-agent first.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-text">Host</span>
+          <Select label="Host" value={host} onValueChange={setHost} options={[...Object.values(HOSTS).map((h) => ({ value: h.host, label: h.host })), { value: 'other', label: 'Another host…' }]} />
+        </div>
+        {host === 'other' ? (
+          <div className="w-56">
+            <Field label="Other host">{(p) => <TextInput {...p} value={other} placeholder="git@git.example.com:2222" onChange={(e) => setOther(e.target.value)} />}</Field>
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-text">Key</span>
+          <Select label="Key" value={key} onValueChange={setKey} options={[{ value: 'any', label: 'Whichever ssh picks' }, ...keys.map((k) => ({ value: k.name, label: k.name }))]} />
+        </div>
+        <Button type="submit" loading={busy} disabled={!target}>
+          Test the connection
+        </Button>
+      </div>
+      {result ? (
+        <div role="status" aria-label="Connection test" className={cn('flex flex-col gap-1 text-sm', result.ok ? 'text-success' : 'text-danger')}>
+          <p>{result.message}</p>
+          {result.output ? (
+            <details className="text-muted">
+              <summary className="cursor-default">What ssh said</summary>
+              <pre className="mt-1 font-mono text-xs whitespace-pre-wrap">{result.output}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+    </form>
   )
 }

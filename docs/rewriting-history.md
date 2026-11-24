@@ -17,6 +17,20 @@ them, can't be edited this way.
 To change the last commit's message and content at once, use **Amend last commit** in the
 [commit box](staging-and-committing.md#committing).
 
+## Change who a commit is by
+
+**Author** in a commit's menu, or in the menu of several selected commits:
+
+- **Reset author to you**: you become the author, as for a new commit, dated now. Useful after committing with the
+  wrong name or email.
+- **Set author…**: someone else, written as `Name <email>` (the people already in the history are suggested). You
+  stay the committer.
+- **Add co-author…**: adds a `Co-authored-by: Name <email>` line to the message, which GitHub and GitLab show as a
+  second author. A commit that already has that line doesn't get it twice.
+
+The last commit alone is amended, so your other changes can stay in the folder. Anything older rewrites the commits
+after it too. Hooks don't run, since the changes stay the same.
+
 ## Move a commit
 
 **Move commit up** and **Move commit down** in a commit's menu swap it with its neighbour on the current branch.
@@ -27,8 +41,8 @@ Merge commits don't move.
 A commit that does two things, or a change that went into the wrong commit: take it out. Pick what:
 
 - **a whole file**: right-click it in the commit's file list, in the details panel;
-- **a block, or some lines**: open the file's diff from the commit, pick lines by clicking their numbers
-  (Shift-click for a range, or the arrow keys and Space), then use the button on the block's bar, **Take block out**
+- **a hunk, or some lines**: open the file's diff from the commit, pick lines by clicking their numbers
+  (Shift-click for a range, or the arrow keys and Space), then use the button on the hunk's bar, **Take hunk out**
   or **Take *n* lines out**.
 
 Then choose:
@@ -87,12 +101,44 @@ Each commit gets one of:
 | --- | --- | --- |
 | Keep | keep it as it is | P |
 | Reword | keep it, with a new message | R |
-| Squash | fold into the commit above, keeping both messages | S |
-| Fixup | fold into the commit above, dropping this message | F |
+| Edit | stop after this commit to change it, then continue | E |
+| Squash | fold into the commit below, keeping both messages | S |
+| Fixup | fold into the commit below, dropping this message | F |
 | Drop | leave it out | D |
 
-The oldest commit is at the top. Drag rows, or use **Alt+↑ / Alt+↓**, to reorder them. **Start rebase** runs it;
-if a step conflicts, Caboose stops and shows the [conflicts](conflicts.md).
+The newest commit is at the top, as in the graph; git replays them from the bottom up. Drag a row by any part of
+it, or use **Alt+↑ / Alt+↓**, to reorder them: the others make room as you drag, and **Esc** puts it back. Near
+the top or bottom of the list, it scrolls. **Start rebase** runs it; if a step conflicts, Caboose stops and shows
+the [conflicts](conflicts.md).
+
+### What's in each commit
+
+Under each message, a row says how big the commit is (**3 files +42 −7**) and when it was made. The commit on the
+row you click, or move to with **↑ / ↓**, shows in the details panel: its whole message, its author and the files
+it changes. Click a file there to see its diff under the list, without leaving the rebase. Drag the line between
+them to make it taller or shorter. **Esc** closes the diff, and closes the rebase after that. The commits can't be
+edited from the details panel while you plan: the plan would no longer match them. The same goes for
+[picking several commits](#cherry-pick) to copy.
+
+### Stop to edit a commit
+
+A commit marked **Edit** is replayed, then the rebase stops there. **Uncommitted changes** says which commit it
+stopped at. Change files and stage them: **Continue** adds what's staged to that commit. Tick **Amend last commit**
+to change its message too, or commit the changes on their own to make new commits after it. Unstaged changes have
+to be staged or discarded before you continue.
+
+### Branches stacked on these commits
+
+When another branch points at one of the commits being rewritten (a branch started from this one, say), a
+**Move *branch* along** box appears. Ticked, that branch moves to wherever its commit ends up, as `git rebase
+--update-refs` does. It starts ticked if `git config rebase.updateRefs` is on. Undo puts those branches back too.
+
+## Move commits onto another branch
+
+**Move *branch*'s commits after this onto…**, in the menu of an older commit on the checked-out branch, replays only
+the commits after that one onto the branch you pick (`git rebase --onto`). The commit itself and what came before
+it stay behind. It's for a branch started from another feature branch that has since been merged or rewritten:
+only your own commits move. Branches stacked on them can move along, as above.
 
 ## Cherry-pick
 

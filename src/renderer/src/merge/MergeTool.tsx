@@ -1,20 +1,39 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, Columns3, FileWarning, RotateCcw, X } from 'lucide-react'
-import type { ConflictFile } from '../../../shared/types'
-import { Badge, Button, Checkbox, EmptyState, IconButton, Tooltip } from '@/ui'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronUp, Columns3, FileWarning, Lightbulb, RotateCcw, Shuffle, X } from 'lucide-react'
+import type { ConflictFile, ConflictWhy, MergeAgain, MergeAgainHow } from '../../../shared/types'
+import { Badge, Button, Checkbox, DropdownMenu, EmptyState, IconButton, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
-import { splitPath } from '@/lib/format'
+import { plural, relativeTime, shortSha, splitPath } from '@/lib/format'
 import { toast } from '@/ui/toastBus'
 import { setPrefs, useApp } from '@/store'
 import * as act from '@/actions'
-import { baseLines, compose, eolOf, hasMarkers, parseConflicts, type Pick, type Segment } from './conflicts'
+import { baseLines, compose, eolOf, hasMarkers, parseConflicts, rangesIn, type Pick, type Segment } from './conflicts'
+import { suggest, wordMarks, type Marked, type Suggestion } from './suggest'
+
+const againName: Record<MergeAgainHow, string> = {
+  'ignore-space': 'Ignoring changes in spacing',
+  patience: 'With the patience algorithm',
+  histogram: 'With the histogram algorithm'
+}
+const againNote: Record<MergeAgainHow, string> = {
+  'ignore-space': 'Where one side only changed spacing, the other side’s lines win, spacing and all.',
+  patience: 'Lines are matched up differently, which can split, join or remove conflicts.',
+  histogram: 'Lines are matched up differently, which can split, join or remove conflicts.'
+}
 
 /** S10: pick lines from each side of every conflict, or edit the result directly, then save. */
 export function MergeTool({ repoId, path }: { repoId: string; path: string }): React.JSX.Element {
   const [file, setFile] = useState<ConflictFile | null>(null)
+  // The file merged again other ways, and the one in use instead of git's own merge.
+  const [again, setAgain] = useState<MergeAgain[]>([])
+  const [using, setUsing] = useState<MergeAgainHow | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [picks, setPicks] = useState<Pick[]>([])
+  // A conflict's own lines, from a suggestion that combines both sides.
+  const [custom, setCustom] = useState<Array<string[] | null>>([])
+  // For each conflict, the commits on each side that changed its lines.
+  const [why, setWhy] = useState<Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }>>([])
   const [output, setOutput] = useState('')
   const [edited, setEdited] = useState(false)
   const [current, setCurrent] = useState(0)
@@ -26,13 +45,21 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
     let live = true
     setFile(null)
     setError(null)
+    setAgain([])
+    setUsing(null)
     call('conflict.get', { repoId, path })
       .then((f) => {
         if (!live) return
         setFile(f)
         setPicks([])
+        setCustom([])
         setEdited(false)
         setCurrent(0)
+        if (!f.binary && f.ours !== null && f.theirs !== null) {
+          void call('conflict.again', { repoId, path })
+            .then((a) => live && setAgain(a))
+            .catch(() => undefined)
+        }
       })
       .catch((e: Error) => live && setError(e.message))
     return () => {
@@ -40,27 +67,107 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
     }
   }, [repoId, path])
 
-  const segs: Segment[] = useMemo(() => (file ? parseConflicts(file.merged) : []), [file])
+  // What's being resolved: git's own merge, or the file merged again another way (in the file's own line endings).
+  const alt = using ? again.find((a) => a.how === using) : undefined
+  const merged = !file ? '' : alt ? alt.merged.replace(/\r?\n/g, eolOf(file.merged)) : file.merged
+  const segs: Segment[] = useMemo(() => parseConflicts(merged), [merged])
   const conflicts = segs.filter((s) => s.kind === 'conflict').length
-  // No ancestor version at all (both sides added the file): every conflict started from nothing.
+  // No ancestor version at all (both sides added the file): every conflict started from nothing. Merged again, the
+  // markers carry the base's lines themselves.
   const bases = useMemo(
-    () => (!file ? [] : file.base === null ? segs.filter((s) => s.kind === 'conflict').map(() => []) : baseLines(segs, file.diff3)),
-    [file, segs]
+    () => (!file ? [] : file.base === null ? segs.filter((s) => s.kind === 'conflict').map(() => []) : baseLines(segs, alt ? null : file.diff3)),
+    [file, segs, alt]
   )
   const eol = file ? eolOf(file.merged) : '\n'
+  const switchTo = (how: MergeAgainHow | null): void => {
+    setUsing(how)
+    setPicks([])
+    setCustom([])
+    setEdited(false)
+    setCurrent(0)
+  }
+  const againMenu: MenuEntry[] = [
+    ...again.map(
+      (a): MenuEntry => ({
+        type: 'item',
+        label: `${againName[a.how]}: ${a.conflicts ? `${plural(a.conflicts, 'conflict')} left` : 'no conflicts left'}`,
+        icon: using === a.how ? <Check size={14} /> : <Shuffle size={14} />,
+        disabled: using === a.how,
+        onSelect: () => switchTo(a.how)
+      })
+    ),
+    ...(using ? ([{ type: 'separator' }, { type: 'item', label: 'Back to git’s own merge', icon: <RotateCcw size={14} />, onSelect: () => switchTo(null) }] as MenuEntry[]) : [])
+  ]
   const labels = { ours: file?.oursLabel ?? 'yours', theirs: file?.theirsLabel ?? 'theirs' }
+  // Per conflict: a suggested resolution when the answer is clear, and the words each side changed (from the base,
+  // or from the other side when the base isn't known).
+  const hints = useMemo(() => {
+    const out: Array<{ suggestion: Suggestion | null; ours: Marked[]; theirs: Marked[] }> = []
+    segs.forEach((s, i) => {
+      if (s.kind !== 'conflict') return
+      const base = bases[out.length] ?? null
+      const before = segs[i - 1]?.kind === 'common' ? (segs[i - 1] as Extract<Segment, { kind: 'common' }>).lines.at(-1) : undefined
+      const after = segs[i + 1]?.kind === 'common' ? (segs[i + 1] as Extract<Segment, { kind: 'common' }>).lines[0] : undefined
+      out.push({
+        suggestion: suggest(s.ours, s.theirs, base, before, after),
+        ours: wordMarks(s.ours, base ?? s.theirs),
+        theirs: wordMarks(s.theirs, base ?? s.ours)
+      })
+    })
+    return out
+  }, [segs, bases])
 
   useEffect(() => {
-    if (file && !edited) setOutput(compose(segs, picks, labels, eol))
+    setWhy([])
+    if (!file || file.binary || file.ours === null || file.theirs === null) return
+    let live = true
+    const parts = segs.filter((s): s is Extract<Segment, { kind: 'conflict' }> => s.kind === 'conflict')
+    const ours = rangesIn(file.ours, parts.map((s) => s.ours))
+    const theirs = rangesIn(file.theirs, parts.map((s) => s.theirs))
+    call('conflict.why', { repoId, path, ranges: parts.map((_, i) => ({ ours: ours[i], theirs: theirs[i] })) })
+      .then((w) => live && setWhy(w))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [repoId, path, file, segs])
+
+  useEffect(() => {
+    if (file && !edited) setOutput(compose(segs, picks, labels, eol, custom))
     // labels derive from file
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, segs, picks, edited, eol])
+  }, [file, segs, picks, custom, edited, eol])
 
-  const resolved = picks.filter((p) => p && p.length).length
+  const resolved = hints.filter((_, i) => custom[i] || picks[i]?.length).length
   const clean = !hasMarkers(output)
+  const inUse = (i: number): boolean => {
+    const s = hints[i]?.suggestion
+    if (!s) return false
+    return s.pick ? !custom[i] && (picks[i] ?? []).join() === s.pick.join() : (custom[i] ?? []).join('\n') === s.lines.join('\n')
+  }
+  const waiting = hints.map((h, i) => (h.suggestion && !inUse(i) ? i : -1)).filter((i) => i >= 0)
+  const applySuggestions = (which: number[]): void => {
+    setEdited(false)
+    setPicks((prev) => {
+      const next = [...prev]
+      for (const i of which) next[i] = hints[i].suggestion?.pick ?? []
+      return next
+    })
+    setCustom((prev) => {
+      const next = [...prev]
+      for (const i of which) next[i] = hints[i].suggestion?.pick ? null : (hints[i].suggestion?.lines ?? null)
+      return next
+    })
+  }
 
   const toggle = (idx: number, side: 'ours' | 'theirs', on: boolean): void => {
     setEdited(false)
+    setCustom((prev) => {
+      if (!prev[idx]) return prev
+      const next = [...prev]
+      next[idx] = null
+      return next
+    })
     setPicks((prev) => {
       const next = [...prev]
       const cur = next[idx] ?? []
@@ -156,7 +263,7 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
   const basePane = (): React.JSX.Element => {
     ci = -1
     return (
-      <div className="min-h-0 flex-1 overflow-auto font-mono text-code">
+      <div role="group" aria-label="Base lines" tabIndex={0} className="min-h-0 flex-1 overflow-auto font-mono text-code outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring">
         {segs.map((s, i) => {
           if (s.kind === 'common') {
             return (
@@ -184,7 +291,13 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
   const side = (which: 'ours' | 'theirs'): React.JSX.Element => {
     ci = -1
     return (
-      <div className="min-h-0 flex-1 overflow-auto font-mono text-code">
+      // Focusable, so the keyboard can scroll it.
+      <div
+        role="group"
+        aria-label={which === 'ours' ? 'Your lines' : 'Their lines'}
+        tabIndex={0}
+        className="min-h-0 flex-1 overflow-auto font-mono text-code outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring"
+      >
         {segs.map((s, i) => {
           if (s.kind === 'common') {
             return (
@@ -195,7 +308,10 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           }
           const idx = ++ci
           const lines = which === 'ours' ? s.ours : s.theirs
-          const checked = (picks[idx] ?? []).includes(which)
+          const marks = hints[idx]?.[which]
+          const changedIn = why[idx]?.[which]
+          const hint = hints[idx]?.suggestion
+          const checked = !custom[idx] && (picks[idx] ?? []).includes(which)
           const order = (picks[idx] ?? []).indexOf(which)
           return (
             <div
@@ -217,7 +333,45 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
                 />
                 <span className="ml-auto text-xs text-muted">Conflict {idx + 1}</span>
               </div>
-              <pre className="px-3 pb-1 whitespace-pre text-text">{lines.join('\n') || '(nothing)'}</pre>
+              {changedIn?.commits.length ? <ChangedIn repoId={repoId} why={changedIn} /> : null}
+              {which === 'ours' && hint ? (
+                <div className="flex items-start gap-2 px-3 pb-1 font-sans text-sm">
+                  <Lightbulb size={14} aria-hidden className="mt-0.5 shrink-0 text-accent-text" />
+                  <p className="min-w-0 flex-1">
+                    <span className="font-medium text-text">Suggested: {hint.what}.</span> <span className="text-muted">{hint.why}</span>
+                  </p>
+                  {inUse(idx) ? (
+                    <span className="flex shrink-0 items-center gap-1 text-xs text-success">
+                      <Check size={12} aria-hidden />
+                      In the result
+                    </span>
+                  ) : (
+                    <Button size="sm" aria-label={`Use suggestion for conflict ${idx + 1}`} onClick={() => applySuggestions([idx])}>
+                      Use suggestion
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+              <pre className="px-3 pb-1 whitespace-pre text-text">
+                {lines.length ? (
+                  (marks ?? lines.map((l): Marked => [[l, false]])).map((parts, k) => (
+                    <Fragment key={k}>
+                      {k ? '\n' : null}
+                      {parts.map(([t, changed], j) =>
+                        changed ? (
+                          <mark key={j} className={cn('rounded-xs text-text', which === 'ours' ? 'bg-conflict-ours-emph' : 'bg-conflict-theirs-emph')}>
+                            {t}
+                          </mark>
+                        ) : (
+                          t
+                        )
+                      )}
+                    </Fragment>
+                  ))
+                ) : (
+                  '(nothing)'
+                )}
+              </pre>
             </div>
           )
         })}
@@ -233,6 +387,13 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           {path}
         </h2>
         <Badge tone={clean ? 'success' : 'warning'}>{clean ? 'All conflicts resolved' : `${Math.min(current + 1, conflicts)} of ${conflicts} · ${resolved} picked`}</Badge>
+        {waiting.length ? (
+          <Tooltip content="Take the suggested resolution for every conflict that has one. The others stay for you to pick, and nothing is saved until you save.">
+            <Button size="sm" icon={<Lightbulb size={14} />} onClick={() => applySuggestions(waiting)}>
+              Use {plural(waiting.length, 'suggestion')}
+            </Button>
+          </Tooltip>
+        ) : null}
         <Tooltip content="Previous conflict">
           <IconButton label="Previous conflict" onClick={() => go(-1)} disabled={!conflicts}>
             <ChevronUp size={16} />
@@ -248,6 +409,17 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
             <Columns3 size={16} />
           </IconButton>
         </Tooltip>
+        {again.length ? (
+          <DropdownMenu
+            trigger={
+              <Button size="sm" variant="ghost">
+                Merge again
+                <ChevronDown size={14} aria-hidden />
+              </Button>
+            }
+            items={againMenu}
+          />
+        ) : null}
         <Tooltip content="Resolve this file in your own merge tool (Settings › External tools)">
           <Button size="sm" variant="ghost" onClick={() => act.externalTool(repoId, 'merge', path)}>
             Merge tool
@@ -272,6 +444,17 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
           </IconButton>
         </Tooltip>
       </header>
+      {using ? (
+        <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-2 border-b border-border bg-surface-sunken px-3 py-1 text-sm">
+          <Shuffle size={14} aria-hidden className="shrink-0 text-muted" />
+          <p className="min-w-0 flex-1">
+            <span className="text-text">Merged again: {againName[using].toLowerCase()}.</span> <span className="text-muted">{againNote[using]} Check the result before saving.</span>
+          </p>
+          <Button size="sm" variant="ghost" icon={<RotateCcw size={14} />} onClick={() => switchTo(null)}>
+            Back to git’s own merge
+          </Button>
+        </div>
+      ) : null}
       <div className="flex min-h-0 flex-1 divide-x divide-border">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <h3 className="shrink-0 border-b border-border bg-surface px-3 py-1 text-sm text-muted">
@@ -315,5 +498,28 @@ export function MergeTool({ repoId, path }: { repoId: string; path: string }): R
         />
       </div>
     </section>
+  )
+}
+
+/** "Changed in “Raise the timeout” · Ana, 2 days ago": the commits behind a side's lines. A click shows one in the details panel. */
+function ChangedIn({ repoId, why }: { repoId: string; why: ConflictWhy }): React.JSX.Element {
+  const [first, ...rest] = why.commits
+  return (
+    <p className="px-3 pb-1 font-sans text-xs text-muted">
+      Changed in{' '}
+      <button type="button" className="text-accent-text hover:underline" title={shortSha(first.sha)} onClick={() => act.select(repoId, first.sha)}>
+        {first.summary}
+      </button>{' '}
+      · {first.author}, {relativeTime(first.time)}
+      {rest.map((c) => (
+        <Fragment key={c.sha}>
+          {', '}
+          <button type="button" className="text-accent-text hover:underline" title={`${shortSha(c.sha)} · ${c.author}, ${relativeTime(c.time)}`} onClick={() => act.select(repoId, c.sha)}>
+            {c.summary}
+          </button>
+        </Fragment>
+      ))}
+      {why.more ? ' and earlier commits' : ''}
+    </p>
   )
 }

@@ -1,5 +1,5 @@
 import { DropdownMenu as RMenu } from 'radix-ui'
-import { GitMerge, GitPullRequestArrow, ListOrdered, Upload } from 'lucide-react'
+import { GitCommitVertical, GitMerge, GitPullRequestArrow, ListOrdered, Upload } from 'lucide-react'
 import * as act from '@/actions'
 
 export interface DropTarget {
@@ -33,6 +33,12 @@ export function DropMenu({ repoId, target, headBranch, onClose }: { repoId: stri
           </RMenu.Label>
           <RMenu.Item className={item} disabled={!destIsBranch} onSelect={() => void act.mergeInto(repoId, source, dest)}>
             <GitMerge size={14} className="text-muted" /> Merge {source} into {dest}
+          </RMenu.Item>
+          <RMenu.Item className={item} disabled={!destIsBranch} onSelect={() => void act.mergeInto(repoId, source, dest, true)}>
+            <GitMerge size={14} className="text-muted" /> Merge {source} into {dest} with a merge commit
+          </RMenu.Item>
+          <RMenu.Item className={item} disabled={!destIsBranch} onSelect={() => act.openDialog({ kind: 'squashMerge', repoId, source, target: dest })}>
+            <GitCommitVertical size={14} className="text-muted" /> Squash {source} into one commit on {dest}…
           </RMenu.Item>
           <RMenu.Item className={item} disabled={!srcIsLocal} onSelect={() => void act.rebaseOnto(repoId, source, dest)}>
             <GitPullRequestArrow size={14} className="text-muted" /> Rebase {source} onto {dest}

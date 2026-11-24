@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { z, type ZodType } from 'zod'
 import type { Api, Channel } from '../../shared/api'
 import type { ActivityEntry, ProgressEvent, Result, SubmoduleSettings } from '../../shared/types'
@@ -6,18 +6,20 @@ import type { Db } from '../db'
 import { uuid } from '../db'
 import { GcFail, invalid } from '../errors'
 import type { GitRunner } from '../git/runner'
-import { UNDO_REFS, samePath } from '../git/ops'
+import { UNDO_REFS, blockingFiles, inTheWay, samePath } from '../git/ops'
+import { flowConfig, flowFinish, flowInit, flowStart } from '../git/flow'
 import type { Repos } from '../repos'
 import type { UndoStack } from '../undo'
 import type { GraphLayouts, Prefs, RefView, RepoPrefs } from '../settings'
 import { defaultCommand, launch } from '../tools'
-import { generateKey, listKeys } from '../ssh'
+import { KEY_PAGES, addToAgent, agentState, generateKey, listKeys, testConnection } from '../ssh'
 import { shell } from 'electron'
 import type { Askpass } from '../askpass'
+import type { GitHub } from '../github'
 import type { Profiles } from '../profiles'
 import { gpuState, setGpu } from '../gpu'
 import { homedir } from 'node:os'
-import { existsSync } from 'node:fs'
+import { existsSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const repoId = z.string().uuid()
@@ -25,8 +27,18 @@ const R = { repoId }
 const paths = z.union([z.literal('all'), z.array(z.string().min(1)).min(1).max(5000)])
 const opId = z.string().min(8).max(64)
 const ref = z.string().min(1).max(400)
+/** Lines of context around each change in a diff; 0 would need `git apply --unidiff-zero` to stage from. */
+const context = z.number().int().min(1).max(1000).optional()
 /** A commit's short sha for labels; a branch or tag name as it is. */
 const shortRef = (r: string): string => (/^[0-9a-f]{40}$/.test(r) ? r.slice(0, 7) : r)
+/** Where a save dialog starts: Documents, or the home folder for an account that has none (Electron throws then). */
+function documentsFolder(): string {
+  try {
+    return app.getPath('documents')
+  } catch {
+    return app.getPath('home')
+  }
+}
 
 interface Deps {
   db: Db
@@ -45,9 +57,10 @@ interface Deps {
   forgetRepoConfig: () => void
   tmpDir: string
   isTrustedSender: (e: IpcMainInvokeEvent) => boolean
+  github: GitHub
 }
 
-export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig, tmpDir, isTrustedSender }: Deps): void {
+export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs, layouts, askpass, profiles, switchProfile, forgetRepoConfig, tmpDir, isTrustedSender, github }: Deps): void {
   const progress = (id: string) => (phase: string, percent?: number, done?: number, total?: number) => {
     const ev: ProgressEvent = { opId: id, phase, percent, done, total }
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send('op:progress', ev)
@@ -90,9 +103,9 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   async function undoable<T>(id: string, type: Parameters<UndoStack['record']>[1], label: string, run: () => Promise<T>, finished: (r: T) => boolean = () => true): Promise<T> {
     return exclusive(id, async () => {
       const o = ops(id)
-      const before = await undo.snapshot(o)
+      const before = type === 'rebase' ? await undo.snapshotTips(o) : await undo.snapshot(o)
       const result = await run()
-      if (finished(result)) undo.record(id, type, label, before, await undo.snapshot(o))
+      if (finished(result)) undo.record(id, type, label, ...(await undo.settle(o, before)))
       else undo.setPending(id, type, label, before)
       return result
     })
@@ -143,7 +156,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('op.cancel', z.object({ opId }), ({ opId }) => (runner.cancel(opId), null))
 
   // ---------- reads ----------
-  handle('graph.load', z.object({ ...R, skip: z.number().int().min(0), limit: z.number().int().min(1).max(5000) }), async ({ repoId, skip, limit }) => {
+  const filter = z.object({ path: z.string().min(1).max(4096).optional(), author: z.string().min(1).max(200).optional() })
+  handle('graph.load', z.object({ ...R, skip: z.number().int().min(0), limit: z.number().int().min(1).max(5000), filter: filter.optional() }), async ({ repoId, skip, limit, filter }) => {
     const o = ops(repoId)
     const refs = await o.refs()
     refView.prune(repoId, new Set(refs.refs.map((r) => r.name)))
@@ -154,7 +168,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     }
     const view = refView.get(repoId)
     if (repoPrefs.getAll(repoId)['graph.focusHead'] === true) view.soloed = [...new Set([...view.soloed, ...(await o.focusRefs(refs))])]
-    return o.graph(skip, limit, refs.stashes, view)
+    return o.graph(skip, limit, refs.stashes, view, filter)
   })
   handle('refs.list', z.object(R), ({ repoId }) => ops(repoId).refs())
   handle('status.get', z.object(R), ({ repoId }) => ops(repoId).status())
@@ -270,13 +284,28 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       force: z.boolean().optional(),
       full: z.boolean().optional(),
       ignoreWs: z.boolean().optional(),
+      context,
       source: z.discriminatedUnion('kind', [
         z.object({ kind: z.literal('worktree') }),
         z.object({ kind: z.literal('index') }),
         z.object({ kind: z.literal('commit'), sha: ref, parent: ref.optional() })
       ])
     }),
-    ({ repoId, path, oldPath, source, force, full, ignoreWs }) => ops(repoId).diff(path, oldPath, source, force, full, ignoreWs)
+    ({ repoId, path, oldPath, source, force, full, ignoreWs, context }) => ops(repoId).diff(path, oldPath, source, force, full, ignoreWs, context)
+  )
+  handle(
+    'diff.images',
+    z.object({
+      ...R,
+      path: z.string().min(1).max(4096),
+      oldPath: z.string().max(4096).optional(),
+      source: z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('worktree') }),
+        z.object({ kind: z.literal('index') }),
+        z.object({ kind: z.literal('commit'), sha: ref, parent: ref.optional() })
+      ])
+    }),
+    ({ repoId, path, oldPath, source }) => ops(repoId).images(path, oldPath, source)
   )
   handle('search.commits', z.object({ ...R, query: z.string().max(400) }), ({ repoId, query }) => ops(repoId).searchCommits(query))
 
@@ -304,12 +333,56 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     return null
   }))
 
+  handle('worktree.cleanPreview', z.object(R), ({ repoId }) => ops(repoId).cleanPreview())
+  handle('worktree.clean', z.object({ ...R, tracked: z.boolean(), untracked: z.boolean(), ignored: z.boolean() }), ({ repoId, tracked, untracked, ignored }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const p = await o.cleanPreview()
+      if (p.conflicted) throw invalid('Resolve the conflicts, or abort, first: conflicted files can’t be put aside for undo.')
+      const picked = [...(tracked ? p.tracked : []), ...(untracked ? p.untracked : []), ...(ignored ? p.ignored : [])]
+      if (!picked.length) return { removed: 0 }
+      // Everything of each kind there is: the whole working tree, as git sees it.
+      const all = tracked && untracked && (ignored || !p.ignored.length)
+      const before = await undo.snapshot(o)
+      const stash = await o.discard(all ? 'all' : picked, `${UNDO_REFS}${uuid()}`, ignored)
+      if (stash) {
+        const label = tracked ? (untracked || ignored ? 'Discard everything' : 'Discard changes to tracked files') : ignored ? (untracked ? 'Remove untracked and ignored files' : 'Remove ignored files') : 'Remove untracked files'
+        undo.record(repoId, 'discard', label, { ...before, stash, paths: all ? 'all' : picked, ignored }, before)
+      }
+      return { removed: stash ? picked.length : 0 }
+    })
+  )
+
   // ---------- branches ----------
   handle('branch.create', z.object({ ...R, name: z.string().min(1).max(255), at: ref, checkout: z.boolean() }), async ({ repoId, name, at, checkout }) => {
-    if (checkout) await undoable(repoId, 'checkout', `Switch to ${name}`, () => ops(repoId).createBranch(name, at, true))
-    else await ops(repoId).createBranch(name, at, false)
-    return null
+    await exclusive(repoId, () => ops(repoId).createBranch(name, at))
+    if (!checkout) return { switched: false, reason: null }
+    // The branch is made either way. A switch that's refused (changes in the way, say) says why, rather than
+    // failing the whole thing: the branch is there, and the switch can be undone on its own.
+    try {
+      await undoable(repoId, 'checkout', `Switch to ${name}`, () => ops(repoId).checkout(name))
+      return { switched: true, reason: null }
+    } catch (e) {
+      if (!(e instanceof GcFail)) throw e
+      const blocked = blockingFiles(e.detail ?? '')
+      return { switched: false, reason: blocked ? inTheWay(blocked, 'switching') : e.message }
+    }
   })
+  // ---------- Git Flow ----------
+  const flowKind = z.enum(['feature', 'release', 'hotfix'])
+  const branchPart = z.string().min(1).max(200)
+  const flowSettings = z.object({
+    production: branchPart,
+    develop: branchPart,
+    prefix: z.object({ feature: branchPart, release: branchPart, hotfix: branchPart }),
+    tagPrefix: z.string().max(100)
+  })
+  handle('flow.config', z.object(R), ({ repoId }) => flowConfig(ops(repoId)))
+  handle('flow.init', z.object({ ...R, config: flowSettings }), ({ repoId, config }) => exclusive(repoId, async () => (await flowInit(ops(repoId), config), null)))
+  handle('flow.start', z.object({ ...R, kind: flowKind, name: branchPart }), ({ repoId, kind, name }) => exclusive(repoId, () => flowStart(ops(repoId), kind, name)))
+  handle('flow.finish', z.object({ ...R, kind: flowKind, name: branchPart, keep: z.boolean(), tagMessage: z.string().max(100_000) }), ({ repoId, kind, name, keep, tagMessage }) =>
+    exclusive(repoId, () => flowFinish(ops(repoId), kind, name, { keep, tagMessage }))
+  )
   handle('bisect.start', z.object({ ...R, bad: ref, good: ref }), ({ repoId, bad, good }) => exclusive(repoId, async () => (await ops(repoId).bisectStart(bad, good), null)))
   handle('bisect.mark', z.object({ ...R, verdict: z.enum(['good', 'bad', 'skip']), sha: ref.optional() }), ({ repoId, verdict, sha }) =>
     exclusive(repoId, async () => (await ops(repoId).bisectMark(verdict, sha), null))
@@ -318,8 +391,11 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('bisect.run', z.object({ ...R, command: z.string().min(1).max(4000), opId }), ({ repoId, command, opId: id }) =>
     exclusive(repoId, async () => (await ops(repoId).bisectRun(command, id, output(id)), null))
   )
+  handle('custom.run', z.object({ ...R, args: z.array(z.string().max(4000)).min(1).max(200), opId }), ({ repoId, args, opId: id }) =>
+    exclusive(repoId, () => ops(repoId).runCustom(args, id, output(id)))
+  )
   handle('branch.checkout', z.object({ ...R, ref, opId: opId.optional() }), async ({ repoId, ref, opId: id }) => {
-    await undoable(repoId, 'checkout', `Switch to ${ref}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
+    await undoable(repoId, 'checkout', `Switch to ${shortRef(ref)}`, () => ops(repoId).checkout(ref, id, id ? progress(id) : undefined))
     return null
   })
   handle('branch.rename', z.object({ ...R, name: ref, newName: z.string().min(1).max(255) }), ({ repoId, name, newName }) => exclusive(repoId, async () => (await ops(repoId).renameBranch(name, newName), null)))
@@ -366,9 +442,13 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('branch.deleteRemoteMany', z.object({ ...R, remote: ref, names: z.array(ref).min(1).max(1000), opId }), ({ repoId, remote, names, opId }) =>
     exclusive(repoId, async () => (await ops(repoId).deleteRemoteBranches(remote, names, opId), null))
   )
-  handle('branch.merge', z.object({ ...R, source: ref }), ({ repoId, source }) =>
-    undoable(repoId, 'merge', `Merge ${source}`, () => ops(repoId).merge(source), (r) => r.result !== 'conflicts')
+  handle('branch.merge', z.object({ ...R, source: ref, noFf: z.boolean().optional() }), ({ repoId, source, noFf }) =>
+    undoable(repoId, 'merge', `Merge ${source}`, () => ops(repoId).merge(source, noFf), (r) => r.result !== 'conflicts')
   )
+  handle('branch.squashMerge', z.object({ ...R, source: ref, message: z.string().min(1).max(100_000), noVerify: z.boolean() }), ({ repoId, source, message, noVerify }) =>
+    undoable(repoId, 'merge', `Squash merge ${source}`, () => ops(repoId).squashMerge(source, message, noVerify))
+  )
+  handle('merge.preview', z.object({ ...R, source: ref, target: ref }), ({ repoId, source, target }) => ops(repoId).mergePreview(source, target))
   handle('branch.rebase', z.object({ ...R, onto: ref, branch: ref.optional() }), ({ repoId, onto, branch }) =>
     undoable(repoId, 'rebase', `Rebase ${branch ? `${branch} ` : ''}onto ${onto}`, () => ops(repoId).rebase(onto, branch), (r) => r.result !== 'conflicts')
   )
@@ -391,8 +471,27 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
 
   // ---------- conflicts ----------
   handle('conflict.get', z.object({ ...R, path: z.string().min(1).max(4096) }), ({ repoId, path }) => ops(repoId).conflict(path))
+  handle(
+    'conflict.forecast',
+    z.intersection(
+      z.object(R),
+      z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('merge'), into: ref, from: ref }),
+        z.object({ kind: z.literal('rebase'), branch: ref, onto: ref }),
+        z.object({ kind: z.literal('pull'), rebase: z.boolean() })
+      ])
+    ),
+    ({ repoId, ...p }) => ops(repoId).forecast(p)
+  )
   handle('conflict.resolve', z.object({ ...R, path: z.string().min(1).max(4096), content: z.string().max(50_000_000) }), ({ repoId, path, content }) => exclusive(repoId, async () => (await ops(repoId).resolve(path, content), null)))
   handle('conflict.take', z.object({ ...R, path: z.string().min(1).max(4096), side: z.enum(['ours', 'theirs']) }), ({ repoId, path, side }) => exclusive(repoId, async () => (await ops(repoId).take(path, side), null)))
+  handle('conflict.again', z.object({ ...R, path: z.string().min(1).max(4096) }), ({ repoId, path }) => ops(repoId).mergeAgain(path))
+  const lineRange = z.tuple([z.number().int().min(1), z.number().int().min(1)]).refine(([a, b]) => b >= a).nullable()
+  handle(
+    'conflict.why',
+    z.object({ ...R, path: z.string().min(1).max(4096), ranges: z.array(z.object({ ours: lineRange, theirs: lineRange })).max(200) }),
+    ({ repoId, path, ranges }) => ops(repoId).conflictWhy(path, ranges)
+  )
   handle('op.continue', z.object(R), ({ repoId }) => exclusive(repoId, async () => {
     const o = ops(repoId)
     const r = await o.continueOp()
@@ -450,7 +549,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       header: z.string().max(10_000),
       lines: z.array(z.number().int().min(0)).max(1_000_000).nullable(),
       action: z.enum(['stage', 'unstage', 'discard']),
-      full: z.boolean()
+      full: z.boolean(),
+      context
     }),
     (input) =>
       exclusive(input.repoId, async () => {
@@ -463,13 +563,70 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
         return null
       })
   )
-  handle('ignore.add', z.object({ ...R, patterns: z.array(z.string().min(1).max(4096)).min(1).max(5000), label: z.string().min(1).max(300) }), ({ repoId, patterns, label }) =>
+  handle(
+    'ignore.add',
+    z.object({ ...R, patterns: z.array(z.string().min(1).max(4096)).min(1).max(5000), label: z.string().min(1).max(300), local: z.boolean().optional() }),
+    ({ repoId, patterns, label, local }) =>
+      exclusive(repoId, async () => {
+        const o = ops(repoId)
+        const head = await undo.snapshot(o)
+        const r = await o.ignore(patterns, local)
+        if (local) undo.record(repoId, 'ignore', `Ignore ${label} on this computer`, { ...head, exclude: r.before }, { ...head, exclude: r.after })
+        else undo.record(repoId, 'ignore', `Ignore ${label}`, { ...head, gitignore: r.before, index: r.index }, { ...head, gitignore: r.after, paths: r.untracked })
+        return { untracked: r.untracked.length }
+      })
+  )
+
+  // ---------- patches ----------
+  const patchSource = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('text'), text: z.string().min(1).max(50_000_000) }),
+    z.object({ kind: z.literal('file'), path: z.string().min(1).max(4096) })
+  ])
+  const patchTarget = z.enum(['worktree', 'index', 'commits'])
+  const commitShas = z.array(z.string().regex(/^[0-9a-f]{40}$/)).min(1).max(1000)
+  // Copied here, not in the page: Chromium turns every LF into CRLF on the Windows clipboard, which breaks patches.
+  handle('patch.copyCommits', z.object({ ...R, shas: commitShas }), async ({ repoId, shas }) => (clipboard.writeText(await ops(repoId).formatPatch(shas)), null))
+  handle('patch.copyChanges', z.object({ ...R, scope: z.enum(['staged', 'unstaged', 'all']), paths: z.array(filePath).min(1).max(100_000).optional() }), async ({ repoId, scope, paths }) =>
+    (clipboard.writeText(await ops(repoId).changesPatch(scope, paths)), null)
+  )
+  handle('patch.save', z.object({ ...R, shas: commitShas, name: z.string().min(1).max(200) }), async ({ repoId, shas, name }, e) => {
+    const text = await ops(repoId).formatPatch(shas)
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const res = await dialog.showSaveDialog(win!, {
+      title: shas.length === 1 ? 'Save the patch' : `Save ${shas.length} commits as a patch`,
+      defaultPath: join(documentsFolder(), name.replace(/[\\/:*?"<>|]+/g, '-')),
+      filters: [{ name: 'Patches', extensions: ['patch', 'diff'] }]
+    })
+    if (res.canceled || !res.filePath) return null
+    try {
+      writeFileSync(res.filePath, text)
+    } catch (err) {
+      throw invalid(`Couldn’t write ${res.filePath}: ${(err as NodeJS.ErrnoException).code === 'ENOENT' ? 'that folder doesn’t exist' : (err as Error).message}.`)
+    }
+    return res.filePath
+  })
+  handle('patch.pickFile', z.object({}), async (_, e) => {
+    const win = BrowserWindow.fromWebContents(e.sender)
+    const res = await dialog.showOpenDialog(win!, { title: 'Open a patch', properties: ['openFile'], filters: [{ name: 'Patches', extensions: ['patch', 'diff', 'eml', 'mbox'] }, { name: 'All files', extensions: ['*'] }] })
+    return res.canceled ? null : (res.filePaths[0] ?? null)
+  })
+  // Read here rather than pasted into a text box, which would turn CRLF line endings into LF.
+  handle('patch.clipboard', z.object({}), async () => {
+    const text = await clipboard.readText()
+    return text.length <= 50_000_000 && /^(diff --git |From [0-9a-f]{40} |--- )/m.test(text) ? text : null
+  })
+  handle('patch.check', z.object({ ...R, source: patchSource, target: patchTarget }), ({ repoId, source, target }) => ops(repoId).patchCheck(source, target))
+  handle('patch.apply', z.object({ ...R, source: patchSource, target: patchTarget }), ({ repoId, source, target }) =>
     exclusive(repoId, async () => {
       const o = ops(repoId)
-      const head = await undo.snapshot(o)
-      const r = await o.ignore(patterns)
-      undo.record(repoId, 'ignore', `Ignore ${label}`, { ...head, gitignore: r.before, index: r.index }, { ...head, gitignore: r.after, paths: r.untracked })
-      return { untracked: r.untracked.length }
+      const before = await undo.snapshot(o)
+      const r = await o.applyPatchSource(source, target)
+      if (target === 'commits') undo.record(repoId, 'cherry_pick', r.commits === 1 ? 'Apply a commit from a patch' : `Apply ${r.commits} commits from a patch`, ...(await undo.settle(o, before)))
+      else {
+        const side = { ...before, patch: r.text, cached: target === 'index' }
+        undo.record(repoId, 'patch_apply', target === 'index' ? 'Apply a patch to the staged changes' : 'Apply a patch', side, side)
+      }
+      return { commits: r.commits }
     })
   )
 
@@ -477,8 +634,8 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   const sha = z.string().regex(/^[0-9a-f]{40}$/)
   handle(
     'stash.save',
-    z.object({ ...R, message: z.string().max(2000), stagedOnly: z.boolean(), includeUntracked: z.boolean(), paths: z.array(filePath).min(1).max(5000).optional() }),
-    ({ repoId, message, stagedOnly, includeUntracked, paths }) => exclusive(repoId, () => ops(repoId).stashSave(message, stagedOnly, includeUntracked, paths))
+    z.object({ ...R, message: z.string().max(2000), stagedOnly: z.boolean(), includeUntracked: z.boolean(), paths: z.array(filePath).min(1).max(100_000).optional(), keepIndex: z.boolean().optional() }),
+    ({ repoId, message, stagedOnly, includeUntracked, paths, keepIndex }) => exclusive(repoId, () => ops(repoId).stashSave(message, stagedOnly, includeUntracked, paths, keepIndex))
   )
   handle(
     'stash.lines',
@@ -489,10 +646,12 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       header: z.string().max(10_000),
       lines: z.array(z.number().int().min(0)).max(1_000_000).nullable(),
       full: z.boolean(),
+      context,
       message: z.string().max(2000)
     }),
     ({ repoId, ...input }) => exclusive(repoId, () => ops(repoId).stashLines(input))
   )
+  handle('stash.branch', z.object({ ...R, sha, name: z.string().min(1).max(255) }), ({ repoId, sha, name }) => exclusive(repoId, async () => (await ops(repoId).stashBranch(sha, name), null)))
   handle('stash.apply', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, false)))
   handle('stash.pop', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, true)))
   handle('stash.dropMany', z.object({ ...R, shas: z.array(sha).min(1).max(1000) }), ({ repoId, shas }) =>
@@ -595,27 +754,34 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       (r) => r.result !== 'conflicts'
     )
   )
-  handle('cherry.preview', z.object({ ...R, tip: ref }), ({ repoId, tip }) => ops(repoId).cherryPreview(tip))
-  handle('rebase.preview', z.object({ ...R, onto: ref }), ({ repoId, onto }) => ops(repoId).rebasePreview(onto))
+  handle('cherry.preview', z.object({ ...R, tip: ref }), async ({ repoId, tip }) => ops(repoId).withStats(await ops(repoId).cherryPreview(tip)))
+  handle('rebase.preview', z.object({ ...R, onto: ref }), async ({ repoId, onto }) => {
+    const p = await ops(repoId).rebasePreview(onto)
+    return { ...p, rows: await ops(repoId).withStats(p.rows) }
+  })
   handle(
     'rebase.interactive',
     z.object({
       ...R,
       onto: ref,
       plan: z
-        .array(z.object({ sha, action: z.enum(['pick', 'reword', 'squash', 'fixup', 'drop']), message: z.string().max(100_000).optional() }))
+        .array(z.object({ sha, action: z.enum(['pick', 'reword', 'edit', 'squash', 'fixup', 'drop']), message: z.string().max(100_000).optional() }))
         .min(1)
         .max(5000),
-      noVerify: z.boolean().optional()
+      noVerify: z.boolean().optional(),
+      updateRefs: z.boolean().optional()
     }),
-    ({ repoId, onto, plan, noVerify }) =>
+    ({ repoId, onto, plan, noVerify, updateRefs }) =>
       undoable(
         repoId,
         'rebase',
         `Interactive rebase onto ${onto.slice(0, 12)}`,
-        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`), noVerify),
-        (r) => r.result !== 'conflicts'
+        () => ops(repoId).rebaseInteractive(onto, plan, join(tmpDir, `rebase-${repoId}`), noVerify, false, updateRefs),
+        (r) => r.result !== 'conflicts' && r.result !== 'paused'
       )
+  )
+  handle('rebase.onto', z.object({ ...R, from: sha, onto: ref, updateRefs: z.boolean() }), ({ repoId, from, onto, updateRefs }) =>
+    undoable(repoId, 'rebase', `Move the commits after ${from.slice(0, 7)} onto ${shortRef(onto)}`, () => ops(repoId).rebaseFrom(from, onto, updateRefs), (r) => r.result !== 'conflicts')
   )
 
   // ---------- remotes ----------
@@ -623,6 +789,20 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('remote.add', z.object({ ...R, name: z.string().min(1).max(255), url: z.string().min(1).max(2048) }), ({ repoId, name, url }) =>
     exclusive(repoId, async () => (await ops(repoId).addRemote(name, url), null))
   )
+  const url = z.string().max(2048)
+  handle('remote.edit', z.object({ ...R, name: ref, next: z.object({ name: z.string().min(1).max(255), fetchUrl: url.min(1), pushUrl: url }) }), ({ repoId, name, next }) =>
+    exclusive(repoId, async () => {
+      const o = ops(repoId)
+      const head = await undo.snapshot(o)
+      const was = await o.editRemote(name, next)
+      const now = (await o.remotes()).find((r) => r.name === next.name)!
+      if (now.name !== was.name || now.fetchUrl !== was.fetchUrl || now.pushUrl !== was.pushUrl) {
+        undo.record(repoId, 'remote_edit', now.name !== name ? `Rename remote ${name} to ${now.name}` : `Change the URL of ${name}`, { ...head, remote: was }, { ...head, remote: now })
+      }
+      return null
+    })
+  )
+  handle('remote.fetchOne', z.object({ ...R, name: ref, opId }), async ({ repoId, name, opId }) => (await ops(repoId).fetchRemote(name, opId, progress(opId)), null))
   handle('remote.remove', z.object({ ...R, name: ref }), ({ repoId, name }) =>
     exclusive(repoId, async () => {
       const o = ops(repoId)
@@ -773,6 +953,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     return null
   })
   handle('commit.template', z.object(R), ({ repoId }) => ops(repoId).commitTemplate())
+  handle('commit.recentMessages', z.object({ ...R, limit: z.number().int().min(1).max(100) }), ({ repoId, limit }) => ops(repoId).recentMessages(limit))
 
   // ---------- other programs ----------
   const webTarget = z.discriminatedUnion('kind', [
@@ -810,11 +991,76 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('file.externalDiff', z.object({ ...R, path: z.string().min(1).max(4096), staged: z.boolean() }), async ({ repoId, path, staged }) => (await ops(repoId).externalTool('diff', path, staged), null))
   handle('file.externalMerge', z.object({ ...R, path: z.string().min(1).max(4096) }), async ({ repoId, path }) => (await ops(repoId).externalTool('merge', path, false), null))
 
+  // ---------- GitHub ----------
+  const none = z.object({})
+  handle('github.status', none, async () => {
+    // A token GitHub turned down is forgotten; without a network, the sign-in stays as it was.
+    let user = null
+    try {
+      user = await github.user()
+    } catch {
+      user = github.token() ? { login: '…', name: null } : null
+    }
+    return { user, canKeep: github.canKeep() }
+  })
+  handle('github.startSignIn', none, () => github.startSignIn())
+  handle('github.openDevicePage', z.object({ userCode: z.string().min(1).max(40), verificationUri: z.string().url().max(500) }), async ({ userCode, verificationUri }) => {
+    if (!/^https:\/\/github\.com\//.test(verificationUri) && process.env.GC_TEST !== '1') throw invalid('That isn’t GitHub’s page.')
+    clipboard.writeText(userCode)
+    await shell.openExternal(verificationUri)
+    return null
+  })
+  handle('github.waitSignIn', none, () => github.waitForApproval())
+  handle('github.cancelSignIn', none, () => (github.cancelSignIn(), null))
+  handle('github.useGhCli', none, () => github.useGhCli())
+  handle('github.signOut', none, () => (github.signOut(), null))
+  handle('github.pulls', z.object(R), async ({ repoId }) => {
+    const gh = await ops(repoId).githubRemote()
+    if (!gh) return { state: 'none' as const }
+    if (!github.token()) return { state: 'signedOut' as const, repo: gh.repo }
+    try {
+      return { state: 'ok' as const, repo: gh.repo, remote: gh.remote, ...(await github.pulls(gh.repo)) }
+    } catch (e) {
+      return { state: 'error' as const, repo: gh.repo, message: (e as Error).message }
+    }
+  })
+  handle('github.pullDraft', z.object({ ...R, branch: ref, base: ref }), async ({ repoId, branch, base }) => {
+    const gh = await ops(repoId).githubRemote()
+    if (!gh) throw invalid('This repository has no remote on GitHub.')
+    return ops(repoId).pullDraft(gh.remote, branch, base)
+  })
+  handle(
+    'github.createPull',
+    z.object({ ...R, head: ref, base: ref, title: z.string().trim().min(1).max(256), body: z.string().max(65_000), draft: z.boolean() }),
+    async ({ repoId, head, base, title, body, draft }) => {
+      const gh = await ops(repoId).githubRemote()
+      if (!gh) throw invalid('This repository has no remote on GitHub.')
+      return github.createPull(gh.repo, { head, base, title, body, draft })
+    }
+  )
+  handle('github.fetchPull', z.object({ ...R, number: z.number().int().min(1), head: z.string().min(1).max(255), fromFork: z.boolean() }), async ({ repoId, number, head, fromFork }) => {
+    const gh = await ops(repoId).githubRemote()
+    if (!gh) throw invalid('This repository has no remote on GitHub.')
+    return exclusive(repoId, () => ops(repoId).fetchPull(gh.remote, number, head, fromFork))
+  })
+
   // ---------- SSH keys (Settings) ----------
   handle('ssh.keys', z.object({}), () => listKeys())
   handle('ssh.generate', z.object({ name: z.string().min(1).max(64), comment: z.string().max(200), passphrase: z.string().max(200) }), ({ name, comment, passphrase }) =>
     generateKey(name, comment, passphrase)
   )
+  const keyName = z.string().min(1).max(64)
+  handle('ssh.agent', z.object({}), () => agentState())
+  handle('ssh.addToAgent', z.object({ name: keyName }), async ({ name }) => (await addToAgent(name, askpass.env()), null))
+  handle('ssh.test', z.object({ target: z.string().min(1).max(300), key: keyName.nullable() }), ({ target, key }) => testConnection(target, key))
+  // Copies the public key and opens the host's page for a new key, where it's pasted.
+  handle('ssh.addToHost', z.object({ name: keyName, host: z.enum(['github', 'gitlab', 'bitbucket', 'azure']) }), async ({ name, host }) => {
+    const key = listKeys().find((k) => k.name === name)
+    if (!key) throw invalid('That key isn’t in your .ssh folder any more.')
+    clipboard.writeText(key.publicKey)
+    await shell.openExternal(KEY_PAGES[host])
+    return KEY_PAGES[host]
+  })
 
   // ---------- hide / show many; rewriting the current branch ----------
   handle(
@@ -826,6 +1072,17 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
   handle('history.reword', z.object({ ...R, sha, message: z.string().min(1).max(100_000), noVerify: z.boolean().optional() }), ({ repoId, sha, message, noVerify }) =>
     undoable(repoId, 'rebase', `Edit message of ${sha.slice(0, 7)}`, () => ops(repoId).reword(sha, message, rewriteDir(repoId), noVerify), (r) => r.result !== 'conflicts')
   )
+  const person = z.string().min(3).max(500)
+  const authorChange = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('reset') }),
+    z.object({ kind: z.literal('set'), author: person }),
+    z.object({ kind: z.literal('coAuthor'), author: person })
+  ])
+  handle('history.authorship', z.object({ ...R, shas: z.array(sha).min(1).max(1000), change: authorChange }), ({ repoId, shas, change }) => {
+    const what = shas.length === 1 ? shas[0].slice(0, 7) : `${shas.length} commits`
+    const label = change.kind === 'reset' ? `Reset the author of ${what}` : change.kind === 'set' ? `Set the author of ${what}` : `Add a co-author to ${what}`
+    return undoable(repoId, 'rebase', label, () => ops(repoId).setAuthorship(shas, change, rewriteDir(repoId)), (r) => r.result !== 'conflicts')
+  })
   handle('history.squash', z.object({ ...R, shas: z.array(sha).min(2).max(1000), message: z.string().min(1).max(100_000), noVerify: z.boolean().optional() }), ({ repoId, shas, message, noVerify }) =>
     undoable(repoId, 'rebase', `Squash ${shas.length} commits`, () => ops(repoId).squash(shas, message, rewriteDir(repoId), noVerify), (r) => r.result !== 'conflicts')
   )
@@ -852,7 +1109,7 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
       sha,
       path: filePath,
       oldPath: filePath.optional(),
-      part: z.object({ hunk: z.number().int().min(0), header: z.string().max(1000), lines: z.array(z.number().int().min(0)).max(100_000).nullable(), full: z.boolean() }).nullable(),
+      part: z.object({ hunk: z.number().int().min(0), header: z.string().max(1000), lines: z.array(z.number().int().min(0)).max(100_000).nullable(), full: z.boolean(), context }).nullable(),
       action: z.enum(['remove', 'split', 'stage']),
       message: z.string().max(100_000).optional()
     }),

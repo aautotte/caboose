@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, Space, UserSearch, WrapText, X } from 'lucide-react'
-import type { DiffLine, DiffSource, FileDiff, Hunk } from '../../../shared/types'
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, ChevronDown, ChevronUp, FilePlus2, FileWarning, ListPlus, HardDrive, History, Maximize2, Minimize2, ScanSearch, Search, SlidersHorizontal, Space, UnfoldVertical, UserSearch, WrapText, X } from 'lucide-react'
+import { IMAGE_TYPES, type DiffLine, type DiffSource, type FileDiff, type Hunk } from '../../../shared/types'
 import { Button, DropdownMenu, EmptyState, IconButton, SegmentedControl, Tooltip } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
@@ -13,10 +13,14 @@ function lfsChange({ old, new: now }: NonNullable<FileDiff['lfs']>): string {
   if (old && now && old.oid === now.oid) return `${fileSize(now.size)}, unchanged.`
   return `${fileSize(old!.size)} → ${fileSize(now!.size)} (content ${old!.oid.slice(0, 8)} → ${now!.oid.slice(0, 8)}). The content is in Git LFS, so there are no lines to compare.`
 }
-import { setPrefs, useApp, useRepo, type DiffMode } from '@/store'
+import { DIFF_CONTEXT_STEPS, setPrefs, useApp, useRepo, type DiffMode } from '@/store'
 import * as act from '@/actions'
-import { highlightLine, languageFor } from './highlight'
+import { useKey } from '@/lib/keys'
+import { highlightLine, languageFor, markChanged } from './highlight'
+import { wordChanges } from './words'
+import type { Marked } from '@/merge/suggest'
 import { SubmoduleDiff } from './SubmoduleDiff'
+import { ImageDiff } from './ImageDiff'
 import { FindBar, useFindInView } from './FindBar'
 
 function sourceLabel(s: DiffSource): string {
@@ -47,9 +51,14 @@ export function DiffView({
   /** Inside another view (file history): no close, history or Esc handling of its own. */
   embedded?: boolean
 }): React.JSX.Element {
+  const findKey = useKey('find')
   const mode = useApp((s) => s.prefs.diffMode)
   const wrap = useApp((s) => s.prefs.diffWrap)
   const ignoreWs = useApp((s) => s.prefs.diffIgnoreWs)
+  // The whole file has no lines around changes to set; staging asks for the same blocks as on screen.
+  const context = useApp((s) => (s.prefs.diffMode === 'inline' ? undefined : s.prefs.diffContext))
+  // The whole file: its changes are cut into hunks as the Changes layout would show them.
+  const hunkContext = useApp((s) => s.prefs.diffContext)
   const wide = useApp((s) => s.diffWide)
   const status = useRepo(repoId, (r) => r.status)
   // A file can become conflicted while its diff is open (or be opened just before the status says so).
@@ -72,7 +81,7 @@ export function DiffView({
 
   // A new file, source or layout starts from a blank view; a status refresh (after staging, or a change on
   // disk) quietly reloads the same view.
-  const viewKey = `${path}|${oldPath}|${srcKey}|${force}|${mode}|${ignoreWs}`
+  const viewKey = `${path}|${oldPath}|${srcKey}|${force}|${mode}|${ignoreWs}|${context}`
   const lastView = useRef('')
   const shownHunks = useRef<string[]>([])
   useEffect(() => {
@@ -83,7 +92,7 @@ export function DiffView({
       lastView.current = viewKey
     }
     setError(null)
-    call('diff.get', { repoId, path, oldPath, source, force, full: mode === 'inline', ignoreWs })
+    call('diff.get', { repoId, path, oldPath, source, force, full: mode === 'inline', ignoreWs, context })
       .then((d) => {
         if (!live) return
         // A pick survives a reload only while its block is the same one (stashing lines elsewhere moves it).
@@ -124,7 +133,8 @@ export function DiffView({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !document.querySelector('[role=dialog],[role=menu]')) {
+      // A menu closed by this Esc is gone from the page already, but it marked the event handled.
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[role=dialog],[role=menu]')) {
         if (sel) setSel(null)
         else if (findOpen) setFindOpen(false)
         else if (!embedded) act.setCenter(repoId, { kind: 'graph' })
@@ -134,18 +144,19 @@ export function DiffView({
     return () => window.removeEventListener('keydown', onKey)
   }, [repoId, sel, embedded, findOpen])
 
-  const run = async (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard'): Promise<void> => {
+  /** `whole`: the lines are one hunk of the whole file, not a pick. */
+  const run = async (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard', whole = false): Promise<void> => {
     if (!diff || source.kind === 'commit') return
     const go = async (): Promise<void> => {
       setBusy(true)
-      const ok = await act.applyPatch(repoId, { path, source: source.kind, hunk, header: diff.hunks[hunk].header, lines, action, full: mode === 'inline' })
+      const ok = await act.applyPatch(repoId, { path, source: source.kind, hunk, header: diff.hunks[hunk].header, lines, action, full: mode === 'inline', context })
       setBusy(false)
       if (ok) setSel(null)
     }
     if (action !== 'discard') return go()
     act.confirm({
-      title: lines ? `Discard ${plural(lines.length, 'line')}?` : 'Discard this block?',
-      body: `The ${lines ? 'selected lines go' : 'block goes'} back to how they were in the last commit, in ${name} on disk.`,
+      title: lines && !whole ? `Discard ${plural(lines.length, 'line')}?` : 'Discard this hunk?',
+      body: `${lines && !whole ? 'The selected lines go back to how they were' : 'The hunk goes back to how it was'} in the last commit, in ${name} on disk.`,
       confirmLabel: 'Discard',
       danger: true,
       undoable: true,
@@ -165,23 +176,27 @@ export function DiffView({
           : status?.op && status.op.kind !== 'none'
             ? 'Finish or abort first'
             : null
-  const stash = (hunk: number, lines: number[] | null): void => {
+  // `whole`: the lines are a whole hunk of the File layout's one block.
+  const stash = (hunk: number, lines: number[] | null, whole = false): void => {
     if (!diff || stashWhy) return
-    act.openDialog({ kind: 'stash', repoId, part: { path, hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline', what: lines ? plural(lines.length, 'line') : 'a block' } })
+    const what = lines && !whole ? plural(lines.length, 'line') : 'a hunk'
+    act.openDialog({ kind: 'stash', repoId, part: { path, hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline', context, what } })
   }
 
   const runPatch = (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage'): void => {
     if (!diff || !patchSha) return
-    act.patchOut(repoId, { sha: patchSha, path, oldPath, part: { hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline' } }, action)
+    act.patchOut(repoId, { sha: patchSha, path, oldPath, part: { hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline', context } }, action)
   }
 
   const jump = (dirn: 1 | -1): void => {
     const el = scroller.current
     if (!el) return
-    const heads = [...el.querySelectorAll<HTMLElement>('[data-hunk]')]
+    // The whole file is one block: its changes are the stops.
+    const box = el.getBoundingClientRect().top - el.scrollTop
+    const heads = [...el.querySelectorAll<HTMLElement>(mode === 'inline' ? '[data-change]' : '[data-hunk]')].map((h) => h.getBoundingClientRect().top - box)
     const top = el.scrollTop + 4
-    const target = dirn === 1 ? heads.find((h) => h.offsetTop > top) : [...heads].reverse().find((h) => h.offsetTop < top - 8)
-    if (target) el.scrollTo({ top: target.offsetTop, behavior: 'smooth' })
+    const target = dirn === 1 ? heads.find((t) => t > top) : [...heads].reverse().find((t) => t < top - 8)
+    if (target !== undefined) el.scrollTo({ top: target, behavior: 'smooth' })
   }
 
   const blameRev = source.kind === 'commit' ? source.sha : null
@@ -198,7 +213,7 @@ export function DiffView({
         {embedded ? (
           <span className="flex-1" />
         ) : (
-          <div className="flex min-w-0 flex-1 items-baseline gap-1.5" title={path}>
+          <div className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden" title={path}>
             <span className="min-w-0 shrink-[10] truncate text-sm text-muted">{oldPath && oldPath !== path ? `${oldPath} → ` : dir}</span>
             <span className="min-w-0 truncate text-base font-medium text-text">{name}</span>
             <span className="shrink-0 text-xs text-muted">· {sourceLabel(source)}</span>
@@ -218,7 +233,7 @@ export function DiffView({
             </Tooltip>
           </>
         )}
-        <Tooltip content="Find in file" shortcut="Ctrl+F">
+        <Tooltip content="Find in file" shortcut={findKey}>
           <IconButton label="Find in file" pressed={findOpen} onClick={() => (findOpen ? setFindOpen(false) : openFind())}>
             <Search size={16} />
           </IconButton>
@@ -238,11 +253,30 @@ export function DiffView({
             <Space size={16} />
           </IconButton>
         </Tooltip>
-        <Tooltip content={wrap ? 'Don’t wrap long lines' : 'Wrap long lines'}>
-          <IconButton label="Wrap long lines" pressed={wrap} onClick={() => setPrefs({ diffWrap: !wrap })}>
-            <WrapText size={16} />
-          </IconButton>
-        </Tooltip>
+        <DropdownMenu
+          trigger={
+            <IconButton label="Diff options">
+              <SlidersHorizontal size={16} />
+            </IconButton>
+          }
+          items={[
+            { type: 'item', label: wrap ? 'Don’t wrap long lines' : 'Wrap long lines', icon: <WrapText size={14} />, onSelect: () => setPrefs({ diffWrap: !wrap }) },
+            { type: 'separator' },
+            context === undefined
+              ? { type: 'item', label: 'Lines around changes: the whole file is shown', icon: <UnfoldVertical size={14} />, disabled: true }
+              : {
+                  type: 'sub',
+                  label: `Lines around changes (${context})`,
+                  icon: <UnfoldVertical size={14} />,
+                  items: DIFF_CONTEXT_STEPS.map((n) => ({
+                    type: 'item' as const,
+                    label: `${plural(n, 'line')}${n === 3 ? ' (default)' : ''}`,
+                    icon: n === context ? <Check size={14} /> : undefined,
+                    onSelect: () => setPrefs({ diffContext: n })
+                  }))
+                }
+          ]}
+        />
         {embedded ? null : (
           <Tooltip content="File history">
             <IconButton label="File history" onClick={() => act.setCenter(repoId, { kind: 'history', path })}>
@@ -309,6 +343,8 @@ export function DiffView({
           <SubmoduleDiff repoId={repoId} path={path} change={diff.submodule} source={source} />
         ) : diff.lfs ? (
           <EmptyState icon={HardDrive} title="Stored in Git LFS" body={lfsChange(diff.lfs)} />
+        ) : diff.binary && IMAGE_TYPES[path.split('.').pop()?.toLowerCase() ?? ''] ? (
+          <ImageDiff repoId={repoId} path={path} oldPath={oldPath} source={source} reload={diff} />
         ) : diff.binary ? (
           <EmptyState icon={FileWarning} title="Binary file" body="This file isn’t text, so there are no lines to compare. All Caboose can say is that it changed." />
         ) : diff.tooLarge ? (
@@ -351,6 +387,7 @@ export function DiffView({
                   showHeader={mode !== 'inline' || diff.hunks.length > 1}
                   source={source}
                   partialOk={!diff.oldPath && canStage}
+                  perChange={mode === 'inline' && !diff.oldPath && canStage}
                   patchOk={!diff.oldPath && canPatch}
                   onPatch={runPatch}
                   newFile={diff.isNew && source.kind === 'worktree'}
@@ -364,7 +401,18 @@ export function DiffView({
                 {mode === 'split' ? (
                   <SplitHunk h={h} lang={lang} wrap={wrap} />
                 ) : (
-                  <UnifiedHunk h={h} index={i} lang={lang} wrap={wrap} selectable={(canStage || canPatch) && !diff.oldPath} sel={sel?.hunk === i ? sel : null} onSelect={setSel} onRun={run} source={source} />
+                  <UnifiedHunk
+                    h={h}
+                    index={i}
+                    lang={lang}
+                    wrap={wrap}
+                    selectable={(canStage || canPatch) && !diff.oldPath}
+                    sel={sel?.hunk === i ? sel : null}
+                    onSelect={setSel}
+                    onRun={run}
+                    source={source}
+                    changes={mode === 'inline' && !diff.oldPath && canStage ? { context: hunkContext, newFile: diff.isNew && source.kind === 'worktree', busy, stashWhy, onStash: (lines) => stash(i, lines, true) } : undefined}
+                  />
                 )}
               </section>
             ))}
@@ -386,6 +434,7 @@ function HunkBar({
   showHeader,
   source,
   partialOk,
+  perChange,
   patchOk,
   onPatch,
   newFile,
@@ -401,6 +450,8 @@ function HunkBar({
   showHeader: boolean
   source: DiffSource
   partialOk: boolean
+  /** The whole file, with buttons on each hunk: this bar only acts on picked lines. */
+  perChange: boolean
   /** A commit's block that can be taken out of it. */
   patchOk: boolean
   onPatch: (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage') => void
@@ -410,13 +461,14 @@ function HunkBar({
   onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard') => void
   /** Why the block can't be stashed, or null when it can. */
   stashWhy: string | null
-  onStash: (hunk: number, lines: number[] | null) => void
+  onStash: (hunk: number, lines: number[] | null, whole?: boolean) => void
   onClear: () => void
 }): React.JSX.Element | null {
   if (!showHeader && source.kind === 'commit' && !patchOk) return null
   const lines = sel ? [...sel.lines].sort((a, b) => a - b) : null
   const n = lines?.length ?? 0
-  const what = n ? plural(n, 'line') : 'block'
+  if (perChange && !n && !showHeader) return null
+  const what = n ? plural(n, 'line') : 'hunk'
   return (
     <div className="sticky top-0 z-[1] flex min-h-7 items-center gap-2 bg-surface-raised px-3 py-0.5 font-sans">
       <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted">{showHeader ? h.header : ''}</span>
@@ -441,55 +493,94 @@ function HunkBar({
             ]}
           />
         </div>
-      ) : source.kind === 'commit' || !partialOk ? null : (
+      ) : source.kind === 'commit' || !partialOk || (perChange && !n) ? null : (
         <div className="flex shrink-0 items-center gap-1">
           {n ? (
             <Button size="sm" variant="ghost" onClick={onClear}>
               Clear
             </Button>
           ) : null}
-          {source.kind === 'worktree' ? (
-            <>
-              <Button size="sm" variant="ghost" className="text-danger" disabled={busy || newFile} onClick={() => onRun(index, lines, 'discard')}>
-                Discard {what}
-              </Button>
-              {stashWhy ? (
-                <Tooltip content={stashWhy}>
-                  <span tabIndex={0}>
-                    <Button size="sm" variant="ghost" disabled>
-                      Stash {what}
-                    </Button>
-                  </span>
-                </Tooltip>
-              ) : (
-                <Button size="sm" variant="ghost" disabled={busy} onClick={() => onStash(index, lines)}>
-                  Stash {what}…
-                </Button>
-              )}
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun(index, lines, 'stage')}>
-                Stage {what}
-              </Button>
-            </>
-          ) : (
-            <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun(index, lines, 'unstage')}>
-              Unstage {what}
-            </Button>
-          )}
+          <HunkButtons what={what} source={source} newFile={newFile} busy={busy} onRun={(action) => onRun(index, lines, action)} stashWhy={stashWhy} onStash={() => onStash(index, lines)} />
         </div>
       )}
     </div>
   )
 }
 
+/** Discard and Stage, or Unstage, for a hunk or the picked lines. */
+function HunkButtons({
+  what,
+  source,
+  newFile,
+  busy,
+  onRun,
+  stashWhy,
+  onStash
+}: {
+  what: string
+  source: DiffSource
+  newFile: boolean
+  busy: boolean
+  onRun: (action: 'stage' | 'unstage' | 'discard') => void
+  /** Why the hunk can't be stashed, or null when it can. */
+  stashWhy: string | null
+  onStash: () => void
+}): React.JSX.Element {
+  return source.kind === 'worktree' ? (
+    <>
+      <Button size="sm" variant="secondary" className="enabled:border-danger/60 enabled:text-danger" disabled={busy || newFile} onClick={() => onRun('discard')}>
+        Discard {what}
+      </Button>
+      {stashWhy ? (
+        <Tooltip content={stashWhy}>
+          <span tabIndex={0}>
+            <Button size="sm" variant="secondary" disabled>
+              Stash {what}
+            </Button>
+          </span>
+        </Tooltip>
+      ) : (
+        <Button size="sm" variant="secondary" disabled={busy} onClick={onStash}>
+          Stash {what}…
+        </Button>
+      )}
+      <Button size="sm" variant="secondary" className="enabled:border-success/60 enabled:text-success" disabled={busy} onClick={() => onRun('stage')}>
+        Stage {what}
+      </Button>
+    </>
+  ) : (
+    <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun('unstage')}>
+      Unstage {what}
+    </Button>
+  )
+}
+
+/** The changed lines of a whole-file block, cut into hunks the way git does: changes with no more than twice `context` unchanged lines between them go together. */
+function hunksOf(lines: DiffLine[], context: number): number[][] {
+  const out: number[][] = []
+  let last = -Infinity
+  lines.forEach((l, i) => {
+    if (l.type === 'ctx') return
+    if (i - last - 1 > 2 * context || !out.length) out.push([])
+    out[out.length - 1].push(i)
+    last = i
+  })
+  return out
+}
+
 const lineBg = { add: 'bg-diff-add-bg', del: 'bg-diff-del-bg', ctx: '' }
 const sign = { add: '+', del: '−', ctx: ' ' }
 const signLabel = { add: 'added', del: 'removed', ctx: '' }
 
-const Code = memo(function Code({ text, lang, wrap }: { text: string; lang: string | null; wrap: boolean }) {
+/** The words that changed, a shade stronger than their line. */
+const wordBg = { add: 'rounded-xs bg-diff-add-emph text-inherit inset-ring inset-ring-success/50', del: 'rounded-xs bg-diff-del-emph text-inherit inset-ring inset-ring-danger/50', ctx: '' }
+
+const Code = memo(function Code({ text, lang, wrap, marks, type }: { text: string; lang: string | null; wrap: boolean; marks?: Marked; type?: DiffLine['type'] }) {
+  const html = highlightLine(text, lang)
   return (
     <span
       className={cn('hljs-line flex-1 px-2', wrap ? 'break-all whitespace-pre-wrap' : 'whitespace-pre')}
-      dangerouslySetInnerHTML={{ __html: highlightLine(text, lang) || ' ' }}
+      dangerouslySetInnerHTML={{ __html: (marks && type ? markChanged(html, marks, wordBg[type]) : html) || ' ' }}
     />
   )
 })
@@ -507,7 +598,8 @@ function UnifiedHunk({
   sel,
   onSelect,
   onRun,
-  source
+  source,
+  changes
 }: {
   h: Hunk
   index: number
@@ -516,11 +608,16 @@ function UnifiedHunk({
   selectable: boolean
   sel: Selection | null
   onSelect: (s: Selection | null) => void
-  onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard') => void
+  onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard', whole?: boolean) => void
   source: DiffSource
+  /** The whole file: a bar with the hunk's buttons above each of its hunks. */
+  changes?: { context: number; newFile: boolean; busy: boolean; stashWhy: string | null; onStash: (lines: number[]) => void }
 }): React.JSX.Element {
   const [cursor, setCursor] = useState<number | null>(null)
   const changed = useMemo(() => h.lines.map((l, i) => (l.type === 'ctx' ? -1 : i)).filter((i) => i >= 0), [h])
+  const hunks = useMemo(() => (changes ? hunksOf(h.lines, changes.context) : []), [h, changes?.context])
+  const words = useMemo(() => wordChanges(h.lines), [h])
+  const hunkAt = new Map(hunks.map((x, k) => [x[0], k]))
 
   const toggle = (i: number, range: boolean): void => {
     if (!selectable || h.lines[i].type === 'ctx') return
@@ -537,7 +634,8 @@ function UnifiedHunk({
   }
 
   const onKey = (e: React.KeyboardEvent): void => {
-    if (!selectable || !changed.length) return
+    // Keys on a hunk's buttons are theirs.
+    if (!selectable || !changed.length || e.target !== e.currentTarget) return
     const pos = cursor === null ? -1 : changed.indexOf(cursor)
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
@@ -566,37 +664,46 @@ function UnifiedHunk({
       {h.lines.map((l, i) => {
         const picked = sel?.lines.has(i) ?? false
         const canPick = selectable && l.type !== 'ctx'
+        const k = hunkAt.get(i)
         return (
-          <div
-            role="row"
-            id={`dl-${index}-${i}`}
-            key={i}
-            aria-label={signLabel[l.type] || undefined}
-            aria-selected={canPick ? picked : undefined}
-            className={cn('flex', lineBg[l.type], picked && 'bg-diff-picked', cursor === i && 'outline-1 -outline-offset-1 outline-focus-ring')}
-          >
-            <span
-              role="cell"
-              onMouseDown={(e) => {
-                if (!canPick) return
-                e.preventDefault()
-                toggle(i, e.shiftKey)
-              }}
-              title={canPick ? 'Pick this line (Shift: a range)' : undefined}
-              className={cn('flex shrink-0 select-none', canPick && 'cursor-pointer hover:bg-row-hover')}
+          <Fragment key={i}>
+            {changes && k !== undefined ? (
+              <div role="row" data-change={k} aria-label={`Hunk ${k + 1} of ${hunks.length}`} className="flex border-y border-border bg-surface-raised font-sans">
+                <span role="cell" className="flex flex-1 items-center justify-end gap-1 px-3 py-0.5">
+                  <HunkButtons what="hunk" source={source} newFile={changes.newFile} busy={changes.busy} onRun={(action) => onRun(index, hunks[k], action, true)} stashWhy={changes.stashWhy} onStash={() => changes.onStash(hunks[k])} />
+                </span>
+              </div>
+            ) : null}
+            <div
+              role="row"
+              id={`dl-${index}-${i}`}
+              aria-label={signLabel[l.type] || undefined}
+              aria-selected={canPick ? picked : undefined}
+              className={cn('flex', lineBg[l.type], picked && 'bg-diff-picked', cursor === i && 'outline-1 -outline-offset-1 outline-focus-ring')}
             >
-              <span aria-hidden className={cn('w-1 shrink-0', picked ? 'bg-accent' : '')} />
-              <span className="w-11 shrink-0 pr-2 text-right text-disabled">{l.oldNo ?? ''}</span>
-              <span className="w-12 shrink-0 pr-2 text-right text-disabled">{l.newNo ?? ''}</span>
-            </span>
-            <span aria-hidden className={cn('w-4 shrink-0 text-center select-none', l.type === 'add' ? 'text-success' : l.type === 'del' ? 'text-danger' : '')}>
-              {sign[l.type]}
-            </span>
-            <span role="cell" className="flex min-w-0 flex-1">
-              <Code text={l.text} lang={lang} wrap={wrap} />
-              {l.noNewline ? <span className="pr-2 font-sans text-xs text-muted">no newline at end</span> : null}
-            </span>
-          </div>
+              <span
+                role="cell"
+                onMouseDown={(e) => {
+                  if (!canPick) return
+                  e.preventDefault()
+                  toggle(i, e.shiftKey)
+                }}
+                title={canPick ? 'Pick this line (Shift: a range)' : undefined}
+                className={cn('flex shrink-0 select-none', canPick && 'cursor-pointer hover:bg-row-hover')}
+              >
+                <span aria-hidden className={cn('w-1 shrink-0', picked ? 'bg-accent' : '')} />
+                <span className="w-11 shrink-0 pr-2 text-right text-muted">{l.oldNo ?? ''}</span>
+                <span className="w-12 shrink-0 pr-2 text-right text-muted">{l.newNo ?? ''}</span>
+              </span>
+              <span aria-hidden className={cn('w-4 shrink-0 text-center select-none', l.type === 'add' ? 'text-success' : l.type === 'del' ? 'text-danger' : '')}>
+                {sign[l.type]}
+              </span>
+              <span role="cell" className="flex min-w-0 flex-1">
+                <Code text={l.text} lang={lang} wrap={wrap} marks={words.get(l)} type={l.type} />
+                {l.noNewline ? <span className="pr-2 font-sans text-xs text-muted">no newline at end</span> : null}
+              </span>
+            </div>
+          </Fragment>
         )
       })}
     </div>
@@ -624,10 +731,11 @@ function pairLines(lines: DiffLine[]): Array<[DiffLine | null, DiffLine | null]>
 
 function SplitHunk({ h, lang, wrap }: { h: Hunk; lang: string | null; wrap: boolean }): React.JSX.Element {
   const pairs = pairLines(h.lines)
+  const words = useMemo(() => wordChanges(h.lines), [h])
   const cell = (l: DiffLine | null, side: 'old' | 'new'): React.JSX.Element => (
     <div role="cell" className={cn('flex min-w-0 flex-1', l ? lineBg[l.type] : 'bg-surface-sunken')}>
-      <span className="w-12 shrink-0 pr-2 text-right text-disabled select-none">{l ? (side === 'old' ? l.oldNo : l.newNo) : ''}</span>
-      {l ? <Code text={l.text} lang={lang} wrap={wrap} /> : <span className="flex-1" />}
+      <span className="w-12 shrink-0 pr-2 text-right text-muted select-none">{l ? (side === 'old' ? l.oldNo : l.newNo) : ''}</span>
+      {l ? <Code text={l.text} lang={lang} wrap={wrap} marks={words.get(l)} type={l.type} /> : <span className="flex-1" />}
     </div>
   )
   return (

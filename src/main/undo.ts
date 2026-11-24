@@ -19,9 +19,11 @@ export type UndoType =
   | 'stash_drop'
   | 'tag_delete'
   | 'remote_remove'
+  | 'remote_edit'
   | 'ignore'
   | 'branch_move'
   | 'staged_rewrite'
+  | 'patch_apply'
 
 /** What each undo entry needs to move the repo back (before) and forward again (after). */
 export interface Snapshot {
@@ -34,12 +36,16 @@ export interface Snapshot {
   stashes?: { stash: string; message: string; index: number }[] // stash_drop of several at once (index: where each was)
   stash?: string // discard: snapshot commit; staged_rewrite: a commit on top of `sha` whose tree is what's staged on this side
   paths?: string[] | 'all' // discard: what was discarded (for redo)
-  patch?: string // discard_lines: the patch that was reversed out of the working files
+  ignored?: boolean // discard: ignored files went too
+  patch?: string // discard_lines: the patch that was reversed out of the working files; patch_apply: the patch applied
+  cached?: boolean // patch_apply: it went to the staged changes too (git apply --index)
   message?: string // stash_drop: the stash's message
   mode?: ResetMode // reset
-  remote?: Remote // remote_remove
+  remote?: Remote // remote_remove; remote_edit: the remote on this side
   gitignore?: string | null // ignore: the root .gitignore on this side (null: none)
+  exclude?: string | null // ignore, on this computer only: .git/info/exclude on this side (null: none)
   index?: string // ignore: the index entries of the files it stopped tracking
+  tips?: { name: string; sha: string }[] // rebase: other branches it moved along (stacked ones), where each is on this side
 }
 
 interface Row {
@@ -63,6 +69,23 @@ export class UndoStack {
   async snapshot(ops: RepoOps): Promise<Snapshot> {
     const refs = await ops.refs()
     return { branch: refs.head.branch, sha: refs.head.sha }
+  }
+
+  /** Before a rebase: every other branch's tip too, since a rebase can move stacked branches along. */
+  async snapshotTips(ops: RepoOps): Promise<Snapshot> {
+    const s = await this.snapshot(ops)
+    return { ...s, tips: await ops.branchTips(s.branch) }
+  }
+
+  /** Both sides of an action that has finished. A rebase keeps only the other branches that moved, on each side. */
+  async settle(ops: RepoOps, before: Snapshot): Promise<[Snapshot, Snapshot]> {
+    const after = await this.snapshot(ops)
+    if (!before.tips) return [before, after]
+    const { tips, ...rest } = before
+    const now = new Map((await ops.branchTips(after.branch)).map((t) => [t.name, t.sha]))
+    const moved = tips.filter((t) => now.has(t.name) && now.get(t.name) !== t.sha)
+    if (!moved.length) return [rest, after]
+    return [{ ...rest, tips: moved }, { ...after, tips: moved.map((t) => ({ name: t.name, sha: now.get(t.name)! })) }]
   }
 
   /**
@@ -111,7 +134,8 @@ export class UndoStack {
     const p = this.pending.get(ops.repo.id)
     if (!p) return
     this.pending.delete(ops.repo.id)
-    this.record(ops.repo.id, p.type, p.label, p.before, await this.snapshot(ops))
+    const [before, after] = await this.settle(ops, p.before)
+    this.record(ops.repo.id, p.type, p.label, before, after)
   }
 
   dropPending(repoId: string): void {
@@ -200,10 +224,15 @@ export class UndoStack {
           return after
         }
         const ref = `${UNDO_REFS}${row.id}`
-        const stash = await ops.discard(before.paths ?? 'all', ref)
+        const stash = await ops.discard(before.paths ?? 'all', ref, before.ignored)
         this.db
           .prepare('UPDATE undo_entries SET before_state = ? WHERE id = ?')
           .run(JSON.stringify({ ...before, stash: stash ?? before.stash }), row.id)
+        return after
+      }
+      case 'patch_apply': {
+        if (cur.sha !== before.sha) throw moved()
+        await ops.reapplyPatch(before.patch!, !!before.cached, dir === 'back')
         return after
       }
       case 'discard_lines': {
@@ -253,7 +282,18 @@ export class UndoStack {
         else await ops.removeRemote(r.name)
         return after
       }
+      case 'remote_edit': {
+        const r = (await ops.remotes()).find((x) => x.name === from.remote!.name)
+        if (!r || r.fetchUrl !== from.remote!.fetchUrl || r.pushUrl !== from.remote!.pushUrl) throw moved()
+        await ops.editRemote(r.name, to.remote!)
+        return after
+      }
       case 'ignore': {
+        if (from.exclude !== undefined) {
+          if ((await ops.readExclude()) !== from.exclude) throw moved()
+          await ops.writeExclude(to.exclude ?? null)
+          return after
+        }
         if (ops.readGitignore() !== from.gitignore) throw moved()
         ops.writeGitignore(to.gitignore ?? null)
         if (dir === 'back') await ops.restoreIndex(before.index ?? '')
@@ -301,8 +341,11 @@ export class UndoStack {
         if (await ops.hasTrackedChanges()) {
           throw new GcFail('invalid', 'Commit or stash your changes first. Undoing this would overwrite them.')
         }
+        // Stacked branches the rebase moved along: each must still be where it left them.
+        for (const t of from.tips ?? []) if ((await ops.tryGit(['rev-parse', '-q', '--verify', `refs/heads/${t.name}`]))?.trim() !== t.sha) throw moved()
         if (to.branch && to.branch !== cur.branch) await ops.mut(['switch', to.branch])
         await ops.mut(['reset', '-q', '--hard', to.sha!])
+        for (const t of to.tips ?? []) await ops.mut(['update-ref', `refs/heads/${t.name}`, t.sha])
         return after
       }
     }

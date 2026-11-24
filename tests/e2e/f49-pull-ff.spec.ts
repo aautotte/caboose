@@ -151,7 +151,7 @@ test('F49-H4: right-click main › Interactive rebase topic onto main… opens t
   await local('main').click({ button: 'right' })
   await h.page.getByRole('menuitem', { name: 'Interactive rebase topic onto main…' }).click()
   const view = h.page.getByRole('region', { name: 'Rebase topic onto main' })
-  const list = view.getByRole('list', { name: 'Commits, oldest first' })
+  const list = view.getByRole('list', { name: 'Commits, newest first' })
   await expect(list.getByRole('listitem')).toHaveCount(2)
   await view.getByRole('button', { name: 'Start rebase' }).click()
   await expect.poll(h.gitOr(repo, 'rev-parse', 'topic~2')).toBe(sha(repo, 'main'))

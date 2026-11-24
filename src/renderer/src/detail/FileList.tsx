@@ -66,7 +66,7 @@ export function FileList({
   /** The menu for a row; `picked` is every picked file when the row is one of them, else just the row. */
   menu: (f: FileItem, picked: FileItem[]) => MenuEntry[]
   /** Menu items for a folder row, above Expand / Collapse. */
-  dirMenu?: (files: FileItem[]) => MenuEntry[]
+  dirMenu?: (files: FileItem[], path: string) => MenuEntry[]
   emptyText: string
   /** Keys on a file row, or on a folder row with `picked` set to the files under it. */
   onKey?: (e: React.KeyboardEvent, f: FileItem, picked: FileItem[]) => void
@@ -175,7 +175,7 @@ export function FileList({
     } else onKey?.(e, d.files[0], d.files)
   }
   const folderMenu = (d: DirLine): MenuEntry[] => [
-    ...(dirMenu ? [...dirMenu(d.files), { type: 'separator' as const }] : []),
+    ...(dirMenu ? [...dirMenu(d.files, d.path), { type: 'separator' as const }] : []),
     { type: 'item', label: d.open ? 'Collapse' : 'Expand', onSelect: () => fold(d.path) },
     { type: 'item', label: 'Collapse all', onSelect: () => setCollapsed(new Set(treeLines(sorted, new Set()).flatMap((l) => (l.kind === 'dir' ? [l.path] : [])))) },
     { type: 'item', label: 'Expand all', onSelect: () => setCollapsed(new Set()) }

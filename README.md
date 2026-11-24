@@ -29,6 +29,8 @@ works offline, and it doesn't phone home.
 - Focus on one branch, show only one commit's history, hide the branches and tags you don't care about, pin a
   branch to the left.
 - Search the whole history by message, SHA or author.
+- Filter it to the commits that change a file, a folder or a pattern, by an author, or both, with the lines
+  joining what's left.
 - Columns can be shown, hidden, reordered and resized, Graph and Branch / tag included. A wide graph scrolls
   sideways. The widths are saved per repository.
 - Move with J / K, or Ctrl+Home / Ctrl+End.
@@ -37,29 +39,47 @@ works offline, and it doesn't phone home.
 
 - Changed files as a flat list or a folder tree, in Not staged and Staged.
 - Stage or unstage files, blocks or single lines, with the mouse or the keyboard. Discard them too, with undo.
-- Inline or side by side, with whitespace hidden or not, long lines wrapped or not, your code size and tab width.
+- Clean up the working tree: remove untracked files, ignored ones, or everything back to the last commit, with
+  undo.
+- Inline or side by side, with as many lines around each change as you like, whitespace hidden or not, long lines
+  wrapped or not, your code size and tab width.
 - Find in the open file (Ctrl+F), with every match highlighted.
 - Binary files, Git LFS files and submodule pointers each get a diff that says what changed.
-- Ignore files from their menu, one or several at once: the file, its extension or its folder.
+- Ignore files from their menu, one or several at once: the file, its extension or its folder. For everyone
+  (`.gitignore`) or on this computer only (`.git/info/exclude`).
 - After a commit leaves nothing to commit, you're back on the commit list.
 
 ### Commits
 
 - Summary and description, with your commit message template. Amend the last commit, sign commits, push after
   committing.
+- Start from a recent message, add co-authors from the history, and wrap the description at 72 characters.
+- Commit rules per repository: a summary length, Conventional Commits, an issue to mention. Warn, or hold back the
+  commit until the message fits.
 - Edit any commit's message, squash several into one (every message kept, ready to edit), move a commit up or down,
   revert, cherry-pick one or several, reset (soft, mixed or hard).
+- Change who commits are by: reset the author to you, set another author, or add a co-author.
 - Take changes out of any commit on the branch, a whole file, a block or a few lines: drop them, move them to a new
   commit right after it (to split a commit), or move them to your staged changes.
 - Fix up older commits: amend the staged changes into any commit on the branch (your other changes stay put), or
   make `fixup!` commits and squash them in later. Caboose can find the commit your changes belong to.
 - Git hooks run when history is rewritten, unless you tick Skip hooks.
+- Copy or save commits as a patch (`git format-patch`), or your changes as a diff. Apply a patch, pasted or from a
+  file, to your files, staged, or as commits with their authors. It's checked first, and undo takes it back.
 
 ### Branches and tags
 
-- Create a branch from any commit, rename, check out, delete. Pick several branches or tags and push or delete
+- Create a branch from any commit, rename, check out, delete. Go back to the previous branch (Ctrl+Shift+B, like
+  `git checkout -`) or a recent one from the branch name in the toolbar. Pick several branches or tags and push or delete
   them at once, on the remote too. The dialog says that undo only brings back the local side.
-- Merge or rebase by dragging one branch onto another.
+- Pull requests on GitHub, in the branches panel: checks, reviews and drafts, a `#12` on their branch in the graph,
+  and a double-click to check one out, from a fork too. Create one from a branch's menu or right after a push: the
+  title and description come from its commits, and the branch is pushed first if it needs to be. Signing in happens
+  in the browser: no token to make.
+- Merge or rebase by dragging one branch onto another. Merge with a merge commit every time (`--no-ff`), or squash
+  a branch into one commit.
+- Git Flow without installing anything: start and finish features, releases and hotfixes. Releases are tagged, and
+  a finish that stops on conflicts carries on once they're resolved.
 - Pull or fast-forward a branch without switching to it. Double-click a remote branch to fast-forward the local one
   and check it out, or reset it when it can't fast-forward.
 - Reset a local branch to a remote branch from its menu.
@@ -69,7 +89,10 @@ works offline, and it doesn't phone home.
 
 ### Interactive rebase
 
-- Keep, reword, squash, fixup, drop or reorder, for a whole branch or only the commits you pick.
+- Keep, reword, edit, squash, fixup, drop or reorder, for a whole branch or only the commits you pick. Edit stops
+  at a commit so you can change it, then continue.
+- Branches stacked on the rewritten commits can move along (`--update-refs`).
+- Move only a branch's own commits onto another branch (`--onto`).
 
 ### Conflicts
 
@@ -81,7 +104,7 @@ works offline, and it doesn't phone home.
 
 - Fetch, pull (fast-forward when possible, fast-forward only, or rebase), push, force push with lease.
 - With several remotes, push the current branch or a tag to whichever one you pick.
-- Set upstreams, add and remove remotes.
+- Set upstreams, add, rename and remove remotes, change their URLs (a separate push URL too), fetch just one.
 - Fetch in the background, every 1 to 60 minutes, without ever asking for a password.
 - When your changes are in a pull's way, stash or discard them from the same dialog.
 - Long operations show git's own progress: the percentage and the count, for example 45% (58234/129384).
@@ -90,9 +113,10 @@ works offline, and it doesn't phone home.
 
 ### Stashes
 
-- Stash your changes (new files too, if you want), apply, pop, rename, delete one or several.
-- Stash only the files you pick, or one block or a few lines of a file. The stash holds only what you picked, and
-  pop puts it back even when the file has other changes since.
+- Stash your changes (new files too, if you want), only the staged ones, or some files; keep the staged changes in
+  the folder if you like. Apply, pop, rename, delete one or several, or make a branch from a stash.
+- Stash one hunk or a few lines of a file. The stash holds only what you picked, some files included, and pop puts
+  it back even when the file has other changes since.
 
 ### Bisect
 
@@ -133,13 +157,17 @@ works offline, and it doesn't phone home.
 ### Profiles
 
 - Separate tabs, settings and identity for work and personal projects: name, email, signing key and the SSH key
-  used to fetch and push. Caboose can create an SSH key for you and copy its public half.
+  used to fetch and push. Caboose can create an SSH key, add it to ssh-agent, open your host's page for it, and
+  test that the host accepts it.
 - Repository settings can override your global ones (signing, for example).
 
 ### Everything else
 
 - A Git activity log with every command Caboose ran and its output, ready to copy.
-- A command palette (Ctrl+P) and keyboard shortcuts for most things (Ctrl+/ lists them).
+- A command palette (Ctrl+P) and keyboard shortcuts for most things (Ctrl+/ lists them). Change any shortcut in
+  Settings.
+- Your own git commands, with questions, on the menus of the commit, branch or file they run on and in the
+  palette.
 - Light and dark themes, or follow the system.
 - Side panels collapse to thin rails (Ctrl+J, Ctrl+K) and remember it.
 - Your own editor, terminal, diff tool and merge tool.
@@ -152,8 +180,8 @@ works offline, and it doesn't phone home.
 ## User guide
 
 How to do each of these, step by step, is in the [user guide](docs/README.md): getting started, the graph, staging,
-branches, syncing, rewriting history, conflicts, bisect, submodules, worktrees, Git LFS, undo, settings and
-keyboard shortcuts.
+branches, syncing, rewriting history, conflicts, bisect, submodules, worktrees, Git LFS, undo, settings,
+keyboard shortcuts and your own commands.
 
 ## Requirements
 

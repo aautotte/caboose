@@ -3,7 +3,7 @@
 import { test, expect } from '@playwright/test'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { commitRow, launch, makeRepo, seed, type Harness } from './harness'
+import { commitRow, invoke, launch, makeRepo, repoId, seed, type Harness } from './harness'
 
 let h: Harness
 const repo = join(seed, 'fixup')
@@ -47,6 +47,9 @@ test('F65-H1: Find the commit these changes belong to selects the commit that la
   await h.page.keyboard.press('Enter')
   await expect(toasts().getByText(/^They belong to [0-9a-f]{7} Edit a$/)).toBeVisible()
   await expect(h.page.getByRole('region', { name: 'Details' }).getByText('Edit a', { exact: true })).toBeVisible()
+  // The summary comes with the answer, so the toast names the commit even before the graph has loaded it.
+  const found = await invoke(h.page, 'history.fixupTarget', { repoId: await repoId(h.page, repo) })
+  expect(found).toEqual({ ok: true, value: { shas: [shaOf('Edit a')], summaries: { [shaOf('Edit a')]: 'Edit a' }, addOnly: false } })
 })
 
 let before = ''

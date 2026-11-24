@@ -1,16 +1,19 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Combine, Copy, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload } from 'lucide-react'
-import type { CommitRow, GraphColumn, GraphColumnKey, Ref } from '../../../shared/types'
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, ClipboardPaste, Combine, Copy, Eraser, FileDiff, FilePlus2, Focus, FolderPlus, GitCompare, GitBranch, GitMerge, GitPullRequestArrow, ListFilter, ListOrdered, Pencil, Plus, RotateCcw, Search, Tag, Trash2, Undo, Upload, UserPen } from 'lucide-react'
+import type { CommitRow, GraphColumn, GraphColumnKey, PullRequest, Ref } from '../../../shared/types'
 import { Avatar, Badge, ContextMenu, DropdownMenu, EmptyState, IconButton, RefPill, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
 import { fullDate, relativeTime, shortSha } from '@/lib/format'
 import { DEFAULT_COLUMNS, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { customMenu } from '@/shell/customMenu'
+import { keyFor } from '@/lib/keys'
 import { webEntry } from '@/shell/webMenu'
 import type { Edge, RowLayout } from './lanes'
 import { DropMenu, type DropTarget } from './DropMenu'
-import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
+import { FilterBar } from './FilterBar'
+import { compareEntry, createPullEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from '@/shell/refMenus'
 
 const ROW = 28 // matches --gc-graph-row-h
 const HEADER = 26 // --gc-list-row-h, the sticky column header
@@ -122,7 +125,8 @@ function ancestry(start: string | null, bySha: Map<string, CommitRow>): Set<stri
     const sha = stack.pop()!
     if (seen.has(sha)) continue
     seen.add(sha)
-    for (const p of bySha.get(sha)?.parents ?? []) stack.push(p)
+    const row = bySha.get(sha)
+    for (const p of row?.drawn ?? row?.parents ?? []) stack.push(p)
   }
   return seen
 }
@@ -230,6 +234,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const layout = useRepo(repoId, (r) => r.layout)
   const refs = useRepo(repoId, (r) => r.refs)
   const status = useRepo(repoId, (r) => r.status)
+  const pulls = useRepo(repoId, (r) => r.pulls)
   const selected = useRepo(repoId, (r) => r.selected)
   const multi = useRepo(repoId, (r) => r.multi)
   const hits = useRepo(repoId, (r) => r.searchHits)
@@ -240,6 +245,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const [hoverSha, setHoverSha] = useState<string | null>(null)
   const columns = useRepo(repoId, (r) => r.columns)
   const focusHead = useRepo(repoId, (r) => r.focusHead)
+  const filtered = useRepo(repoId, (r) => !!act.graphFilter(r))
   const [draft, setDraft] = useState<GraphColumn[] | null>(null)
   const liveColumns = draft ?? columns
 
@@ -280,12 +286,13 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const inQuestion = useMemo(() => (bisect?.candidates && !bisect.firstBad ? new Set(bisect.candidates) : null), [bisect])
   const order = useMemo(() => rows.filter((r) => r.kind === 'commit').map((r) => r.sha), [rows])
   const multiSet = useMemo(() => new Set(multi), [multi])
-  // The current branch's own line, newest first: what move up / down and squash work on.
+  // The current branch's own line, newest first: what move up / down and squash work on. A filter leaves gaps in it.
   const line = useMemo(() => {
     const out: string[] = []
+    if (filtered) return out
     for (let sha = refs?.head.sha ?? null; sha && bySha.has(sha); sha = bySha.get(sha)!.parents[0] ?? null) out.push(sha)
     return out
-  }, [refs?.head.sha, bySha])
+  }, [refs?.head.sha, bySha, filtered])
   // Fits the lanes up to MAX_GRAPH_W, unless the user dragged the column to a width of their own.
   const fitW = Math.min(MAX_GRAPH_W, Math.max(3, layout?.maxCols ?? 1) * LANE + 8)
   const savedGraphW = useRepo(repoId, (r) => r.graphWidth)
@@ -335,7 +342,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
     if (last && hasMore && !loading && last.index > rows.length - 200) void act.loadMore(repoId)
   }, [items, hasMore, loading, rows.length, repoId])
 
-  // Keep the selected row (or the moving end of a Shift selection) in view when it changes from the keyboard.
+  // Keep the selected row (or the moving end of a Shift selection) in view when it changes.
   const selIndex = rows.findIndex((r) => r.sha === selected)
   const [extent, setExtent] = useState<string | null>(null)
   const extentIndex = multi.length && extent ? rows.findIndex((r) => r.sha === extent) : -1
@@ -344,13 +351,28 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   // view back to it from wherever you've scrolled.
   const viewKey = extentIndex >= 0 ? extent : selected
   const scrolledTo = useRef<string | null>(null)
+  // Set by a click or a key in the graph: the list stays put, or scrolls just enough to show the row. A selection
+  // from elsewhere (a branch in the panel, search, a link) that's off screen comes to the middle instead.
+  const fromGrid = useRef(false)
+  const moveHere = (): void => {
+    fromGrid.current = true
+    // A click that changes nothing (the row already selected) mustn't leave it set for the next jump.
+    setTimeout(() => (fromGrid.current = false))
+  }
   useEffect(() => {
     if (viewIndex < 0 || viewKey === scrolledTo.current) return
     scrolledTo.current = viewKey
-    v.scrollToIndex(viewIndex, { align: 'auto' })
+    // 'auto' keeps its alignment only when the row is already fully in view.
+    const inView = v.getOffsetForIndex(viewIndex, 'auto')?.[1] === 'auto'
+    if (fromGrid.current || inView) return void v.scrollToIndex(viewIndex, { align: 'auto' })
+    // The middle of what's visible under the sticky header. The rows (all ROW high) start below that header, which the
+    // virtualizer's own centring doesn't know about.
+    const el = parentRef.current
+    if (el) v.scrollToOffset(Math.max(0, viewIndex * ROW + ROW / 2 - (el.clientHeight - HEADER) / 2))
   }, [viewIndex, viewKey, v])
 
   const clickRow = (e: React.MouseEvent, sha: string): void => {
+    moveHere()
     if (sha !== 'wip' && bySha.get(sha)?.kind === 'commit' && (e.ctrlKey || e.metaKey)) {
       setExtent(null)
       return act.toggleSelect(repoId, sha, order)
@@ -366,6 +388,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
   const onKey = (e: React.KeyboardEvent): void => {
     const move = (d: number): void => {
       e.preventDefault()
+      moveHere()
       if (e.shiftKey && selected && selected !== 'wip') {
         // Shift: grow or shrink the selection from its moving end, over commits only.
         const from = order.indexOf(extentIndex >= 0 && extent ? extent : selected)
@@ -382,6 +405,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
     else if (e.key === 'ArrowUp' || e.key === 'k' || e.key === 'K') move(-1)
     else if (e.key === 'Escape' && multi.length) {
       e.preventDefault()
+      moveHere()
       setExtent(null)
       act.select(repoId, selected)
     }
@@ -391,6 +415,16 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
     else if (e.key === 'PageUp') move(-20)
   }
 
+  if (!loading && rows.length === 0 && filtered) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <FilterBar repoId={repoId} />
+        <div className="grid flex-1 place-items-center">
+          <EmptyState icon={ListFilter} title="No commits match" body="Nothing in the history changes that path by that author. Try a shorter path or name." />
+        </div>
+      </div>
+    )
+  }
   if (!loading && rows.length === 0) {
     return (
       <div className="grid flex-1 place-items-center">
@@ -407,6 +441,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
 
   return (
     <div ref={outerRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <FilterBar repoId={repoId} />
       <div
         ref={parentRef}
         role="grid"
@@ -471,16 +506,21 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
                   ? `Stash: ${row.summary}`
                   : `${row.summary}, by ${row.authorName}, ${relativeTime(row.authorTime)}${rowRefs.length ? `, on ${rowRefs.map((r) => r.name).join(' and ')}` : ''}${mark && bisect ? `, bisect: ${mark === 'first' ? `first ${bisect.terms.bad}` : mark === 'skip' ? 'skipped' : bisect.terms[mark]}` : ''}`
             return (
-              <ContextMenu key={row.sha} items={multi.length && multiSet.has(row.sha) ? multiMenu(repoId, multi, line, headBranch) : rowMenu(repoId, row, rowRefs, headBranch, refs?.head.sha ?? null, line, bySha)}>
+              <ContextMenu key={row.sha} items={multi.length && multiSet.has(row.sha) ? multiMenu(repoId, multi, line, headBranch, filtered) : rowMenu(repoId, row, rowRefs, headBranch, refs?.head.sha ?? null, line, bySha, filtered)}>
                 <div
                   role="row"
                   aria-rowindex={it.index + 2}
                   aria-selected={isSel}
                   aria-label={label}
                   onClick={(e) => clickRow(e, row.sha)}
-                  onDoubleClick={() => {
-                    const local = rowRefs.find((r) => r.kind !== 'tag' && r.kind !== 'remote') ?? rowRefs.find((r) => r.kind === 'remote')
-                    if (local && !local.isHead) void act.checkout(repoId, local.name)
+                  onDoubleClick={(e) => {
+                    // A remote branch's label has its own click (below).
+                    if ((e.target as HTMLElement).closest('[data-remote-label]')) return
+                    const local = rowRefs.find((r) => r.kind !== 'tag' && r.kind !== 'remote')
+                    if (local) return void (!local.isHead && act.checkout(repoId, local.name))
+                    // Only a remote branch here: its local branch is brought up to it (or made), then checked out.
+                    const remote = rowRefs.find((r) => r.kind === 'remote')
+                    if (remote) void act.fastForwardTo(repoId, remote.name, { checkout: true })
                   }}
                   className={cn(
                     'absolute left-0 flex w-full cursor-default items-center text-base select-none',
@@ -497,7 +537,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
                     onMouseLeave={() => setHoverSha(null)}
                   >
                     {rowRefs.slice(0, 1).map((r) => (
-                      <DraggableRef key={r.key} r={r} lane={lay?.color ?? 0} onDrop={(t) => setDrop(t)} repoId={repoId} />
+                      <DraggableRef key={r.key} r={r} lane={lay?.color ?? 0} onDrop={(t) => setDrop(t)} repoId={repoId} pr={pulls?.state === 'ok' ? act.pullFor(repoId, r.name) : undefined} />
                     ))}
                     {rowRefs.length > 1 ? (
                       // Only the first branch gets a pill; the rest are one click away, with the same actions as the row menu.
@@ -513,7 +553,7 @@ export function GraphView({ repoId }: { repoId: string }): React.JSX.Element {
                             +{rowRefs.length - 1}
                           </button>
                         }
-                        items={rowMenu(repoId, row, rowRefs.slice(1), headBranch, refs?.head.sha ?? null, line, bySha).filter((e) => e.type === 'sub')}
+                        items={rowMenu(repoId, row, rowRefs.slice(1), headBranch, refs?.head.sha ?? null, line, bySha, filtered).filter((e) => e.type === 'sub')}
                       />
                     ) : null}
                   </div>
@@ -594,7 +634,7 @@ function GraphSkeleton(): React.JSX.Element {
   )
 }
 
-function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number; onDrop: (t: DropTarget) => void; repoId: string }): React.JSX.Element {
+function DraggableRef({ r, lane, onDrop, repoId, pr }: { r: DisplayRef; lane: number; onDrop: (t: DropTarget) => void; repoId: string; /** The pull request this branch is for. */ pr?: PullRequest }): React.JSX.Element {
   const [over, setOver] = useState(false)
   const canDrag = r.kind !== 'tag'
   return (
@@ -611,6 +651,10 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
         }
       }}
       onDragLeave={() => setOver(false)}
+      // A remote branch's label checks it out: its local branch moves up to it, or (asking first) is reset to it.
+      data-remote-label={r.kind === 'remote' ? '' : undefined}
+      title={r.kind === 'remote' ? `Click to check out ${r.name}` : undefined}
+      onClick={r.kind === 'remote' ? (e) => e.detail === 1 && void act.fastForwardTo(repoId, r.name, { checkout: true, resetFirst: true }) : undefined}
       onDrop={(e) => {
         setOver(false)
         const data = e.dataTransfer.getData('application/x-caboose-ref')
@@ -619,9 +663,14 @@ function DraggableRef({ r, lane, onDrop, repoId }: { r: DisplayRef; lane: number
         if (src.repoId !== repoId || src.name === r.name) return
         onDrop({ source: src.name, sourceKind: src.kind, target: r.name, targetKind: r.kind, x: e.clientX, y: e.clientY })
       }}
-      className={cn('min-w-0 rounded-sm', over && 'outline-2 outline-dashed outline-accent')}
+      className={cn('inline-flex min-w-0 items-center rounded-sm', r.kind === 'remote' && 'cursor-pointer', over && 'outline-2 outline-dashed outline-accent')}
     >
       <RefPill name={r.label} kind={r.kind} remote={r.remote} lane={lane} current={r.isHead} />
+      {pr ? (
+        <span title={`Pull request #${pr.number}: ${pr.title}`} className="ml-1 shrink-0 text-xs text-muted">
+          #{pr.number}
+        </span>
+      ) : null}
     </span>
   )
 }
@@ -631,6 +680,7 @@ export function stashMenu(repoId: string, sha: string, label: string): MenuEntry
     { type: 'item', label: 'Pop (apply and delete)', icon: <ArchiveRestore size={14} />, onSelect: () => void act.stashApply(repoId, sha, true) },
     { type: 'item', label: 'Apply (keep the stash)', onSelect: () => void act.stashApply(repoId, sha, false) },
     { type: 'item', label: 'Rename…', icon: <Pencil size={14} />, onSelect: () => act.openDialog({ kind: 'renameStash', repoId, sha, message: label.replace(/^On [^:]+: /, '') }) },
+    { type: 'item', label: 'Create a branch from this stash…', icon: <GitBranch size={14} />, onSelect: () => act.openDialog({ kind: 'stashBranch', repoId, sha, label: label.replace(/^On [^:]+: /, '') }) },
     { type: 'separator' },
     { type: 'item', label: 'Delete stash…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.stashDrop(repoId, sha, label) }
   ]
@@ -647,30 +697,85 @@ export function squashProblem(shas: string[], line: string[], parentsOf: (sha: s
   return null
 }
 
+/** Who the commits are by: you, someone else, or an added co-author. `why`: why it can't be changed here. */
+function authorMenu(repoId: string, shas: string[], why: string | null): MenuEntry {
+  const off = why ? [{ type: 'item' as const, label: why, disabled: true }, { type: 'separator' as const }] : []
+  return {
+    type: 'sub',
+    label: 'Author',
+    icon: <UserPen size={14} />,
+    items: [
+      ...off,
+      { type: 'item', label: 'Reset author to you', disabled: !!why, onSelect: () => act.setAuthorship(repoId, shas, { kind: 'reset' }) },
+      { type: 'item', label: 'Set author…', disabled: !!why, onSelect: () => act.openDialog({ kind: 'author', repoId, shas, mode: 'set' }) },
+      { type: 'item', label: 'Add co-author…', disabled: !!why, onSelect: () => act.openDialog({ kind: 'author', repoId, shas, mode: 'coAuthor' }) }
+    ]
+  }
+}
+
+/** Why the authors of these commits can't be changed (off the branch's line, merges in the way), or null. */
+function authorProblem(shas: string[], line: string[], parentsOf: (sha: string) => string[] | undefined): string | null {
+  const idx = shas.map((s) => line.indexOf(s))
+  if (idx.some((i) => i < 0)) return 'Only commits on the checked-out branch’s own line'
+  if (shas.some((s) => (parentsOf(s)?.length ?? 1) > 1)) return 'Merge commits can’t be changed here'
+  // The newest commit alone is amended; anything older is replayed from its parent.
+  if (line.length > 1 && shas.some((s) => parentsOf(s)?.length === 0)) return 'The very first commit can’t be changed here'
+  if (line.slice(0, Math.max(...idx)).some((s) => (parentsOf(s)?.length ?? 1) > 1)) return 'A merge commit after these would be flattened'
+  return null
+}
+
+/** Stands in for the commands that rewrite the branch while a filter hides commits on it. */
+const clearToEdit = (repoId: string, here: string): MenuEntry[] => [
+  { type: 'item', label: `Clear the filter to edit commits on ${here}`, icon: <ListFilter size={14} />, onSelect: () => act.setFilter(repoId, null) },
+  { type: 'separator' }
+]
+
 /** The right-click menu for several selected commits. */
-function multiMenu(repoId: string, shas: string[], line: string[], headBranch: string | null): MenuEntry[] {
+function multiMenu(repoId: string, shas: string[], line: string[], headBranch: string | null, filtered: boolean): MenuEntry[] {
   const r = useApp.getState().repos[repoId]
   const parentsOf = (sha: string): string[] | undefined => r?.commits.find((c) => c.sha === sha)?.parents
   const here = headBranch ?? 'HEAD'
   const onLine = shas.every((s) => line.includes(s))
   const offLine = shas.every((s) => !line.includes(s))
   return [
+    ...(filtered ? clearToEdit(repoId, here) : []),
     { type: 'item', label: `Squash ${shas.length} commits into one…`, icon: <Combine size={14} />, disabled: !!squashProblem(shas, line, parentsOf), onSelect: () => void act.askSquash(repoId, shas) },
     { type: 'item', label: `Rebase these ${shas.length} commits…`, icon: <ListOrdered size={14} />, disabled: !onLine, onSelect: () => act.rebaseRange(repoId, shas) },
     { type: 'item', label: `Cherry-pick ${shas.length} commits onto ${here}`, icon: <GitPullRequestArrow size={14} />, disabled: !offLine, onSelect: () => void act.cherryPick(repoId, [...shas].reverse()) },
     ...(shas.length === 2 ? [{ type: 'item' as const, label: 'Compare these two commits', icon: <GitCompare size={14} />, onSelect: () => act.compareCommits(repoId, shas) }] : []),
+    ...(onLine ? [authorMenu(repoId, shas, authorProblem(shas, line, parentsOf))] : []),
     { type: 'separator' },
+    patchMenu(repoId, shas, shas.some((s) => (parentsOf(s)?.length ?? 0) > 1)),
     { type: 'item', label: 'Copy commit SHAs', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(shas.join('\n')) },
     { type: 'item', label: 'Clear the selection', shortcut: 'Esc', onSelect: () => act.select(repoId, shas[0]) }
   ]
 }
 
-function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch: string | null, headSha: string | null, line: string[], bySha: Map<string, CommitRow>): MenuEntry[] {
+/** Patch › Copy as patch / Save as patch file…: not for merge commits, which git format-patch leaves out. */
+function patchMenu(repoId: string, shas: string[], merge: boolean): MenuEntry {
+  return {
+    type: 'sub',
+    label: 'Patch',
+    icon: <FileDiff size={14} />,
+    items: merge
+      ? [{ type: 'item', label: 'Merge commits can’t be made into patches', disabled: true }]
+      : [
+          { type: 'item', label: shas.length === 1 ? 'Copy as patch' : `Copy ${shas.length} commits as patch`, onSelect: () => void act.copyCommitsPatch(repoId, shas) },
+          { type: 'item', label: 'Save as patch file…', onSelect: () => void act.saveCommitsPatch(repoId, shas) }
+        ]
+  }
+}
+
+function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch: string | null, headSha: string | null, line: string[], bySha: Map<string, CommitRow>, filtered: boolean): MenuEntry[] {
   if (row.kind === 'wip') {
     return [
       { type: 'item', label: 'Stage all changes', onSelect: () => void act.stage(repoId, 'all') },
       { type: 'item', label: 'Find the commit these changes belong to', icon: <Search size={14} />, onSelect: () => void act.findFixupTarget(repoId) },
       { type: 'item', label: 'Stash changes…', icon: <Archive size={14} />, onSelect: () => act.openDialog({ kind: 'stash', repoId }) },
+      { type: 'item', label: 'Copy all changes as patch', icon: <FileDiff size={14} />, onSelect: () => void act.copyChangesPatch(repoId, 'all') },
+      { type: 'item', label: 'Apply a patch…', icon: <ClipboardPaste size={14} />, onSelect: () => act.openDialog({ kind: 'applyPatch', repoId }) },
+      { type: 'item', label: 'Remove untracked files…', icon: <Eraser size={14} />, onSelect: () => act.openDialog({ kind: 'clean', repoId, untrackedOnly: true }) },
+      { type: 'item', label: 'Clean up the working tree…', icon: <Eraser size={14} />, onSelect: () => act.openDialog({ kind: 'clean', repoId }) },
       { type: 'item', label: 'Discard all changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, 'all') }
     ]
   }
@@ -681,7 +786,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     const items: MenuEntry[] = []
     if (!r.isHead) items.push({ type: 'item', label: `Check out ${r.name}`, icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, r.name) })
     if (headBranch && !r.isHead) {
-      items.push({ type: 'item', label: `Merge ${r.name} into ${headBranch}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.name, headBranch) })
+      items.push(...mergeEntries(repoId, r.name, headBranch, true))
       items.push({ type: 'item', label: `Rebase ${headBranch} onto ${r.name}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, headBranch, r.name) })
       items.push(rebaseOntoEntry(repoId, headBranch, r.name))
       items.push(compareEntry(repoId, headBranch, r.name))
@@ -694,6 +799,8 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
     if (r.local) {
       items.push(pullEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream, upstreamGone: r.local.upstreamGone, worktree: r.local.worktree }))
       items.push(pushEntry(repoId, { name: r.name, isHead: r.isHead, upstream: r.local.upstream }, remotes))
+      const pr = createPullEntry(repoId, r.name)
+      if (pr) items.push(pr)
       items.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.name }) })
       items.push({ type: 'item', label: 'Delete…', danger: true, icon: <Trash2 size={14} />, disabled: r.isHead, onSelect: () => act.deleteBranch(repoId, r.name) })
     }
@@ -710,7 +817,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   const here = headBranch ?? 'HEAD'
   const isHead = row.sha === headSha
   entries.push(
-    { type: 'item', label: 'Create branch here…', icon: <Plus size={14} />, shortcut: 'Ctrl+B', onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: row.sha, atLabel: short }) },
+    { type: 'item', label: 'Create branch here…', icon: <Plus size={14} />, shortcut: keyFor('new-branch'), onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'New worktree here…', icon: <FolderPlus size={14} />, onSelect: () => act.openDialog({ kind: 'addWorktree', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'Create tag here…', icon: <Tag size={14} />, onSelect: () => act.openDialog({ kind: 'createTag', repoId, at: row.sha, atLabel: short }) },
     { type: 'item', label: 'Check out this commit (detached)', onSelect: () => void act.checkout(repoId, row.sha) },
@@ -721,6 +828,9 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: `Cherry-pick onto ${here}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.cherryPick(repoId, [row.sha]) },
       { type: 'item', label: `Pick several commits up to here…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'cherry', tip: row.sha, tipLabel: short }) },
       { type: 'item', label: `Rewrite ${here} after this commit…`, icon: <ListOrdered size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'rebase', onto: row.sha, ontoLabel: short }) },
+      ...(headBranch && line.includes(row.sha)
+        ? [{ type: 'item' as const, label: `Move ${here}’s commits after this onto…`, icon: <GitPullRequestArrow size={14} />, onSelect: () => act.openDialog({ kind: 'rebaseFrom', repoId, from: row.sha, fromLabel: short }) }]
+        : []),
       { type: 'item', label: `Reset ${here} to this commit…`, icon: <RotateCcw size={14} />, onSelect: () => act.openDialog({ kind: 'reset', repoId, target: row.sha, targetLabel: short }) },
       { type: 'item', label: `Compare with ${here}`, icon: <GitCompare size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'compare', base: row.sha, target: headBranch ?? headSha, baseLabel: short, targetLabel: here }) }
     )
@@ -738,6 +848,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
       { type: 'item', label: 'Move commit up', icon: <ArrowUp size={14} />, disabled: !newer || mergeAfter || isMerge(row.sha), onSelect: () => act.moveCommit(repoId, row.sha, 'up') },
       // Moving below the first commit isn't possible: the older neighbour needs a parent too.
       { type: 'item', label: 'Move commit down', icon: <ArrowDown size={14} />, disabled: !older || mergeAfter || isMerge(row.sha) || isMerge(older), onSelect: () => act.moveCommit(repoId, row.sha, 'down') },
+      authorMenu(repoId, [row.sha], authorProblem([row.sha], line, (s) => bySha.get(s)?.parents)),
       { type: 'separator' },
       // Not the very first commit: the rebase that folds them in starts from its parent.
       { type: 'item', label: 'Amend staged changes into this commit', icon: <FilePlus2 size={14} />, disabled: !staged || mergeAfter || isMerge(row.sha) || !row.parents.length, onSelect: () => act.amendInto(repoId, row.sha) },
@@ -747,7 +858,7 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
         : []),
       { type: 'separator' }
     )
-  }
+  } else if (filtered && headSha) entries.push(...clearToEdit(repoId, here))
   const bisect = useApp.getState().repos[repoId]?.status?.bisect
   if (bisect && !bisect.firstBad) {
     entries.push(
@@ -765,9 +876,12 @@ function rowMenu(repoId: string, row: CommitRow, refs: DisplayRef[], headBranch:
   }
   entries.push(
     { type: 'item', label: 'Revert this commit', icon: <Undo size={14} />, onSelect: () => act.revert(repoId, row.sha, row.parents.length > 1) },
+    { type: 'item', label: `Show only commits by ${row.authorName}`, icon: <ListFilter size={14} />, onSelect: () => act.setFilter(repoId, { author: row.authorName }) },
     { type: 'separator' },
     ...(remotes.length ? [webEntry(repoId, { sha: row.sha })] : []),
-    { type: 'item', label: 'Copy commit SHA', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(row.sha) }
+    patchMenu(repoId, [row.sha], row.parents.length > 1),
+    { type: 'item', label: 'Copy commit SHA', icon: <Copy size={14} />, onSelect: () => void navigator.clipboard.writeText(row.sha) },
+    ...customMenu(repoId, 'commit', { commit: row.sha })
   )
   return entries
 }

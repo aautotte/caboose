@@ -35,6 +35,14 @@ export interface CommitRow {
   authorTime: number // unix seconds
   summary: string
   kind: RowKind
+  /** With a filter on: the parents as the graph draws them, the nearest commits it shows (the real ones stay in `parents`). */
+  drawn?: string[]
+}
+
+/** Narrows the graph to commits that change this path (a file, a folder or a pattern like *.md) and whose author matches this text. */
+export interface GraphFilter {
+  path?: string
+  author?: string
 }
 
 export interface GraphPage {
@@ -72,6 +80,13 @@ export interface Refs {
   refs: Ref[]
   stashes: Stash[]
   remotes: string[]
+  /** Local branches checked out before, most recent first, from HEAD's reflog; the current one isn't among them. */
+  recent: string[]
+  /**
+   * Where "Switch to the previous branch" goes, as `git checkout -` does: the branch (or, when HEAD was detached
+   * there, the commit's full sha) last switched away from. A branch deleted since is skipped.
+   */
+  previous: string | null
 }
 
 /** One letter per side, as git status reports it. '.' = unchanged. */
@@ -91,12 +106,23 @@ export interface Change {
 
 export type OperationKind = 'none' | 'merge' | 'rebase' | 'cherry_pick' | 'revert'
 
+/**
+ * What a merge, rebase or pull would run into, worked out without touching anything: the files that would conflict
+ * (none: it goes through). A rebase stops at the first commit that conflicts: `stopAt`.
+ */
+export interface ConflictForecast {
+  files: string[]
+  stopAt?: { sha: string; summary: string; step: number; total: number }
+}
+
 export interface OperationState {
   kind: OperationKind
   step?: number
   total?: number
   onto?: string
   head?: string
+  /** A rebase stopped at a commit marked Edit (not on conflicts): that commit, to change before continuing. */
+  edit?: { sha: string; summary: string }
 }
 
 export interface Status {
@@ -151,7 +177,6 @@ export interface CommitDetails {
   body: string
   coAuthors: Person[]
   files: FileChange[]
-  isHead: boolean
   /** null when the commit isn't signed. */
   signature: CommitSignature | null
 }
@@ -178,6 +203,31 @@ export interface Hunk {
   newStart: number
   newLines: number
   lines: DiffLine[]
+}
+
+/** Images a diff shows as pictures, by extension (SVG is text, so it diffs as lines). */
+export const IMAGE_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  avif: 'image/avif'
+}
+
+/** One version of an image. `data` (base64) is left out when it's larger than the app shows. */
+export interface ImageSide {
+  size: number
+  data?: string
+}
+
+/** An image's two versions, for a binary diff; null on the side where the file isn't (added, deleted). */
+export interface ImageDiff {
+  mime: string
+  old: ImageSide | null
+  new: ImageSide | null
 }
 
 export interface FileDiff {
@@ -234,6 +284,23 @@ export interface ConflictFile {
   diff3: string | null
   oursLabel: string
   theirsLabel: string
+}
+
+/** Other ways git can merge a file: leaving spacing-only changes aside, or matching lines up with another diff algorithm. */
+export type MergeAgainHow = 'ignore-space' | 'patience' | 'histogram'
+
+/** A conflicted file merged again: its text with conflict markers (the base's lines kept), and how many are left. */
+export interface MergeAgain {
+  how: MergeAgainHow
+  merged: string
+  conflicts: number
+}
+
+/** The commits on one side that changed a conflict's lines since the two sides split, newest first. */
+export interface ConflictWhy {
+  commits: Array<{ sha: string; summary: string; author: string; time: number }>
+  /** More than these. */
+  more: boolean
 }
 
 export type PullMode = 'ff' | 'ff-only' | 'rebase'
@@ -314,8 +381,8 @@ export interface LfsState {
 }
 
 export interface OpResult {
-  /** dirty: uncommitted changes are in the way (a pull that would overwrite them). */
-  result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale' | 'dirty'
+  /** dirty: uncommitted changes are in the way (a pull that would overwrite them). paused: a rebase stopped at a commit to edit. */
+  result: 'ok' | 'conflicts' | 'rejected' | 'needsUpstream' | 'nothing' | 'stale' | 'dirty' | 'paused'
   message?: string
   /** A fast-forward refused: how many commits the branch has that the target doesn't. */
   ahead?: number
@@ -349,6 +416,8 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: GcError }
 export interface RepoChangedEvent {
   repoId: string
   what: Array<'refs' | 'index' | 'worktree'>
+  /** When the last of these changes was seen (ms since the epoch): anything read after it shows them all. */
+  at: number
 }
 
 export interface ProgressEvent {
@@ -423,7 +492,19 @@ export interface Blame {
 
 export type ResetMode = 'soft' | 'mixed' | 'hard'
 
-export type RebaseAction = 'pick' | 'reword' | 'squash' | 'fixup' | 'drop'
+/** Who commits are by: you as the author, someone else, or a co-author added. `author` is "Name <email>". */
+export type AuthorChange = { kind: 'reset' } | { kind: 'set'; author: string } | { kind: 'coAuthor'; author: string }
+
+/** What cleaning up the working tree can remove. Ignored folders come as one entry each (node_modules/). */
+export interface CleanPreview {
+  tracked: string[]
+  untracked: string[]
+  ignored: string[]
+  /** Conflicted files: nothing can be put aside until they're resolved. */
+  conflicted: boolean
+}
+
+export type RebaseAction = 'pick' | 'reword' | 'edit' | 'squash' | 'fixup' | 'drop'
 
 export interface RebaseRow {
   sha: string
@@ -432,6 +513,8 @@ export interface RebaseRow {
   authorName: string
   authorEmail: string
   authorTime: number
+  /** How big it is: files changed, lines added and removed (binary files count as files, with no lines). */
+  stat?: { files: number; adds: number; dels: number }
 }
 
 export interface RebaseStep {
@@ -447,11 +530,29 @@ export interface RebasePreview {
   rows: RebaseRow[]
   /** Merge commits in the range: interactive rebase here would flatten them, so it's refused. */
   merges: number
+  /** Other local branches that point at commits in the range (stacked on them): a rebase can move them along. */
+  stacked: Array<{ name: string; sha: string }>
+  /** git config rebase.updateRefs: whether git moves stacked branches by default. */
+  updateRefs: boolean
 }
 
 export interface GitIdentity {
   name: string | null
   email: string | null
+}
+
+/** A patch to apply: text pasted in, or a file picked (read as is, so CRLF lines survive). */
+export type PatchSource = { kind: 'text'; text: string } | { kind: 'file'; path: string }
+/** Where a patch goes: the working files, the staged changes (and the files with them), or new commits (git am). */
+export type PatchTarget = 'worktree' | 'index' | 'commits'
+
+export interface PatchPreview {
+  /** The files it changes; added / removed are null for a binary file. */
+  files: { path: string; added: number | null; removed: number | null }[]
+  /** One per commit, oldest first, when it's a mailbox from git format-patch. Empty for a plain diff. */
+  commits: { subject: string; author: string }[]
+  /** Why it can't be applied there, in git's words; null when it applies. */
+  problem: string | null
 }
 
 export interface RefViewState {
@@ -503,6 +604,75 @@ export interface SshKey {
   publicKey: string
 }
 
+/** What ssh-agent holds: whether one answers at all, and the public keys it has ("type base64", no comment). */
+export interface AgentState {
+  running: boolean
+  keys: string[]
+}
+
+export interface SshTest {
+  ok: boolean
+  /** What the host said, in a sentence: who you're signed in as, or why not. */
+  message: string
+  output: string
+}
+
+export type SshHost = 'github' | 'gitlab' | 'bitbucket' | 'azure'
+
+export interface GitHubUser {
+  login: string
+  name: string | null
+}
+
+/** What a new pull request for a branch starts with, and what pushing it needs first. */
+export interface PullDraft {
+  title: string
+  body: string
+  /** Commits on the branch that the base doesn't have; GitHub turns down a pull request with none. */
+  commits: number
+  /**
+   * none: not on the GitHub remote yet; ahead: there, with commits still to push; pushed: up to date there.
+   */
+  push: 'none' | 'ahead' | 'pushed'
+  /** The branch's name on the remote: what the pull request is from. */
+  head: string
+  /** Pushing it should also make it track the remote branch: it tracks nothing yet. */
+  track: boolean
+}
+
+/** Step one of signing in to GitHub: the code to type at its page. */
+export interface DeviceCode {
+  userCode: string
+  verificationUri: string
+  /** Seconds before the code runs out. */
+  expiresIn: number
+}
+
+export interface PullRequest {
+  number: number
+  title: string
+  url: string
+  author: string
+  draft: boolean
+  /** ISO time of the last activity. */
+  updatedAt: string
+  /** The branch it's from, on its own repository (a fork's, when fromFork). */
+  head: string
+  headSha: string
+  base: string
+  fromFork: boolean
+  /** The checks on its last commit, all together; null when there are none. */
+  checks: 'success' | 'failure' | 'pending' | null
+  review: 'approved' | 'changes' | 'required' | null
+}
+
+/** A repository's pull requests, or why there are none to show. */
+export type PullsResult =
+  | { state: 'none' } // no remote on github.com
+  | { state: 'signedOut'; repo: string }
+  | { state: 'ok'; repo: string; remote: string; defaultBranch: string; pulls: PullRequest[] }
+  | { state: 'error'; repo: string; message: string }
+
 export type GraphColumnKey = 'author' | 'date' | 'sha'
 
 export interface GraphColumn {
@@ -513,6 +683,27 @@ export interface GraphColumn {
 
 /** Git config keys the app reads and writes (Settings). */
 export type GitConfigKey = 'user.signingkey' | 'commit.gpgsign' | 'commit.template' | 'diff.tool' | 'merge.tool'
+
+/** Git Flow's three kinds of short-lived branch. */
+export type FlowKind = 'feature' | 'release' | 'hotfix'
+
+/** Git Flow's settings, from the same git config keys the git-flow tool uses (gitflow.branch.*, gitflow.prefix.*). */
+export interface FlowConfig {
+  /** Where releases land: gitflow.branch.master. */
+  production: string
+  /** Where features land: gitflow.branch.develop. */
+  develop: string
+  prefix: Record<FlowKind, string>
+  /** Put in front of a release's or hotfix's version to make its tag (gitflow.prefix.versiontag), often "" or "v". */
+  tagPrefix: string
+}
+
+export interface FlowFinished {
+  /** The branches it was merged into, in order; one it was already in is left out. */
+  merged: string[]
+  tag: string | null
+  deleted: boolean
+}
 
 export interface AuthPromptEvent {
   promptId: string

@@ -1,6 +1,7 @@
 # Keyboard shortcuts
 
-**Ctrl+/** shows this list in the app. On macOS, Cmd works wherever Ctrl is written.
+**Ctrl+/** shows this list in the app, with any you've changed. On macOS, Cmd works wherever Ctrl is written.
+These are the keys out of the box: most can be [changed](#changing-a-shortcut).
 
 ## Repository
 
@@ -12,6 +13,7 @@
 | Unstage all | Ctrl+Shift+U |
 | Focus the commit summary | Ctrl+Shift+M |
 | New branch | Ctrl+B |
+| Switch to the previous branch | Ctrl+Shift+B |
 | Fetch all | Ctrl+L |
 | Undo | Ctrl+Z |
 | Redo | Ctrl+Y |
@@ -26,6 +28,7 @@
 | Search commits | Ctrl+F (when no file is open) |
 | Find in the open file | Ctrl+F (in a diff) |
 | Filter branches | Ctrl+Alt+F |
+| Filter the graph by path or author | Ctrl+Shift+F |
 | Command palette | Ctrl+P |
 | Collapse or expand the branches panel | Ctrl+J |
 | Collapse or expand the details panel | Ctrl+K |
@@ -40,6 +43,7 @@
 | Close tab | Ctrl+W |
 | Go to tab 1 to 9 | Ctrl+1 … Ctrl+9 |
 | Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Move the tab left / right | Ctrl+Shift+← / → (on the tab) |
 | Open a folder | Alt+O |
 
 ## Branches panel
@@ -75,3 +79,23 @@ Focus a block of changes first (click it, or Tab to it).
 | | |
 | --- | --- |
 | Good, Bad, Skip | G, B, S |
+
+## Changing a shortcut
+
+**Settings › Keyboard shortcuts**, or **Change shortcuts…** under the list Ctrl+/ shows. Every command in the
+Repository, Moving around and Tabs lists above can change, and so can these, which have no key to start with:
+Pull, Pull (rebase), Push, Stash changes, Pop the newest stash, Apply a patch, Compare, Focus on this branch,
+Reflog, Git activity log, Settings, Switch theme and Open in terminal, editor or file manager. So can
+[your own commands](custom-commands.md).
+
+1. Click **Change** next to it. It says **Press the keys**.
+2. Press the new keys. **Esc** leaves it as it was.
+
+The keys need Ctrl or Alt, or are one of F1 to F12: a key on its own is for typing and the lists. A few stay
+as they are: Ctrl+C, Ctrl+V, Ctrl+X and Ctrl+A, Ctrl+Enter (commit), Ctrl+Tab, Ctrl+Shift+← / → (moving a tab),
+Ctrl+1 to Ctrl+9, Ctrl+Home and Ctrl+End. A key another command has is offered with **Use it here instead**, which leaves the other one
+without a shortcut.
+
+Next to a shortcut, **×** takes it away and the arrow puts back the one it came with. **Put every shortcut
+back** at the end of the list does that for all of them. Menus, tooltips and the command palette show the keys
+as they are now.

@@ -10,7 +10,23 @@ buttons to finish.
 | **Skip this commit** | during a rebase: leave out the commit that conflicts and go on |
 | **Abort** | put everything back as it was before the operation started |
 
+A rebase also stops at a commit marked [Edit](rewriting-history.md#stop-to-edit-a-commit). There's nothing to
+resolve: change the commit, then **Continue**.
+
 Conflicted files are marked **U** in the file list. Click one to open it in the merge tool.
+
+## Before you start
+
+Before a merge, a rebase onto another branch, or a pull that merges or rebases, Caboose works out whether it would
+conflict, with `git merge-tree`: nothing in your files changes. If it would, it says so first, and with which files:
+
+- a merge: *Merging feature into main will conflict. Both sides changed the same lines in app.ts and README.md.*
+- a rebase replays one commit at a time, so it says which commit it would stop at: *It would stop at “Raise the
+  timeout” (commit 2 of 5)*.
+- a pull works from the last fetch: anything newer on the remote is fetched first, and isn't in the forecast.
+
+**Merge anyway** (or **Rebase anyway**, **Pull anyway**) goes ahead, and the conflicts are resolved as below.
+**Cancel** leaves everything as it was. One that goes through cleanly doesn't ask.
 
 ## The merge tool
 
@@ -26,6 +42,40 @@ The top shows **yours** (the branch you're on) and **theirs** (what's coming in)
 - You can type in the merged result directly. **Rebuild from picks** drops your edits and starts again from the
   picks.
 - **Save result** writes the file and stages it. It's enabled once no conflict is left open.
+
+The words each side changed are highlighted: against the base when it's known, against the other side otherwise.
+Above each side's lines, **Changed in** names the commits on that side that changed them since the two sides split,
+newest first, with who made the last one and when: often what decides which side is right. Click one to see it in
+the details panel; **Uncommitted changes** brings back the conflict banner.
+
+### Suggestions
+
+When the answer is clear from the two sides and what they started from, a conflict says what to keep, and why:
+
+| Suggested | When |
+| --- | --- |
+| **keep it once** | both sides made the same change |
+| **keep yours** or **keep theirs** | the other side left these lines as they were, or only changed their spacing; or both made the same change apart from spacing |
+| **keep both, sorted** | both sides added lines to a sorted list, such as imports: they go in, in order, a line both added once |
+| **keep both** | both sides added lines at the same place (yours first), or changed different lines next to each other, which git counts as a conflict too |
+
+**Use suggestion** puts it in the result, and **Use *n* suggestions** in the header takes them all. Nothing is taken
+until you ask, and nothing is saved until **Save result**. Ticking a side by hand replaces a suggestion. A conflict
+where both sides changed the same lines differently gets no suggestion: that one takes a person.
+
+### Merge again
+
+Some conflicts come from how git matched the lines up, not from what changed. **Merge again**, in the merge tool's
+header, redoes this file's merge from the same two sides, other ways, and says how many conflicts each one leaves:
+
+- **Ignoring changes in spacing**: reindented code or changed spaces stop conflicting. Where one side only changed
+  spacing, the other side's lines win, spacing and all.
+- **With the patience algorithm** or **the histogram algorithm**: lines are matched up differently, which helps
+  when blocks of code were moved, or when many lines look alike (blank lines, braces).
+
+Picking one puts it in the merge tool instead of git's own merge, with a note saying so: resolve what's left as
+usual, check the result, then **Save result**. Nothing is written before that. **Back to git's own merge** undoes
+the choice. During a rebase or a cherry-pick, the commit is merged again against its parent, as git does.
 
 Some conflicts aren't about lines:
 

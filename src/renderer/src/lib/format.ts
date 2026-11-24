@@ -21,6 +21,8 @@ export function fullDate(unixSeconds: number): string {
 }
 
 export const shortSha = (sha: string): string => sha.slice(0, 7)
+/** A branch or tag name as it is; a full sha in its short form. */
+export const refLabel = (ref: string): string => (/^[0-9a-f]{40}$/.test(ref) ? shortSha(ref) : ref)
 
 export function splitPath(p: string): { dir: string; name: string } {
   const i = p.lastIndexOf('/')

@@ -9,14 +9,16 @@ Caboose runs the git installed on your computer. Whatever it does, you can see t
 ## Start here
 
 1. [Getting started](getting-started.md): open, clone or create a repository, tabs, your name and email.
-2. [The commit graph](graph.md): reading it, focusing, hiding branches, columns, search.
+2. [The commit graph](graph.md): reading it, focusing, hiding branches, filtering by path or author, columns, search.
 3. [Staging and committing](staging-and-committing.md): files, blocks and lines, diffs, find in file, amend,
-   signing, ignoring files.
+   signing, ignoring files, patches.
 
 ## Day to day
 
-4. [Branches, tags and stashes](branches-tags-stashes.md)
-5. [Syncing with remotes](syncing.md): fetch, pull, push, several remotes, background fetch.
+4. [Branches, tags and stashes](branches-tags-stashes.md): recent branches, merge and rebase, Git Flow, tags,
+   stashes, remotes.
+5. [Syncing with remotes](syncing.md): fetch, pull, push, several remotes, background fetch, pull requests on
+   GitHub.
 6. [Undo](undo.md): what can be undone, and what can't.
 7. [File history, blame, compare and the reflog](history-and-blame.md)
 
@@ -36,6 +38,7 @@ Caboose runs the git installed on your computer. Whatever it does, you can see t
 ## Reference
 
 14. [Settings and profiles](settings.md)
-15. [Keyboard shortcuts](shortcuts.md)
-16. [Everything else](everything-else.md): Git activity log, command palette, panels, external tools.
-17. [Troubleshooting](troubleshooting.md)
+15. [Keyboard shortcuts](shortcuts.md): the list, and changing them.
+16. [Your own commands](custom-commands.md): git commands of your own in the menus and the palette.
+17. [Everything else](everything-else.md): Git activity log, command palette, panels, external tools.
+18. [Troubleshooting](troubleshooting.md)

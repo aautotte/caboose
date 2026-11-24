@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { KeyRound } from 'lucide-react'
-import type { ResetMode } from '../../../shared/types'
-import { Button, Checkbox, Dialog, Field, Select, TextArea, TextInput } from '@/ui'
+import type { Remote, ResetMode } from '../../../shared/types'
+import { Button, Checkbox, Dialog, Field, SegmentedControl, Select, TextArea, TextInput } from '@/ui'
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { plural } from '@/lib/format'
-import { useApp, type Dialog as D } from '@/store'
+import { useApp, type Dialog as D, type StashPart } from '@/store'
 import * as act from '@/actions'
 
 const close = (): void => act.closeDialog()
@@ -26,27 +26,28 @@ function DialogForm({ onSubmit, children }: { onSubmit: () => void; children: Re
   )
 }
 
-/** F13: stash the uncommitted work, optionally named, optionally only what's staged, only some files, or only some lines. */
+type StashWhat = 'all' | 'staged' | 'files'
+
+/** F13: stash the uncommitted work, optionally named: all of it, only what's staged, some files, or one block or some lines of a file. */
 export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.JSX.Element {
+  return d.part ? <StashPartDialog repoId={d.repoId} part={d.part} /> : <StashChangesDialog d={d} />
+}
+
+/** One block, or some lines, of a file's unstaged changes, from its diff. */
+function StashPartDialog({ repoId, part }: { repoId: string; part: StashPart }): React.JSX.Element {
   const [message, setMessage] = useState('')
-  const [stagedOnly, setStagedOnly] = useState(false)
   const [busy, setBusy] = useState(false)
-  const status = useApp((s) => s.repos[d.repoId]?.status)
-  const untracked = useApp((s) => s.prefs.stashUntracked)
-  const stagedCount = status?.changes.filter((c) => c.index !== '.' && c.index !== '?' && !c.conflicted).length ?? 0
-  const { paths, part } = d
   const submit = async (): Promise<void> => {
     setBusy(true)
-    const ok = part ? await act.stashLines(d.repoId, part, message) : await act.stashSave(d.repoId, message, stagedOnly, paths)
+    const ok = await act.stashLines(repoId, part, message)
     setBusy(false)
     if (ok) close()
   }
-  const shown = paths?.slice(0, 8) ?? []
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && close()}
-      title={part ? `Stash ${part.what}` : paths ? `Stash ${plural(paths.length, 'file')}` : 'Stash changes'}
+      title={`Stash ${part.what}`}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -57,35 +58,78 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
       }
     >
       <DialogForm onSubmit={() => void submit()}>
-        {part ? (
-          <p className="text-base text-text">
-            Puts the {part.lines ? 'selected lines' : 'block'} of <span className="font-mono text-sm">{part.path}</span> aside and takes them out of the file. The rest of your changes stay. Pop
-            the stash to bring them back.
-          </p>
-        ) : paths ? (
-          <>
-            <p className="text-base text-text">Puts the changes in these files aside, staged and unstaged, new files too. Your other changes stay. Pop the stash to bring them back.</p>
-            <ul className="max-h-40 overflow-auto rounded border border-border bg-surface px-2 py-1 font-mono text-sm text-text">
-              {shown.map((p) => (
-                <li key={p} className="truncate">
-                  {p}
-                </li>
-              ))}
-              {paths.length > shown.length ? <li className="font-sans text-muted">and {plural(paths.length - shown.length, 'more file')}</li> : null}
-            </ul>
-          </>
-        ) : (
-          <p className="text-base text-text">Puts your uncommitted changes aside and leaves the working folder clean. Pop the stash to bring them back.</p>
-        )}
+        <p className="text-base text-text">
+          Puts the {part.lines ? 'selected lines' : 'block'} of <span className="font-mono text-sm">{part.path}</span> aside and takes them out of the file. The rest of your changes stay. Pop
+          the stash to bring them back.
+        </p>
         <Field label="Name (optional)" help="Helps you find it later in the Stashes list.">
           {(p) => <TextInput {...p} autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="half-done settings page" />}
         </Field>
-        {!part && !paths ? (
-          <>
-            <Checkbox label={`Only staged changes (${stagedCount})`} checked={stagedOnly} disabled={stagedCount === 0} onCheckedChange={setStagedOnly} />
-            {!stagedOnly ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
-          </>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+function StashChangesDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.JSX.Element {
+  const [message, setMessage] = useState('')
+  const [what, setWhat] = useState<StashWhat>(d.paths ? 'files' : 'all')
+  const [picked, setPicked] = useState<string[]>(d.paths ?? [])
+  const [keepIndex, setKeepIndex] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const status = useApp((s) => s.repos[d.repoId]?.status)
+  const untracked = useApp((s) => s.prefs.stashUntracked)
+  const changes = useMemo(() => (status?.changes ?? []).filter((c) => !c.conflicted), [status])
+  const stagedCount = changes.filter((c) => c.index !== '.' && c.index !== '?').length
+  const ready = what !== 'files' || picked.length > 0
+  const submit = async (): Promise<void> => {
+    if (!ready) return
+    setBusy(true)
+    const ok = await act.stashSave(d.repoId, message, { stagedOnly: what === 'staged', paths: what === 'files' ? picked : undefined, keepIndex: what !== 'staged' && keepIndex })
+    setBusy(false)
+    if (ok) close()
+  }
+  const toggle = (path: string, on: boolean): void => setPicked((cur) => (on ? [...cur, path] : cur.filter((p) => p !== path)))
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title="Stash changes"
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            {what === 'files' && picked.length ? `Stash ${plural(picked.length, 'file')}` : 'Stash'}
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <p className="text-base text-text">Puts your uncommitted changes aside and leaves the working folder clean. Pop the stash to bring them back.</p>
+        <Field label="Name (optional)" help="Helps you find it later in the Stashes list.">
+          {(p) => <TextInput {...p} autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="half-done settings page" />}
+        </Field>
+        <SegmentedControl
+          label="What to stash"
+          value={what}
+          onValueChange={setWhat}
+          options={[
+            { value: 'all', label: 'All changes' },
+            { value: 'staged', label: `Staged only (${stagedCount})` },
+            { value: 'files', label: 'Some files' }
+          ]}
+        />
+        {what === 'files' ? (
+          <ul aria-label="Files to stash" className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border border-border bg-surface-sunken px-3 py-2">
+            {changes.map((c) => (
+              <li key={c.path}>
+                <Checkbox label={<span className="font-mono text-sm">{c.worktree === '?' ? `${c.path} (new)` : c.path}</span>} checked={picked.includes(c.path)} onCheckedChange={(on) => toggle(c.path, on)} />
+              </li>
+            ))}
+          </ul>
         ) : null}
+        {what === 'files' ? <p className="text-sm text-muted">Their staged and unstaged changes go into the stash, and only theirs. Your other changes stay.</p> : null}
+        {what === 'all' ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
+        {what !== 'staged' ? <Checkbox label="Keep the staged changes in the folder too" checked={keepIndex} onCheckedChange={setKeepIndex} /> : null}
       </DialogForm>
     </Dialog>
   )
@@ -203,6 +247,71 @@ export function AddRemoteDialog({ d }: { d: Extract<D, { kind: 'addRemote' }> })
           {(p) => <TextInput {...p} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/owner/repo.git" />}
         </Field>
         <Checkbox label="Fetch its branches now" checked={fetchAfter} onCheckedChange={setFetchAfter} />
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+/** Rename a remote, change its URL, or push somewhere else than it fetches from. */
+export function EditRemoteDialog({ d }: { d: Extract<D, { kind: 'editRemote' }> }): React.JSX.Element {
+  const remotes = useApp((s) => s.repos[d.repoId]?.refs?.remotes) ?? []
+  const [was, setWas] = useState<Remote | null>(null)
+  const [name, setName] = useState(d.name)
+  const [url, setUrl] = useState('')
+  const [pushUrl, setPushUrl] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    call('remote.list', { repoId: d.repoId })
+      .then((list) => {
+        const r = list.find((x) => x.name === d.name)
+        if (!live || !r) return
+        setWas(r)
+        setUrl(r.fetchUrl)
+        setPushUrl(r.pushUrl === r.fetchUrl ? '' : r.pushUrl)
+      })
+      .catch(act.fail)
+    return () => {
+      live = false
+    }
+  }, [d.repoId, d.name])
+  const n = name.trim()
+  const nameProblem = !n || n === d.name ? undefined : remotes.includes(n) ? 'A remote with that name already exists.' : /[\s~^:?*[\\]|\.\.|^-|\/$/.test(n) ? 'Use letters, numbers, dashes and dots.' : undefined
+  const urlProblem = urlProblemOf(url.trim())
+  const pushProblem = urlProblemOf(pushUrl.trim())
+  const changed = !!was && (n !== was.name || url.trim() !== was.fetchUrl || (pushUrl.trim() || url.trim()) !== was.pushUrl)
+  const ready = changed && !!n && !!url.trim() && !nameProblem && !urlProblem && !pushProblem
+  const submit = async (): Promise<void> => {
+    if (!ready) return
+    setBusy(true)
+    const ok = await act.editRemote(d.repoId, d.name, { name: n, fetchUrl: url.trim(), pushUrl: pushUrl.trim() })
+    setBusy(false)
+    if (ok) close()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title={`Edit remote ${d.name}`}
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" disabled={!ready} loading={busy} onClick={() => void submit()}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <Field label="Name" error={nameProblem} help="Renaming moves its remote branches, and your branches keep tracking them.">
+          {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} />}
+        </Field>
+        <Field label="URL" error={urlProblem} help="Where fetch and pull get commits from.">
+          {(p) => <TextInput {...p} value={url} disabled={!was} onChange={(e) => setUrl(e.target.value)} />}
+        </Field>
+        <Field label="Push URL (optional)" error={pushProblem} help="Leave it empty to push to the URL above.">
+          {(p) => <TextInput {...p} value={pushUrl} disabled={!was} onChange={(e) => setPushUrl(e.target.value)} />}
+        </Field>
       </DialogForm>
     </Dialog>
   )

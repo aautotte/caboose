@@ -1,7 +1,9 @@
 import { create } from 'zustand'
-import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
+import type { AuthPromptEvent, CommitRow, DiffSource, GitHubUser, PullsResult, FlowConfig, FlowKind, GraphColumn, Profile, PullMode, RefViewState, RepoSummary, Refs, Status, UndoPeek, LfsState, Submodule, SubmoduleSettings, Worktree } from '../../shared/types'
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
+import type { CommandContext, CustomCommand } from './lib/custom'
+import type { CommitRules } from './lib/commitRules'
 
 
 /** Part of one file's unstaged diff, picked for a stash. `what` names it for people ("3 lines", "a block"). */
@@ -11,6 +13,8 @@ export interface StashPart {
   header: string
   lines: number[] | null
   full: boolean
+  /** The lines of context the diff was shown with. */
+  context?: number
   what: string
 }
 
@@ -45,14 +49,18 @@ export interface RepoState {
   /** A commit whose message the details panel should open for editing (set from the graph's menu). */
   editing: string | null
   center: Center
+  /** While planning a rebase or a copy: a file of one of its commits, open under the list. */
+  rebaseFile: { path: string; oldPath?: string; source: DiffSource } | null
   undo: UndoPeek
   /** Running remote / long operations, by key. */
-  busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout', string>>
+  busy: Partial<Record<'fetch' | 'pull' | 'push' | 'commit' | 'op' | 'checkout' | 'flow', string>>
   progress: { phase: string; percent?: number; done?: number; total?: number } | null
   lastFetch: number | null
   fetchFailed: boolean
   search: string
   searchHits: string[] | null
+  /** The filter bar above the graph, while it’s open: the graph shows only commits that change `path` by authors matching `author` (empty: any). */
+  filter: { path: string; author: string } | null
   refView: RefViewState
   /** Auto-fetch stops after an auth failure until the next manual fetch. */
   autoFetchPaused: boolean
@@ -65,10 +73,19 @@ export interface RepoState {
   graphWidth: number | null
   /** The Branch / tag column's width, if the user dragged it; null follows the window. */
   refsWidth: number | null
+  /** This repository's commit message rules (Settings › This repository); null for none. */
+  commitRules: CommitRules | null
+  /** Git Flow's settings, when it's set up here. */
+  flow: FlowConfig | null
   /** The commit message being written. Kept here, not in the panel, so it survives looking at other commits. */
   draft: { summary: string; body: string }
   /** Read when the repository opens and after "Check again"; null until then. */
   lfs: LfsState | null
+  /** Its pull requests on GitHub (or why there are none to show); null until asked. */
+  pulls: PullsResult | null
+  pullsLoading: boolean
+  /** When the pull requests were last read (ms); they're read again on their own when older than a few minutes. */
+  pullsAt: number
   /** "Not now" on the LFS notice, for this session. */
   lfsDismissed: boolean
   /** The checked-out commit's submodules and this repository's submodule settings; null until read. */
@@ -95,10 +112,12 @@ export type Dialog =
   | { kind: 'renameBranch'; repoId: string; name: string }
   | { kind: 'publish'; repoId: string; branch: string }
   | { kind: 'shortcuts' }
-  /** `paths`: only those files. `part`: one block, or some of its lines, of a file's unstaged changes. */
+  /** `paths`: start with only these files picked. `part`: one block, or some of its lines, of a file's unstaged changes. */
   | { kind: 'stash'; repoId: string; paths?: string[]; part?: StashPart }
+  | { kind: 'stashBranch'; repoId: string; sha: string; label: string }
   | { kind: 'createTag'; repoId: string; at: string; atLabel: string }
   | { kind: 'addRemote'; repoId: string }
+  | { kind: 'editRemote'; repoId: string; name: string }
   /** `branch`: a local branch other than the checked-out one, which just moves (no files involved). */
   | { kind: 'reset'; repoId: string; target: string; targetLabel: string; branch?: string }
   | { kind: 'upstream'; repoId: string; branch: string }
@@ -118,6 +137,25 @@ export type Dialog =
   | { kind: 'patchCommit'; repoId: string; input: import('./actions').PatchInput; summary: string }
   /** Pick two branches or commits to compare. */
   | { kind: 'compare'; repoId: string }
+  /** Clean up the working tree: changes, untracked files, ignored files. `untrackedOnly`: only untracked ticked to start. */
+  | { kind: 'clean'; repoId: string; untrackedOnly?: boolean }
+  | { kind: 'applyPatch'; repoId: string }
+  | { kind: 'githubSignIn' }
+  | { kind: 'createPull'; repoId: string; branch: string }
+  | { kind: 'flowInit'; repoId: string }
+  | { kind: 'flowStart'; repoId: string; flowKind: FlowKind }
+  | { kind: 'flowFinish'; repoId: string; flowKind: FlowKind; name: string }
+  /** Squash merge: what `source` brings in, as one commit on `target`, with a message to write. */
+  | { kind: 'squashMerge'; repoId: string; source: string; target: string }
+  /** Move the current branch's commits after `from` onto another branch (git rebase --onto). */
+  | { kind: 'rebaseFrom'; repoId: string; from: string; fromLabel: string }
+  /** Set the author of commits, or add a co-author to them. */
+  /** `draft`: a co-author for the commit being written (no shas), not for commits already made. */
+  | { kind: 'author'; repoId: string; shas: string[]; mode: 'set' | 'coAuthor' | 'draft' }
+  /** One of your commands: its questions, then what it prints (each when it has some). */
+  | { kind: 'runCommand'; repoId: string; commandId: string; ctx: CommandContext }
+  /** Write a new command (no commandId) or change one. */
+  | { kind: 'editCommand'; commandId?: string }
   | {
       kind: 'confirm'
       title: string
@@ -138,12 +176,16 @@ export interface Prefs {
   detailWidth: number
   theme: 'dark' | 'light' | 'system'
   pushAfterCommit: boolean
+  /** The description is wrapped at 72 characters as it's committed (code, quotes and trailers aside). */
+  wrapOnCommit: boolean
   /** Minutes between background fetches; 0 turns it off. */
   autoFetchMinutes: number
   diffMode: DiffMode
   diffWrap: boolean
   stashUntracked: boolean
   historyListWidth: number
+  /** The height of a commit's file diff under the interactive rebase list, in px. */
+  rebaseDiffHeight: number
   /** Code size in diffs, blame and the merge tool, in px. */
   codeFontSize: number
   tabSize: number
@@ -154,6 +196,8 @@ export interface Prefs {
   mergeShowBase: boolean
   /** Diffs leave out lines that only changed whitespace (git diff -w). Line staging is off while it's on. */
   diffIgnoreWs: boolean
+  /** Unchanged lines shown above and below each change (git diff -U), one of DIFF_CONTEXT_STEPS. */
+  diffContext: number
   /** List files Git doesn't track yet among the unstaged changes. */
   showUntracked: boolean
   /** Changed-file lists show their folders as a tree instead of one flat list. */
@@ -161,11 +205,17 @@ export interface Prefs {
   /** The side panels shrunk to a thin rail (Ctrl+J, Ctrl+K). */
   leftCollapsed: boolean
   detailCollapsed: boolean
+  /** Shortcuts you changed, by command id (lib/keys.ts); '' takes a command's shortcut away. */
+  keymap: Record<string, string>
+  /** Your own git commands (Settings › Your commands). */
+  customCommands: CustomCommand[]
 }
 
 // Preferences live in the app database (main process). A copy in localStorage paints the right theme
 // before that answer arrives.
 const PREFS_KEY = 'caboose.prefs'
+/** The choices for Prefs.diffContext. Not 0: blocks with no lines around them can't be staged reliably. */
+export const DIFF_CONTEXT_STEPS = [1, 3, 5, 10, 25]
 const LEGACY_PREFS_KEY = 'mergatroid.prefs'
 export const defaultPrefs: Prefs = {
   pullMode: 'ff',
@@ -173,21 +223,26 @@ export const defaultPrefs: Prefs = {
   detailWidth: 380,
   theme: 'dark',
   pushAfterCommit: false,
+  wrapOnCommit: false,
   autoFetchMinutes: 1,
   diffMode: 'hunk',
   diffWrap: false,
   stashUntracked: true,
   historyListWidth: 320,
+  rebaseDiffHeight: 320,
   codeFontSize: 12,
   tabSize: 4,
   terminalCommand: '',
   editorCommand: '',
   mergeShowBase: true,
   diffIgnoreWs: false,
+  diffContext: 3,
   showUntracked: true,
   fileTree: false,
   leftCollapsed: false,
-  detailCollapsed: false
+  detailCollapsed: false,
+  keymap: {},
+  customCommands: []
 }
 
 function loadPrefs(): Prefs {
@@ -210,6 +265,7 @@ export const emptyRepo = (): RepoState => ({
   multi: [],
   editing: null,
   center: { kind: 'graph' },
+  rebaseFile: null,
   undo: { undo: null, redo: null },
   busy: {},
   progress: null,
@@ -217,6 +273,7 @@ export const emptyRepo = (): RepoState => ({
   fetchFailed: false,
   search: '',
   searchHits: null,
+  filter: null,
   refView: { hidden: [], soloed: [], pinned: null },
   autoFetchPaused: false,
   openedAt: Date.now(),
@@ -224,8 +281,13 @@ export const emptyRepo = (): RepoState => ({
   focusHead: false,
   graphWidth: null,
   refsWidth: null,
+  commitRules: null,
+  flow: null,
   draft: { summary: '', body: '' },
   lfs: null,
+  pulls: null,
+  pullsLoading: false,
+  pullsAt: 0,
   lfsDismissed: false,
   submodules: null,
   subOp: null,
@@ -248,6 +310,8 @@ export interface AppState {
   profiles: Profile[]
   /** Goes up whenever a name or email is saved, so whatever shows "who commits" reads it again. */
   identityVersion: number
+  /** Who's signed in to GitHub in this profile; null until asked. canKeep: the system can encrypt the sign-in. */
+  github: { user: GitHubUser | null; canKeep: boolean } | null
 }
 
 export const useApp = create<AppState>(() => ({
@@ -261,7 +325,8 @@ export const useApp = create<AppState>(() => ({
   prefs: loadPrefs(),
   authPrompt: null,
   profiles: [],
-  identityVersion: 0
+  identityVersion: 0,
+  github: null
 }))
 
 function cachePrefs(prefs: Prefs): void {

@@ -223,7 +223,8 @@ test('F48-H8: one branch on origin: the checkbox says undo only brings back the 
   h.git(repo, 'branch', 'solo')
   h.git(repo, 'push', '-q', '-u', 'origin', 'solo')
   const sha = h.git(repo, 'rev-parse', 'solo')
-  await expect(branch('solo')).toBeVisible()
+  // The row can show before the push is seen; the dialog only offers origin once the upstream is known.
+  await expect(branch('solo')).toHaveAttribute('title', /→ origin\/solo/)
   await branch('solo').click({ button: 'right' })
   await h.page.getByRole('menuitem', { name: 'Delete…' }).click()
   await expect(dialog(h.page)).toContainText('Delete solo?')

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Archive, CheckCircle2, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Minus, Plus, Trash2, UserSearch } from 'lucide-react'
+import { AlertTriangle, Archive, CheckCircle2, Eraser, ExternalLink, Eye, EyeOff, FolderOpen, GitCompare, HardDrive, History, Minus, Plus, Trash2, UserSearch } from 'lucide-react'
 import type { Change, EffectiveIdentity } from '../../../shared/types'
 import { Button, Checkbox, EmptyState, IconButton, TextArea, TextInput, Tooltip, type MenuEntry } from '@/ui'
 import { cn } from '@/ui/cn'
@@ -7,10 +7,15 @@ import { call } from '@/lib/api'
 import { plural, splitPath } from '@/lib/format'
 import { extensionRule, ruleFor } from '@/lib/lfs'
 import { ignoreChoices } from '@/lib/ignore'
+import { wrapMessage } from '@/lib/message'
+import { checkMessage } from '@/lib/commitRules'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
+import { customMenu } from '@/shell/customMenu'
 import { CollapseDetailsButton } from '@/shell/PanelRails'
 import { FileList, toStatus, type FileItem } from './FileList'
+import { MessageTools } from './MessageTools'
+import { filterPathEntry } from '@/graph/FilterBar'
 
 const opText = {
   merge: (o: { head?: string }) => `Merging${o.head ? ` (${o.head})` : ''}.`,
@@ -27,7 +32,9 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
   const busy = useRepo(repoId, (r) => r.busy)
   const lfs = useRepo(repoId, (r) => r.lfs)
   const pushAfter = useApp((s) => s.prefs.pushAfterCommit)
+  const wrapOnCommit = useApp((s) => s.prefs.wrapOnCommit)
   const draft = useRepo(repoId, (r) => r.draft)
+  const rules = useRepo(repoId, (r) => r.commitRules)
   const summary = draft.summary
   const body = draft.body
   type Up = string | ((cur: string) => string)
@@ -92,18 +99,23 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     return () => window.removeEventListener('gc:focus-summary', onFocus)
   }, [])
 
-  const canCommit = (staged.length > 0 || amend) && summary.trim().length > 0 && !busy.commit && conflicted.length === 0
+  // This repository's commit rules (Settings › Commit rules): what the message is missing, and whether that holds it back.
+  const problems = useMemo(() => checkMessage(rules, summary, body), [rules, summary, body])
+  const held = rules?.enforce === 'block' && problems.length > 0
+  const max = rules?.summaryMax ?? null
+  const canCommit = (staged.length > 0 || amend) && summary.trim().length > 0 && !busy.commit && conflicted.length === 0 && !held
   const buttonLabel = useMemo(() => {
     if (conflicted.length) return 'Resolve conflicts first'
     if (!staged.length && !amend) return 'Stage files to commit'
     if (!summary.trim()) return 'Add a summary to commit'
+    if (held) return 'Fix the message to commit'
     if (amend) return pushAfter ? 'Amend last commit and push' : 'Amend last commit'
     return `Commit ${plural(staged.length, 'file')}${pushAfter ? ' and push' : ''}`
-  }, [conflicted.length, staged.length, amend, summary, pushAfter])
+  }, [conflicted.length, staged.length, amend, summary, pushAfter, held])
 
   const doCommit = async (): Promise<void> => {
     if (!canCommit) return
-    const ok = await act.commit(repoId, { summary, body, amend, noVerify, push: pushAfter })
+    const ok = await act.commit(repoId, { summary, body: wrapOnCommit ? wrapMessage(body) : body, amend, noVerify, push: pushAfter })
     if (ok) {
       // act.commit already cleared the message.
       setAmend(false)
@@ -134,23 +146,24 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     }
   }
 
-  // Ignore › this file (or these files) / all files of their kind / a folder that holds them all.
-  const ignoreMenu = (files: FileItem[]): MenuEntry => ({
-    type: 'sub',
-    label: 'Ignore',
-    icon: <EyeOff size={14} />,
-    items: files.some((f) => f.status === 'conflicted')
-      ? [{ type: 'item', label: 'Resolve the conflict first', disabled: true }]
-      : ignoreChoices(files.map((f) => f.path)).map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c) }))
-  })
-
-  // Stash only these files. A rename takes its old path along, so the deletion doesn't stay behind.
-  const stashMenu = (files: FileItem[]): MenuEntry => {
-    const label = files.length > 1 ? `Stash ${plural(files.length, 'file')}…` : 'Stash this file…'
-    const why = files.some((f) => f.status === 'conflicted') ? 'Resolve the conflict first' : paused ? 'Finish or abort first' : !refs?.head.sha ? 'Commit once before stashing' : null
-    if (why) return { type: 'item', label: why, icon: <Archive size={14} />, disabled: true }
-    const paths = [...new Set(files.flatMap((f) => (f.origPath ? [f.path, f.origPath] : [f.path])))]
-    return { type: 'item', label, icon: <Archive size={14} />, onSelect: () => act.openDialog({ kind: 'stash', repoId, paths }) }
+  // Ignore › this file (or these files) / all files of their kind / a folder that holds them all, and the same
+  // for this computer only (.git/info/exclude). That one can't stop Git tracking a file, so it's for new files.
+  const ignoreMenu = (files: FileItem[]): MenuEntry => {
+    const choices = ignoreChoices(files.map((f) => f.path))
+    return {
+      type: 'sub',
+      label: 'Ignore',
+      icon: <EyeOff size={14} />,
+      items: files.some((f) => f.status === 'conflicted')
+        ? [{ type: 'item', label: 'Resolve the conflict first', disabled: true }]
+        : [
+            ...choices.map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c) })),
+            { type: 'separator' },
+            files.every((f) => f.status === 'untracked')
+              ? { type: 'sub', label: 'On this computer only', items: choices.map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c, true) })) }
+              : { type: 'item', label: 'On this computer only (new files)', disabled: true }
+          ]
+    }
   }
 
   // Several files picked: only what makes sense for all of them at once.
@@ -162,8 +175,9 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         ? { type: 'item', label: `Stage ${n}`, onSelect: () => void act.stage(repoId, paths) }
         : { type: 'item', label: `Unstage ${n}`, onSelect: () => void act.unstage(repoId, paths) },
       { type: 'item', label: 'Copy paths', onSelect: () => void navigator.clipboard.writeText(paths.join('\n')) },
+      { type: 'item', label: 'Copy as patch', disabled: files.some((f) => f.status === 'conflicted'), onSelect: () => void act.copyChangesPatch(repoId, side, paths) },
       { type: 'separator' },
-      stashMenu(files),
+      { type: 'item', label: `Stash ${n}…`, icon: <Archive size={14} />, disabled: files.some((f) => f.status === 'conflicted'), onSelect: () => act.openDialog({ kind: 'stash', repoId, paths }) },
       ignoreMenu(files),
       { type: 'separator' },
       { type: 'item', label: `Discard changes to ${n}…`, danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, paths) }
@@ -177,6 +191,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
       ? { type: 'item' as const, label: 'Stage', onSelect: () => void act.stage(repoId, [f.path]) }
       : { type: 'item' as const, label: 'Unstage', onSelect: () => void act.unstage(repoId, [f.path]) },
     { type: 'item' as const, label: 'Copy path', onSelect: () => void navigator.clipboard.writeText(f.path) },
+    { type: 'item' as const, label: 'Copy as patch', disabled: f.status === 'conflicted', onSelect: () => void act.copyChangesPatch(repoId, side, [f.path]) },
     { type: 'separator' as const },
     f.status === 'conflicted'
       ? { type: 'item' as const, label: 'Open in merge tool', icon: <GitCompare size={14} />, onSelect: () => act.externalTool(repoId, 'merge', f.path) }
@@ -191,12 +206,14 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     { type: 'item' as const, label: 'Show in folder', icon: <FolderOpen size={14} />, disabled: f.status === 'deleted', onSelect: () => void act.openIn(repoId, 'folder', f.path) },
     { type: 'separator' as const },
     { type: 'item' as const, label: 'File history', icon: <History size={14} />, disabled: f.status === 'untracked' || f.status === 'added', onSelect: () => act.setCenter(repoId, { kind: 'history', path: f.path }) },
+    filterPathEntry(repoId, f.path, false, f.status === 'untracked' || f.status === 'added'),
     { type: 'item' as const, label: 'Blame', icon: <UserSearch size={14} />, disabled: f.status === 'untracked' || f.status === 'added' || f.status === 'deleted', onSelect: () => act.setCenter(repoId, { kind: 'blame', path: f.path, rev: null }) },
-    stashMenu([f]),
+    { type: 'item' as const, label: 'Stash this file…', icon: <Archive size={14} />, disabled: f.status === 'conflicted', onSelect: () => act.openDialog({ kind: 'stash', repoId, paths: [f.path] }) },
     ignoreMenu([f]),
     lfsMenu(f),
     { type: 'separator' as const },
-    { type: 'item' as const, label: 'Discard changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, [f.path]) }
+    { type: 'item' as const, label: 'Discard changes…', danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, [f.path]) },
+    ...customMenu(repoId, 'file', { file: f.path })
   ]
 
   const open = (f: FileItem, source: 'worktree' | 'index'): void => {
@@ -216,6 +233,11 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             <Archive size={16} />
           </IconButton>
         </Tooltip>
+        <Tooltip content="Clean up the working tree…">
+          <IconButton label="Clean up the working tree" onClick={() => act.openDialog({ kind: 'clean', repoId })}>
+            <Eraser size={16} />
+          </IconButton>
+        </Tooltip>
         <Tooltip content="Discard all changes">
           <IconButton label="Discard all changes" disabled={changes.length === 0} onClick={() => act.discard(repoId, 'all')}>
             <Trash2 size={16} />
@@ -227,16 +249,22 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         <div role="region" aria-label="Paused operation" className="flex flex-col gap-2 border-b border-l-(length:--gc-stripe-w) border-border border-l-warning bg-surface-raised p-3">
           <p className="flex items-start gap-2 text-base text-text">
             <AlertTriangle size={16} className="mt-px shrink-0 text-warning" aria-hidden />
-            <span>
-              {opText[op!.kind as keyof typeof opText](op!)}{' '}
-              {conflicted.length ? `Resolve ${plural(conflicted.length, 'conflicted file')}, then continue.` : 'All conflicts are resolved. Continue to finish.'}
-            </span>
+            {op!.edit ? (
+              <span>
+                Rebasing {op!.head ?? 'your branch'}: stopped at {op!.edit.sha.slice(0, 7)} “{op!.edit.summary}” to edit it. Stage changes to add them to it (or tick Amend last commit to change its message), or make new commits. Then continue.
+              </span>
+            ) : (
+              <span>
+                {opText[op!.kind as keyof typeof opText](op!)}{' '}
+                {conflicted.length ? `Resolve ${plural(conflicted.length, 'conflicted file')}, then continue.` : 'All conflicts are resolved. Continue to finish.'}
+              </span>
+            )}
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="primary" disabled={conflicted.length > 0} loading={!!busy.op} onClick={() => void act.continueOp(repoId)}>
               Continue
             </Button>
-            {op!.kind === 'rebase' ? (
+            {op!.kind === 'rebase' && !op!.edit ? (
               <Button size="sm" onClick={() => void act.skipOp(repoId)}>
                 Skip this commit
               </Button>
@@ -288,7 +316,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
               }
             }}
             menu={(f, picked) => fileMenu(f, 'unstaged', picked)}
-            dirMenu={(files) => manyMenu(files, 'unstaged')}
+            dirMenu={(files, path) => [...manyMenu(files, 'unstaged'), { type: 'separator' }, filterPathEntry(repoId, path, true)]}
             multi
             emptyText="Everything is staged."
             onKey={(e, _f, picked) => {
@@ -305,7 +333,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             rowAction={{ label: 'Unstage', icon: <Minus size={12} aria-hidden />, onClick: (f) => void act.unstage(repoId, [f.path]) }}
             dirAction={{ label: 'Unstage', onClick: (files) => void act.unstage(repoId, files.map((f) => f.path)) }}
             menu={(f, picked) => fileMenu(f, 'staged', picked)}
-            dirMenu={(files) => manyMenu(files, 'staged')}
+            dirMenu={(files, path) => [...manyMenu(files, 'staged'), { type: 'separator' }, filterPathEntry(repoId, path, true)]}
             multi
             emptyText="Stage files to include them in the next commit."
             onKey={(e, _f, picked) => e.key === 'u' && void act.unstage(repoId, picked.map((p) => p.path))}
@@ -337,16 +365,32 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
             className="pr-10"
           />
           <span
-            aria-label={`${summary.length} characters`}
+            aria-label={max ? `${summary.length} of ${max} characters` : `${summary.length} characters`}
             className={cn(
               'absolute top-1/2 right-2 -translate-y-1/2 text-xs tabular-nums',
-              summary.length > 72 ? 'text-danger' : summary.length > 50 ? 'text-warning' : 'text-muted'
+              max ? (summary.length > max ? 'text-danger' : 'text-muted') : summary.length > 72 ? 'text-danger' : summary.length > 50 ? 'text-warning' : 'text-muted'
             )}
           >
-            {summary.length}
+            {max ? `${summary.length}/${max}` : summary.length}
           </span>
         </div>
         <TextArea aria-label="Commit description" placeholder="Description" value={body} onChange={(e) => setBody(e.target.value)} />
+        {problems.length ? (
+          <div role="status" aria-label="Commit rules" className={cn('flex flex-col gap-1 text-sm', held ? 'text-danger' : 'text-warning')}>
+            <ul className="flex flex-col gap-0.5">
+              {problems.map((p) => (
+                <li key={p} className="flex items-start gap-1.5">
+                  <AlertTriangle size={14} aria-hidden className="mt-0.5 shrink-0" />
+                  <span>{p}</span>
+                </li>
+              ))}
+            </ul>
+            <Button size="sm" variant="ghost" className="-ml-2 self-start text-accent-text" onClick={() => openRules(repoId)}>
+              This repository’s rules
+            </Button>
+          </div>
+        ) : null}
+        <MessageTools repoId={repoId} />
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           <Checkbox label="Amend last commit" checked={amend} disabled={!refs?.head.sha} onCheckedChange={(v) => void toggleAmend(v)} />
           <Checkbox label="Push after committing" checked={pushAfter} disabled={!refs?.head.branch} onCheckedChange={(v) => setPrefs({ pushAfterCommit: v })} />
@@ -359,6 +403,12 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
       </form>
     </div>
   )
+}
+
+/** Settings, at this repository's commit rules. */
+function openRules(repoId: string): void {
+  act.setCenter(repoId, { kind: 'prefs' })
+  requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById('prefs-commit-rules')?.scrollIntoView({ block: 'start' })))
 }
 
 /** Who the commit will be by. With several profiles, this is the line that saves a commit under the wrong email. */

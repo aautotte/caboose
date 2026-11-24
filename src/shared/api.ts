@@ -1,27 +1,48 @@
 // The IPC contract. Every channel: input and output types. Main validates inputs with zod (main/ipc/schemas.ts).
 import type {
   ActivityEntry,
+  DeviceCode,
+  GitHubUser,
+  PullDraft,
+  PullRequest,
+  PullsResult,
+  AgentState,
+  AuthorChange,
   AuthPromptEvent,
   Blame,
+  CleanPreview,
   EffectiveIdentity,
   FileHistoryEntry,
+  FlowConfig,
+  FlowFinished,
+  FlowKind,
   GitConfigKey,
   GitIdentity,
   GpuState,
   GraphColumn,
+  GraphFilter,
+  PatchPreview,
+  PatchSource,
+  PatchTarget,
   Profile,
   RebasePreview,
   RebaseRow,
   RebaseStep,
   RefViewState,
+  SshHost,
   SshKey,
+  SshTest,
   Remote,
   ResetMode,
   CommitDetails,
   Comparison,
   ConflictFile,
+  ConflictForecast,
   DiffSource,
+  ConflictWhy,
+  MergeAgain,
   FileDiff,
+  ImageDiff,
   GraphPage,
   LfsState,
   Submodule,
@@ -62,13 +83,18 @@ export interface Api {
   'repo.init': { in: { parentDir: string; name: string; defaultBranch: string; gitignore: string | null; license: string | null }; out: RepoSummary }
   'op.cancel': { in: { opId: string }; out: null }
 
-  'graph.load': { in: R & { skip: number; limit: number }; out: GraphPage }
+  'graph.load': { in: R & { skip: number; limit: number; filter?: GraphFilter }; out: GraphPage }
   'refs.list': { in: R; out: Refs }
   'status.get': { in: R; out: Status }
   'commit.details': { in: R & { sha: string }; out: CommitDetails }
   /** The full messages (summary and description) of these commits, in the order asked. */
+  /** The last messages on the checked-out branch, newest first, each once; no merges or fixup! commits. */
+  'commit.recentMessages': { in: R & { limit: number }; out: { summary: string; body: string }[] }
   'commit.messages': { in: R & { shas: string[] }; out: { sha: string; message: string }[] }
-  'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean }; out: FileDiff }
+  /** `context`: lines shown around each change (git's default when unset); `full` shows the whole file instead. */
+  'diff.get': { in: R & { path: string; oldPath?: string; source: DiffSource; force?: boolean; full?: boolean; ignoreWs?: boolean; context?: number }; out: FileDiff }
+  /** An image's two versions, for a diff that is binary. */
+  'diff.images': { in: R & { path: string; oldPath?: string; source: DiffSource }; out: ImageDiff }
   'search.commits': { in: R & { query: string }; out: string[] }
   'lfs.state': { in: R; out: LfsState }
   'lfs.turnOn': { in: R & { opId: string }; out: null }
@@ -103,14 +129,24 @@ export interface Api {
   'index.unstage': { in: R & { paths: string[] | 'all' }; out: null }
   'commit.create': { in: R & { summary: string; body: string; amend: boolean; noVerify: boolean; messageOnly?: boolean }; out: { sha: string } }
   'worktree.discard': { in: R & { paths: string[] | 'all' }; out: null }
+  'worktree.cleanPreview': { in: R; out: CleanPreview }
+  'worktree.clean': { in: R & { tracked: boolean; untracked: boolean; ignored: boolean }; out: { removed: number } }
 
-  'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: null }
+  /** reason: why it didn't switch to the new branch, when asked to and it couldn't (the branch is made anyway). */
+  'branch.create': { in: R & { name: string; at: string; checkout: boolean }; out: { switched: boolean; reason: string | null } }
+  'flow.config': { in: R; out: FlowConfig | null }
+  'flow.init': { in: R & { config: FlowConfig }; out: null }
+  /** The branch it made and checked out. */
+  'flow.start': { in: R & { kind: FlowKind; name: string }; out: string }
+  'flow.finish': { in: R & { kind: FlowKind; name: string; keep: boolean; tagMessage: string }; out: FlowFinished }
   /** Bisect: start between a bad and a good commit; mark the one being tested (or another); stop. */
   'bisect.start': { in: R & { bad: string; good: string }; out: null }
   'bisect.mark': { in: R & { verdict: 'good' | 'bad' | 'skip'; sha?: string }; out: null }
   'bisect.reset': { in: R; out: null }
   /** git bisect run with a command; its output comes as op:output events. */
   'bisect.run': { in: R & { command: string; opId: string }; out: null }
+  /** One of your own commands, already split into arguments. Its exit code and output, whatever they are. */
+  'custom.run': { in: R & { args: string[]; opId: string }; out: { code: number; stdout: string; stderr: string } }
   'branch.checkout': { in: R & { ref: string; opId?: string }; out: null }
   'branch.rename': { in: R & { name: string; newName: string }; out: null }
   'branch.delete': { in: R & { name: string; force: boolean }; out: null }
@@ -127,7 +163,9 @@ export interface Api {
   'branch.deleteRemote': { in: R & { remote: string; name: string; opId: string }; out: string | null }
   /** One push that deletes several branches on `remote`. */
   'branch.deleteRemoteMany': { in: R & { remote: string; names: string[]; opId: string }; out: null }
-  'branch.merge': { in: R & { source: string }; out: OpResult }
+  'branch.merge': { in: R & { source: string; noFf?: boolean }; out: OpResult }
+  'branch.squashMerge': { in: R & { source: string; message: string; noVerify: boolean }; out: OpResult }
+  'merge.preview': { in: R & { source: string; target: string }; out: RebaseRow[] }
   'branch.rebase': { in: R & { onto: string; branch?: string }; out: OpResult }
   'branch.setUpstream': { in: R & { name: string; upstream: string }; out: null }
 
@@ -137,8 +175,14 @@ export interface Api {
   'remote.push': { in: R & { opId: string; remote?: string; branch?: string; setUpstream?: boolean; force?: boolean }; out: OpResult }
 
   'conflict.get': { in: R & { path: string }; out: ConflictFile }
+  /** Before starting: would merging `from` into `into`, rebasing `branch` onto `onto`, or pulling, conflict? */
+  'conflict.forecast': { in: R & ({ kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean }); out: ConflictForecast }
   'conflict.resolve': { in: R & { path: string; content: string }; out: null }
   'conflict.take': { in: R & { path: string; side: 'ours' | 'theirs' }; out: null }
+  /** The file merged again each other way git can, from the same two sides; nothing is written. Empty when it can't be. */
+  'conflict.again': { in: R & { path: string }; out: MergeAgain[] }
+  /** For each conflict: the commits on each side that changed its lines (1-based, inclusive, in that side's file). */
+  'conflict.why': { in: R & { path: string; ranges: Array<{ ours: [number, number] | null; theirs: [number, number] | null }> }; out: Array<{ ours: ConflictWhy | null; theirs: ConflictWhy | null }> }
   'op.continue': { in: R; out: OpResult }
   'op.abort': { in: R; out: null }
   'op.skip': { in: R; out: OpResult }
@@ -151,15 +195,30 @@ export interface Api {
 
   /** Stage, unstage or discard one hunk, or some of its lines. `header` must match what the user saw. */
   'index.applyPatch': {
-    in: R & { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }
+    in: R & { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean; context?: number }
     out: null
   }
-  'ignore.add': { in: R & { patterns: string[]; label: string }; out: { untracked: number } }
+  /** `local`: to .git/info/exclude, for this computer only, instead of .gitignore. */
+  'ignore.add': { in: R & { patterns: string[]; label: string; local?: boolean }; out: { untracked: number } }
+  /** Copies these commits as one mailbox of patches (git format-patch), oldest first. Not for merge commits. */
+  'patch.copyCommits': { in: R & { shas: string[] }; out: null }
+  /** Copies uncommitted changes as a plain diff; `paths` limits it to those files. New files come with the unstaged ones. */
+  'patch.copyChanges': { in: R & { scope: 'staged' | 'unstaged' | 'all'; paths?: string[] }; out: null }
+  /** Asks where, then saves the commits' patch there. `name` is the suggested file name. Null when cancelled. */
+  'patch.save': { in: R & { shas: string[]; name: string }; out: string | null }
+  'patch.pickFile': { in: Record<string, never>; out: string | null }
+  /** The clipboard's text if it looks like a patch, CRLF line endings kept; otherwise null. */
+  'patch.clipboard': { in: Record<string, never>; out: string | null }
+  'patch.check': { in: R & { source: PatchSource; target: PatchTarget }; out: PatchPreview }
+  /** Undoable: a patch to the files or the staged changes goes back out; commits are taken off the branch. */
+  'patch.apply': { in: R & { source: PatchSource; target: PatchTarget }; out: { commits: number } }
 
-  /** `paths`: only those files, staged and unstaged parts, new ones included. */
-  'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[] }; out: OpResult }
+  /** `paths`: only these files. `keepIndex`: what's staged is stashed and also stays in the folder, staged. */
+  'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[]; keepIndex?: boolean }; out: OpResult }
   /** One block, or some of its lines, of a file's unstaged changes: stashed, and taken out of the file. */
-  'stash.lines': { in: R & { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; message: string }; out: OpResult }
+  'stash.lines': { in: R & { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; context?: number; message: string }; out: OpResult }
+  /** A new branch from the commit the stash was made on, checked out, with the stash applied there and deleted. */
+  'stash.branch': { in: R & { sha: string; name: string }; out: null }
   'stash.apply': { in: R & { sha: string }; out: OpResult }
   'stash.pop': { in: R & { sha: string }; out: OpResult }
   'stash.drop': { in: R & { sha: string }; out: null }
@@ -182,11 +241,15 @@ export interface Api {
   'cherry.preview': { in: R & { tip: string }; out: RebaseRow[] }
   'rebase.preview': { in: R & { onto: string }; out: RebasePreview }
   /** `noVerify`: skip git hooks, as for a commit (they run by default). Also for reword and squash. */
-  'rebase.interactive': { in: R & { onto: string; plan: RebaseStep[]; noVerify?: boolean }; out: OpResult }
+  'rebase.interactive': { in: R & { onto: string; plan: RebaseStep[]; noVerify?: boolean; updateRefs?: boolean }; out: OpResult }
+  'rebase.onto': { in: R & { from: string; onto: string; updateRefs: boolean }; out: OpResult }
 
   'remote.list': { in: R; out: Remote[] }
   'remote.add': { in: R & { name: string; url: string }; out: null }
   'remote.remove': { in: R & { name: string }; out: null }
+  /** Rename a remote and set its URLs; an empty push URL pushes to the fetch URL. */
+  'remote.edit': { in: R & { name: string; next: Remote }; out: null }
+  'remote.fetchOne': { in: R & { name: string; opId: string }; out: null }
 
   'file.history': { in: R & { path: string; limit: number }; out: FileHistoryEntry[] }
   'file.blame': { in: R & { path: string; rev: string | null }; out: Blame }
@@ -200,6 +263,7 @@ export interface Api {
   'refView.pin': { in: R & { ref: string | null }; out: RefViewState }
   'refView.setMany': { in: R & { refs: string[]; state: 'normal' | 'hidden' }; out: RefViewState }
   'history.reword': { in: R & { sha: string; message: string; noVerify?: boolean }; out: OpResult }
+  'history.authorship': { in: R & { shas: string[]; change: AuthorChange }; out: OpResult }
   'history.squash': { in: R & { shas: string[]; message: string; noVerify?: boolean }; out: OpResult }
   /** Folds the staged changes into an older commit of the current branch (unstaged ones are set aside and put back). */
   'history.amendInto': { in: R & { sha: string }; out: OpResult }
@@ -208,14 +272,14 @@ export interface Api {
   /** git rebase --autosquash: every fixup!/squash!/amend! commit into the commit it names. */
   'history.autosquash': { in: R; out: OpResult }
   /** The commits the changed lines last came from (staged changes, else unstaged), and whether pure additions were left out. */
-  'history.fixupTarget': { in: R; out: { shas: string[]; addOnly: boolean } }
+  'history.fixupTarget': { in: R; out: { shas: string[]; summaries: Record<string, string>; addOnly: boolean } }
   /**
    * Takes a file (`part` null), a block or some lines out of a commit on the current branch: dropped (`remove`), into a
    * new commit right after it (`split`, with `message`), or staged on top (`stage`; `staged` false when they couldn't
    * be placed there).
    */
   'history.patchOut': {
-    in: R & { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null; action: 'remove' | 'split' | 'stage'; message?: string }
+    in: R & { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean; context?: number } | null; action: 'remove' | 'split' | 'stage'; message?: string }
     out: OpResult & { staged?: boolean }
   }
   'history.move': { in: R & { sha: string; direction: 'up' | 'down' }; out: OpResult }
@@ -250,8 +314,30 @@ export interface Api {
   'shell.open': { in: R & { target: 'folder' | 'terminal' | 'editor'; path?: string; worktree?: string }; out: null }
   'file.externalDiff': { in: R & { path: string; staged: boolean }; out: null }
   'file.externalMerge': { in: R & { path: string }; out: null }
+  /** Who's signed in to GitHub in this profile; canKeep false when the system can't encrypt the sign-in. */
+  'github.status': { in: Record<string, never>; out: { user: GitHubUser | null; canKeep: boolean } }
+  'github.startSignIn': { in: Record<string, never>; out: DeviceCode }
+  /** Copies the code and opens GitHub's page for it. */
+  'github.openDevicePage': { in: { userCode: string; verificationUri: string }; out: null }
+  /** Waits until the code is approved at GitHub (or refused, or cancelled). */
+  'github.waitSignIn': { in: Record<string, never>; out: GitHubUser }
+  'github.cancelSignIn': { in: Record<string, never>; out: null }
+  'github.useGhCli': { in: Record<string, never>; out: GitHubUser }
+  'github.signOut': { in: Record<string, never>; out: null }
+  'github.pulls': { in: R; out: PullsResult }
+  /** Brings a pull request's branch here: the remote branch (same repository), or pr/<number> for a fork's. */
+  /** The title and description a new pull request for `branch` into `base` starts with, and whether to push first. */
+  'github.pullDraft': { in: R & { branch: string; base: string }; out: PullDraft }
+  'github.createPull': { in: R & { head: string; base: string; title: string; body: string; draft: boolean }; out: PullRequest }
+  'github.fetchPull': { in: R & { number: number; head: string; fromFork: boolean }; out: { ref: string; fork: boolean } }
   'ssh.keys': { in: Record<string, never>; out: SshKey[] }
   'ssh.generate': { in: { name: string; comment: string; passphrase: string }; out: SshKey }
+  'ssh.agent': { in: Record<string, never>; out: AgentState }
+  'ssh.addToAgent': { in: { name: string }; out: null }
+  /** target: a host, or user@host:port. key: one from ~/.ssh, or null for whatever ssh picks. */
+  'ssh.test': { in: { target: string; key: string | null }; out: SshTest }
+  /** Copies the public key and opens the host's page for adding one; returns that page. */
+  'ssh.addToHost': { in: { name: string; host: SshHost }; out: string }
 }
 
 export type Channel = keyof Api

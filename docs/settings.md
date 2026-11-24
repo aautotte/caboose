@@ -39,6 +39,7 @@ section) adds, renames and deletes them, and sets each one's:
 | | |
 | --- | --- |
 | Push after committing | ticks **Push after committing** under the commit message by default |
+| Wrap the description when committing | at 72 characters; code, quotes, tables and trailers stay as typed |
 | Stash new files | include untracked files when you stash |
 | Show untracked files | list files git isn't tracking yet among your changes (the eye on the list does the same) |
 
@@ -47,6 +48,7 @@ section) adds, renames and deletes them, and sets each one's:
 | | |
 | --- | --- |
 | Layout | Inline or Side by side. You can switch from any diff |
+| Lines around changes | unchanged lines shown above and below each change, 1 to 25 (3 by default). **Diff options**, on a diff, changes it too |
 | Hide whitespace changes | leaves out lines where only spaces, tabs or line endings changed. Lines can't be staged from the diff while it's on |
 | Wrap long lines | otherwise long lines scroll sideways |
 | Code size | text size in diffs, blame and the merge tool |
@@ -79,6 +81,15 @@ Git does the signing with the `gpg` on your computer.
 Commands run without a shell. `{path}` is the repository folder, `{file}` the file you picked (or the folder). **Try it on
 this repository** checks a command.
 
+## Your commands
+
+Git commands of your own, for the menus, the command palette and shortcuts: see
+[Your own commands](custom-commands.md).
+
+## Keyboard shortcuts
+
+Change, take away or put back the key of a command: see [Changing a shortcut](shortcuts.md#changing-a-shortcut).
+
 ## SSH keys
 
 Lists the public keys in your `.ssh` folder, with a button to copy each one. Add a public key to your git host
@@ -86,6 +97,44 @@ Lists the public keys in your `.ssh` folder, with a button to copy each one. Add
 
 To make a new key, give it a file name, a label (like `laptop`) and an optional passphrase. Caboose runs
 `ssh-keygen` and creates an ed25519 key in `~/.ssh`.
+
+The **⋯** menu next to a key has:
+
+- **Add to ssh-agent**: the agent keeps the key unlocked until you sign out, so a key with a passphrase asks for
+  it once instead of on every fetch. Caboose asks for the passphrase itself on macOS and Linux. On Windows, ssh
+  can't use Caboose's prompt, so for a key with a passphrase it gives you the `ssh-add` command to run once in a
+  terminal. Keys already in the agent say **In ssh-agent**. The line above the list says whether an agent is
+  running; on Windows that's the **OpenSSH Authentication Agent** service.
+- **Add to GitHub…**, **GitLab…**, **Bitbucket…** or **Azure DevOps…**: copies the public key and opens that
+  host's page for a new SSH key, where you paste it.
+
+**Test a connection** signs in to a host over SSH (`ssh -T`), the way a fetch does, and says whose account the
+key belongs to, or why the host said no. Pick github.com, gitlab.com, bitbucket.org, ssh.dev.azure.com or another
+host (`git@git.example.com:2222`), and which key to try, or whichever ssh picks. It never asks for anything: add a
+key with a passphrase to ssh-agent first. A host seen for the first time is added to `known_hosts`; one whose key
+has changed is refused, and the result says so. **What ssh said** shows its own words.
+
+## GitHub
+
+Signing in to GitHub lets Caboose list each repository's [pull requests](syncing.md#pull-requests-on-github) and
+[create new ones](syncing.md#creating-a-pull-request).
+
+**Sign in to GitHub…** shows a short code. **Copy the code and open GitHub** opens GitHub's page in your browser:
+paste the code there, then authorize Caboose. The dialog closes on its own once you have. Caboose never sees your
+password, and there's no token to make or copy. It asks for the `repo` permission, so private repositories' pull
+requests show too. An organization that limits which apps can see its repositories may have to approve Caboose
+first.
+
+**Use the gh CLI's sign-in** copies the sign-in of the GitHub CLI (`gh auth login`), if it's installed and signed
+in, instead.
+
+The sign-in belongs to the current [profile](#profile), so work and personal profiles can use different GitHub
+accounts. It's kept encrypted with your system's keychain; on a system that can't encrypt it, it lasts until
+Caboose quits. **Sign out** forgets it here. To take back Caboose's access on GitHub too, revoke it in GitHub's
+**Settings › Applications**. If GitHub stops accepting the sign-in (revoked there, say), Caboose signs out and
+says so.
+
+Pushing and fetching don't use this sign-in: they go through git and your usual credentials or SSH key.
 
 ## This repository
 
@@ -95,6 +144,13 @@ Settings for the repository in the current tab only:
   global ones.
 - **Sign commits here**: use the global setting, or turn signing on or off for this repository.
 - **Signing key**: empty uses your global key.
+
+## Commit rules
+
+Rules for this repository's commit messages, kept on this computer: a summary length, Conventional Commits (with
+the types to accept), and an issue to mention (in the summary or anywhere, with the pattern to look for). Once one
+is on, **When a message doesn't fit** chooses between **Warn** and **Hold back the commit**. See
+[Commit rules](staging-and-committing.md#commit-rules).
 
 ## Submodules
 

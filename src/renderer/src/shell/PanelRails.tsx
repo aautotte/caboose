@@ -1,6 +1,7 @@
 import { Archive, Boxes, Cloud, FolderGit2, GitBranch, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Tag } from 'lucide-react'
 import { IconButton, Tooltip } from '@/ui'
 import { setPrefs, useRepo } from '@/store'
+import { useKey } from '@/lib/keys'
 
 /** The id of a left-panel section, so the rail can scroll to it after expanding. */
 export const leftSectionId = (title: string): string => `left-section-${title.toLowerCase().replace(/\s+/g, '-')}`
@@ -15,8 +16,9 @@ export function collapseDetails(collapsed: boolean): void {
 
 /** In the left panel, next to the filter. */
 export function CollapseLeftButton(): React.JSX.Element {
+  const key = useKey('toggle-left')
   return (
-    <Tooltip content="Collapse the branches panel" shortcut="Ctrl+J">
+    <Tooltip content="Collapse the branches panel" shortcut={key}>
       <IconButton label="Collapse the branches panel" size="sm" onClick={() => collapseLeft(true)}>
         <PanelLeftClose size={14} />
       </IconButton>
@@ -26,8 +28,9 @@ export function CollapseLeftButton(): React.JSX.Element {
 
 /** First thing in each details panel's header. */
 export function CollapseDetailsButton(): React.JSX.Element {
+  const key = useKey('toggle-detail')
   return (
-    <Tooltip content="Collapse the details panel" shortcut="Ctrl+K">
+    <Tooltip content="Collapse the details panel" shortcut={key}>
       <IconButton label="Collapse the details panel" size="sm" onClick={() => collapseDetails(true)}>
         <PanelRightClose size={14} />
       </IconButton>
@@ -37,6 +40,7 @@ export function CollapseDetailsButton(): React.JSX.Element {
 
 /** The left panel, collapsed: a way back, and a shortcut to each section with its count. */
 export function LeftRail({ repoId }: { repoId: string }): React.JSX.Element {
+  const key = useKey('toggle-left')
   const refs = useRepo(repoId, (r) => r.refs)
   const subs = useRepo(repoId, (r) => r.submodules)
   const worktrees = useRepo(repoId, (r) => r.worktrees)
@@ -56,7 +60,7 @@ export function LeftRail({ repoId }: { repoId: string }): React.JSX.Element {
   }
   return (
     <nav aria-label="Branches and tags (collapsed)" className="flex w-(--gc-rail-w) shrink-0 flex-col items-center gap-1 border-r border-border bg-surface py-2">
-      <Tooltip content="Expand the branches panel" shortcut="Ctrl+J" side="right">
+      <Tooltip content="Expand the branches panel" shortcut={key} side="right">
         <IconButton label="Expand the branches panel" size="sm" onClick={() => open()}>
           <PanelLeftOpen size={14} />
         </IconButton>
@@ -75,9 +79,10 @@ export function LeftRail({ repoId }: { repoId: string }): React.JSX.Element {
 
 /** The details panel, collapsed. */
 export function DetailRail(): React.JSX.Element {
+  const key = useKey('toggle-detail')
   return (
     <section aria-label="Details (collapsed)" className="flex w-(--gc-rail-w) shrink-0 flex-col items-center border-l border-border bg-surface py-2">
-      <Tooltip content="Expand the details panel" shortcut="Ctrl+K" side="left">
+      <Tooltip content="Expand the details panel" shortcut={key} side="left">
         <IconButton label="Expand the details panel" size="sm" onClick={() => collapseDetails(false)}>
           <PanelRightOpen size={14} />
         </IconButton>

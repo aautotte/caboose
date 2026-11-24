@@ -13,7 +13,7 @@ Each repository keeps its own list of the last 100 actions, and the list survive
 | Discard changes (files, blocks or lines, or everything) | the changes, from a copy Caboose kept |
 | Check out a branch or commit | the branch you were on |
 | Merge, rebase, pull | the branch where it was before |
-| Edit message, squash, move a commit, interactive rebase | the commits as they were |
+| Edit message, change the author, squash, move a commit, interactive rebase | the commits as they were, and any stacked branches it moved along |
 | Amend staged changes into an older commit | the commits as they were, with the changes staged again |
 | Fixup commit, squash fixup commits | the commits as they were |
 | Take changes out of a commit (remove, move to a new commit, move to staged) | the commits as they were, with nothing staged |
@@ -24,7 +24,9 @@ Each repository keeps its own list of the last 100 actions, and the list survive
 | Delete tags | the local tags |
 | Delete stashes | the stashes, in their places |
 | Remove a remote | the remote, with its URLs |
-| Ignore files | `.gitignore` as it was, and the files tracked again |
+| Rename a remote, change its URLs | its name and URLs |
+| Ignore files | `.gitignore` as it was, and the files tracked again; `.git/info/exclude` as it was, for files ignored on this computer only |
+| Apply a patch | the patch taken back out of the files (and the staged changes); for commits, the branch where it was |
 
 A merge, rebase or pull that stopped on conflicts is recorded once you finish it.
 

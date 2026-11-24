@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranchPlus, Globe, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ArrowDownToLine, ArrowUpFromLine, ChevronDown, Command, ExternalLink, FolderOpen, GitBranch, GitBranchPlus, Globe, History, ListFilter, Redo2, Settings, SquareTerminal, Undo2 } from 'lucide-react'
 import { DropdownMenu as RMenu } from 'radix-ui'
 import { Check } from 'lucide-react'
 import type { PullMode } from '../../../shared/types'
@@ -6,7 +6,8 @@ import { DropdownMenu, IconButton, Spinner, TextInput, Tooltip, Shortcut } from 
 import { cn } from '@/ui/cn'
 import { setPrefs, useApp, useRepo } from '@/store'
 import * as act from '@/actions'
-import { progressAmount } from '@/lib/format'
+import { useKeyOf } from '@/lib/keys'
+import { progressAmount, refLabel } from '@/lib/format'
 
 const pullModes: Array<{ mode: PullMode; label: string }> = [
   { mode: 'ff', label: 'Pull (fast-forward when possible)' },
@@ -35,11 +36,13 @@ function ToolButton({ label, shortcut, icon, onClick, disabled, busy, text }: { 
 }
 
 export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
+  const key = useKeyOf()
   const undo = useRepo(repoId, (r) => r.undo)
   const busy = useRepo(repoId, (r) => r.busy)
   const refs = useRepo(repoId, (r) => r.refs)
   const search = useRepo(repoId, (r) => r.search)
   const hits = useRepo(repoId, (r) => r.searchHits)
+  const filterOpen = useRepo(repoId, (r) => !!r.filter)
   const progress = useRepo(repoId, (r) => r.progress)
   const dirty = useRepo(repoId, (r) => (r.status?.changes.length ?? 0) > 0)
   const pullMode = useApp((s) => s.prefs.pullMode)
@@ -50,17 +53,39 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
   const upstream = refs?.refs.find((r) => r.kind === 'local' && r.isHead)?.upstream
   const tracked = upstream ? remotes.find((r) => upstream.startsWith(`refs/remotes/${r}/`)) : undefined
   const branchLabel = head?.branch ?? (head?.sha ? `Detached at ${head.sha.slice(0, 7)}` : '…')
+  // The branches switched to lately, after the previous one (which the menu offers first).
+  const recent = (refs?.recent ?? []).filter((b) => b !== refs?.previous)
 
   return (
     <div role="toolbar" aria-label="Repository actions" className="flex h-(--gc-toolbar-h) shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
       <div className="flex min-w-0 flex-col leading-tight">
         <h1 className="truncate text-md text-text">{tab?.alias ?? tab?.name}</h1>
-        <span className={cn('truncate text-sm', head?.detached ? 'text-warning' : 'text-muted')}>{branchLabel}</span>
+        <DropdownMenu
+          trigger={
+            <button
+              type="button"
+              aria-label={`Switch branch: ${branchLabel}`}
+              className={cn('-mx-1 flex min-w-0 items-center gap-0.5 rounded-sm px-1 text-sm hover:bg-row-hover hover:text-text', head?.detached ? 'text-warning' : 'text-muted')}
+            >
+              <span className="truncate">{branchLabel}</span>
+              <ChevronDown size={12} className="shrink-0" />
+            </button>
+          }
+          items={[
+            ...(refs?.previous
+              ? [{ type: 'item' as const, label: `Previous: ${refLabel(refs.previous)}`, icon: <History size={14} />, shortcut: key('co-previous'), onSelect: () => void act.checkoutPrevious(repoId) }]
+              : [{ type: 'item' as const, label: 'No previous branch yet', disabled: true }]),
+            ...(recent.length ? [{ type: 'separator' as const }] : []),
+            ...recent.map((b) => ({ type: 'item' as const, label: b, icon: <GitBranch size={14} />, onSelect: () => void act.checkout(repoId, b) })),
+            { type: 'separator' as const },
+            { type: 'item' as const, label: 'Another branch…', shortcut: key('palette'), onSelect: () => useApp.setState({ paletteOpen: true }) }
+          ]}
+        />
       </div>
       <div className="mx-auto flex items-center gap-1">
         <ToolButton
           label={undo.undo ? `Undo: ${undo.undo.label}` : 'Nothing to undo'}
-          shortcut="Ctrl+Z"
+          shortcut={key('undo')}
           text="Undo"
           icon={<Undo2 size={16} />}
           disabled={!undo.undo}
@@ -68,7 +93,7 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
         />
         <ToolButton
           label={undo.redo ? `Redo: ${undo.redo.label}` : 'Nothing to redo'}
-          shortcut="Ctrl+Y"
+          shortcut={key('redo')}
           text="Redo"
           icon={<Redo2 size={16} />}
           disabled={!undo.redo}
@@ -92,7 +117,7 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
             <RMenu.Portal>
               <RMenu.Content align="start" sideOffset={4} className="z-(--gc-z-dropdown) min-w-64 rounded-md border border-border bg-surface-raised p-1 shadow-pop">
                 <RMenu.Item onSelect={() => void act.fetchAll(repoId)} className="flex h-7 items-center justify-between gap-4 rounded-sm px-2 text-base text-text outline-none data-highlighted:bg-row-selected">
-                  Fetch all remotes <Shortcut keys="Ctrl+L" />
+                  Fetch all remotes {key('fetch') ? <Shortcut keys={key('fetch')!} /> : null}
                 </RMenu.Item>
                 <RMenu.Separator className="my-1 h-px bg-border" />
                 {pullModes.map((p) => (
@@ -160,7 +185,7 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
         <span className="mx-1 h-6 w-px bg-border" />
         <ToolButton
           label="New branch from here"
-          shortcut="Ctrl+B"
+          shortcut={key('new-branch')}
           text="Branch"
           icon={<GitBranchPlus size={16} />}
           disabled={!head?.sha}
@@ -210,6 +235,11 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
         />
         {hits ? <span className="shrink-0 text-xs text-muted" aria-live="polite">{hits.length} found</span> : null}
       </div>
+      <Tooltip content="Show only the commits that change a path, or by an author" shortcut={key('filter')}>
+        <IconButton label="Filter the graph" pressed={filterOpen} onClick={() => (filterOpen ? act.setFilter(repoId, null) : act.openFilter(repoId))}>
+          <ListFilter size={16} />
+        </IconButton>
+      </Tooltip>
       <DropdownMenu
         trigger={
           <IconButton label="Open the repository in…">
@@ -223,7 +253,7 @@ export function Toolbar({ repoId }: { repoId: string }): React.JSX.Element {
           { type: 'item', label: 'Browser', icon: <Globe size={14} />, disabled: !refs?.remotes.length, onSelect: () => void act.openOnWeb(repoId, { kind: 'repo' }) }
         ]}
       />
-      <Tooltip content="Command palette" shortcut="Ctrl+P">
+      <Tooltip content="Command palette" shortcut={key('palette')}>
         <IconButton label="Command palette" onClick={() => useApp.setState({ paletteOpen: true })}>
           <Command size={16} />
         </IconButton>

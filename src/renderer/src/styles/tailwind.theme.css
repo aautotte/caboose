@@ -35,6 +35,8 @@
   --color-diff-picked: var(--gc-color-diff-picked);
   --color-conflict-ours-bg: var(--gc-color-conflict-ours-bg);
   --color-conflict-theirs-bg: var(--gc-color-conflict-theirs-bg);
+  --color-conflict-ours-emph: var(--gc-color-conflict-ours-emph);
+  --color-conflict-theirs-emph: var(--gc-color-conflict-theirs-emph);
   --color-lane-0: var(--gc-color-lane-0);
   --color-lane-1: var(--gc-color-lane-1);
   --color-lane-2: var(--gc-color-lane-2);

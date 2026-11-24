@@ -47,6 +47,13 @@ test('S04 repository view', async () => {
   await commitRow(h.page, 'Print the real temperature in the CLI').click()
   await scan('S04')
 })
+test('S04 repository view, graph filtered', async () => {
+  await h.page.getByRole('button', { name: 'Filter the graph' }).click()
+  await h.page.getByRole('search', { name: 'Filter the graph' }).getByRole('textbox', { name: 'Path' }).fill('src/')
+  await h.page.getByRole('search', { name: 'Filter the graph' }).getByRole('status').filter({ hasText: /commit/ }).waitFor()
+  await scan('S04-filter')
+  await h.page.getByRole('button', { name: 'Clear the filter' }).click()
+})
 test('S05 uncommitted changes', async () => {
   await openWip(h.page)
   await scan('S05')
@@ -75,7 +82,7 @@ test('S09 file history', async () => {
 test('S11 interactive rebase', async () => {
   await toGraph(h.page)
   await menu(h.page, commitRow(h.page, 'Update the changelog (4)'), /^Rewrite main after this commit/)
-  await h.page.getByRole('list', { name: 'Commits, oldest first' }).waitFor()
+  await h.page.getByRole('list', { name: 'Commits, newest first' }).waitFor()
   await scan('S11')
 })
 test('S12 command palette', async () => {
@@ -101,6 +108,16 @@ test('S15 reset dialog', async () => {
   await menu(h.page, commitRow(h.page, 'Update the changelog (5)'), /^Reset main to this commit/)
   await dialog(h.page).waitFor()
   await scan('S15')
+  await h.page.keyboard.press('Escape')
+})
+test('S17 apply a patch dialog, with a patch checked', async () => {
+  await toGraph(h.page)
+  await h.page.keyboard.press('Control+p')
+  await h.page.keyboard.type('Apply a patch')
+  await h.page.keyboard.press('Enter')
+  await dialog(h.page).getByRole('textbox', { name: 'Patch' }).fill('diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-nothing like this\n+x\n')
+  await dialog(h.page).getByRole('alert').waitFor()
+  await scan('S17')
   await h.page.keyboard.press('Escape')
 })
 test('S16 activity log', async () => {

@@ -6,6 +6,10 @@ Every commit is a row, newest at the top. Each line of development gets its own 
 **Uncommitted changes**, is your working copy; it's there when you have changes. Stashes appear as rows too, next
 to the commit they were made on.
 
+The graph shows the commits of your branches, remote branches and tags, and the one checked out. Commits that only
+other refs keep are left out: the checkpoints a tool like Cline saves under `refs/cline/`, git notes, and so on.
+Search leaves them out too.
+
 Labels in the **Branch / tag** column show local branches, remote branches and tags. A local branch and its
 remote branch on the same commit share one label, with a cloud icon. `+1` means more labels on that commit; hover
 to see them, click for their menus.
@@ -17,6 +21,8 @@ to see them, click for their menus.
 - **Ctrl+click** adds or removes commits; **Shift+click** picks a range. With several commits picked, the details
   panel offers **Squash into one…**, **Rebase these…**, cherry-pick and copying their SHAs.
 - **Esc** clears the pick.
+- Clicking and the keys keep the list where it is, scrolling only as far as needed. A commit picked from
+  elsewhere (a branch in the panel, search, a link to a commit) that's off screen comes to the middle of the list.
 
 ![Three commits picked, with Squash into one and Rebase these in the details panel](images/guide/pick-commits.png)
 
@@ -32,6 +38,32 @@ to see them, click for their menus.
 - **Pin to the left of the graph**: keeps a branch, usually main, in the leftmost lane.
 
 The branches panel has a **Filter** box (Ctrl+Alt+F) that narrows branches, tags and stashes as you type.
+
+## Filtering
+
+Searching dims the commits that don't match; filtering leaves them out. The filter button in the toolbar
+(Ctrl+Shift+F, or **Filter the graph by path or author…** in the command palette) opens a bar above the graph:
+
+- **Path**: only the commits that change this file or folder (`src/`), or files matching a pattern (`*.md`), the
+  way `git log -- <path>` picks them.
+- **Author**: only the commits whose author's name or email contains this text, in any case.
+
+Fill in one or both. The graph follows as you type, and the bar counts what it shows. Lines join each commit to the
+nearest commit below it that's still shown, so the shape of the history stays readable. A branch or tag label shows
+only when the commit it points at is shown.
+
+You can also start from what you're looking at:
+
+- **Show only commits that change it**, in a file's menu: the changed files of a commit, or your uncommitted
+  changes. A folder's menu (in the folder view) does the same for the folder.
+- **Show only commits by *name***, in a commit's menu.
+
+Selecting, the arrow keys, search and the commit menus work as usual on the commits that are shown. Editing commits
+in place (their message, order or author, squash, rebasing a range) isn't offered while the filter hides commits
+on the branch: **Clear the filter to edit commits on *branch*** in a commit's menu, Esc in the bar, or the × closes
+it and shows every commit again.
+
+The filter is for this session: it's gone when the app restarts.
 
 ## Searching
 

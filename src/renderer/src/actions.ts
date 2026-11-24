@@ -1,12 +1,16 @@
 // Every user action that touches git goes through here: call main, toast on failure, refresh what changed.
-import type { DiffSource, GraphColumn, OpResult, PullMode, RebaseStep, Ref, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
+import type { AuthorChange, CommitRow, DiffSource, FlowConfig, FlowFinished, FlowKind, GitHubUser, GraphColumn, GraphFilter, PullDraft, PullRequest, OpResult, PatchSource, PatchTarget, PullMode, RebaseStep, Ref, Refs, Remote, ResetMode, Status, SubmoduleMode, SubmoduleSettings, SubmoduleSyncResult, Worktree } from '../../shared/types'
 import { ApiError, call, newOpId, on } from './lib/api'
 import type { WebTarget } from '../../shared/api'
-import { plural } from './lib/format'
+import { plural, refLabel } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
+import { hasRules, readRules, type CommitRules } from './lib/commitRules'
 import { layoutInWorker } from './graph/layoutClient'
+import type { Layout } from './graph/lanes'
 import { toast } from './ui/toastBus'
-import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog, type StashPart } from './store'
+import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, setPrefs, useApp, type Center, type Dialog, type RepoState, type StashPart } from './store'
+import { fillCommand, parseCommand, type CommandContext, type CustomCommand } from './lib/custom'
+import { customKeyId } from './lib/keys'
 
 const PAGE = 2000
 
@@ -50,8 +54,13 @@ export async function boot(): Promise<void> {
   const tabs = list?.open ?? []
   useApp.setState({ tabs, active: tabs[0]?.id ?? 'home', ready: true })
   for (const t of tabs) void loadRepo(t.id)
+  void loadGitHub().then(() => {
+    for (const t of tabs) void loadPulls(t.id)
+  })
   on('repo:changed', (e) => {
     if (!useApp.getState().repos[e.repoId]) return
+    // A full load started since these changes (the action that made them, or the window's focus) shows them already.
+    if ((loadStarted.get(e.repoId) ?? 0) >= e.at) return
     if (e.what.includes('refs')) void loadRepo(e.repoId, { keepSelection: true })
     else void loadStatus(e.repoId)
   })
@@ -86,6 +95,7 @@ export async function openRepo(path: string): Promise<boolean> {
     active: repo.id
   }))
   void loadRepo(repo.id)
+  void loadPulls(repo.id)
   return true
 }
 
@@ -94,6 +104,12 @@ export async function pickAndOpen(): Promise<void> {
   if (path) await openRepo(path)
 }
 
+// The tabs by when they were last open, the latest first: closing the one you're on goes back to the one before it.
+let lastUsed: string[] = []
+useApp.subscribe((s, prev) => {
+  if (s.active !== prev.active) lastUsed = [s.active, ...[prev.active, ...lastUsed].filter((id) => id !== s.active)].filter((id, i, all) => all.indexOf(id) === i)
+})
+
 export async function closeTab(repoId: string): Promise<void> {
   await attempt(() => call('repo.close', { repoId }))
   useApp.setState((s) => {
@@ -101,7 +117,10 @@ export async function closeTab(repoId: string): Promise<void> {
     const tabs = s.tabs.filter((t) => t.id !== repoId)
     const repos = { ...s.repos }
     delete repos[repoId]
-    const active = s.active === repoId ? (tabs[Math.min(idx, tabs.length - 1)]?.id ?? 'home') : s.active
+    // The repository used before this one; one never left (opened at startup, say) falls back to its neighbour.
+    const previous = lastUsed.find((id) => id !== repoId && tabs.some((t) => t.id === id))
+    const active = s.active === repoId ? (previous ?? tabs[Math.min(idx, tabs.length - 1)]?.id ?? 'home') : s.active
+    lastUsed = lastUsed.filter((id) => id !== repoId)
     return { tabs, repos, active }
   })
 }
@@ -181,6 +200,11 @@ function followOpenFile(repoId: string, status: Status): void {
  * the file watcher saying so. A cheap look at the branches decides: changed, reload it all; else just the status.
  */
 export async function refreshOnReturn(repoId: string): Promise<void> {
+  const load = loads.get(repoId)
+  // One to come starts after now: it shows whatever happened outside.
+  if (load?.next) return load.next.done
+  // One under way may have read before a change made outside: compare with what it shows once done.
+  await load?.running
   const before = useApp.getState().repos[repoId]?.refs
   const now = await call('refs.list', { repoId }).catch(() => null)
   const sig = (r: typeof now): string => (r ? `${r.head.branch} ${r.head.sha}\n${r.refs.map((x) => `${x.name} ${x.sha}`).join('\n')}` : '')
@@ -198,7 +222,7 @@ export async function loadStatus(repoId: string): Promise<void> {
     // The graph's top row comes and goes with uncommitted changes; the lanes have to move with it.
     if (r && r.layout && dirty !== (r.status?.changes.length ?? 0) > 0) {
       const commits = r.commits
-      const layout = await layoutInWorker(withWip(commits, dirty, r.refs?.head.sha ?? null), pinnedLine(commits, r.refs, r.refView.pinned))
+      const layout = await layoutFor(commits, dirty, r.refs, r.refView.pinned, !!graphFilter(r))
       if (!isLatest(statusSeq, repoId, seq) || useApp.getState().repos[repoId]?.commits !== commits) return
       patchRepo(repoId, { status, undo, layout })
     } else patchRepo(repoId, { status, undo })
@@ -481,7 +505,42 @@ export function dismissLfs(repoId: string): void {
   patchRepo(repoId, { lfsDismissed: true })
 }
 
-export async function loadRepo(repoId: string, opts: { keepSelection?: boolean } = {}): Promise<void> {
+/**
+ * One full load per repository at a time. Asked again while one runs (an action's own reload, the watcher, the window's
+ * focus), the next one starts when it ends, once for everyone who asked meanwhile: the one under way may have read too
+ * early for them, and two side by side would each run every command for the same answer.
+ */
+const loads = new Map<string, { running: Promise<void>; next: { keepSelection: boolean; done: Promise<void> } | null }>()
+/** When each repository's latest full load started (ms since the epoch). */
+const loadStarted = new Map<string, number>()
+
+export function loadRepo(repoId: string, opts: { keepSelection?: boolean } = {}): Promise<void> {
+  const keepSelection = !!opts.keepSelection
+  const load = loads.get(repoId)
+  if (!load) return startLoad(repoId, keepSelection)
+  // What the one under way read may be older than what the caller just changed (a branch hidden, say): it isn't shown.
+  next(repoSeq, repoId)
+  if (load.next) load.next.keepSelection &&= keepSelection
+  else {
+    const next = { keepSelection, done: Promise.resolve() }
+    next.done = load.running.then(() => startLoad(repoId, next.keepSelection))
+    load.next = next
+  }
+  return load.next.done
+}
+
+function startLoad(repoId: string, keepSelection: boolean): Promise<void> {
+  loadStarted.set(repoId, Date.now())
+  const running = readRepo(repoId, { keepSelection })
+    .catch(() => {})
+    .finally(() => {
+      if (!loads.get(repoId)?.next) loads.delete(repoId)
+    })
+  loads.set(repoId, { running, next: null })
+  return running
+}
+
+async function readRepo(repoId: string, opts: { keepSelection?: boolean }): Promise<void> {
   if (!useApp.getState().repos[repoId]) patchRepo(repoId, emptyRepo())
   patchRepo(repoId, { loading: true })
   if (!useApp.getState().repos[repoId].lfs) void checkLfs(repoId)
@@ -490,31 +549,36 @@ export async function loadRepo(repoId: string, opts: { keepSelection?: boolean }
   const seq = next(repoSeq, repoId)
   const sseq = next(statusSeq, repoId)
   // Settings the user changes while this load runs (dragging a column, say) are newer than what it reads.
-  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore } = useApp.getState().repos[repoId]
+  const { columns: columnsBefore, focusHead: focusBefore, graphWidth: widthBefore, refsWidth: refsBefore, commitRules: rulesBefore } = useApp.getState().repos[repoId]
   try {
-    const [refs, status, undo, refView, columns, repoPrefs] = await Promise.all([
+    const already = useApp.getState().repos[repoId]?.commits.length ?? 0
+    const filter = graphFilter(useApp.getState().repos[repoId])
+    loadedFilter.set(repoId, JSON.stringify(filter ?? null))
+    const [refs, status, undo, refView, columns, repoPrefs, flow, page] = await Promise.all([
       call('refs.list', { repoId }),
       call('status.get', { repoId }),
       call('undo.peek', { repoId }),
       call('refView.get', { repoId }),
       call('graph.getColumns', { repoId }),
-      call('repoPrefs.get', { repoId })
+      call('repoPrefs.get', { repoId }),
+      call('flow.config', { repoId }).catch(() => null),
+      call('graph.load', { repoId, skip: 0, limit: Math.max(PAGE, already), filter })
     ])
-    const already = useApp.getState().repos[repoId]?.commits.length ?? 0
-    const page = await call('graph.load', { repoId, skip: 0, limit: Math.max(PAGE, already) })
-    const layout = await layoutInWorker(withWip(page.commits, status.changes.length > 0, refs.head.sha), pinnedLine(page.commits, refs, refView.pinned))
+    const layout = await layoutFor(page.commits, status.changes.length > 0, refs, refView.pinned, !!filter)
     if (!isLatest(repoSeq, repoId, seq)) return // a newer full load is on its way
     const freshStatus = isLatest(statusSeq, repoId, sseq)
     // HEAD as the screen last showed it: if it moved (a checkout, pull, reset, or a terminal), submodules may follow.
     const headBefore = useApp.getState().repos[repoId]?.refs?.head.sha ?? null
     patchRepo(repoId, (r) => ({
       refs,
+      flow,
       ...(freshStatus ? { status, undo } : {}),
       refView,
       columns: r.columns !== columnsBefore ? r.columns : columns ?? DEFAULT_COLUMNS,
       focusHead: r.focusHead !== focusBefore ? r.focusHead : repoPrefs['graph.focusHead'] === true,
       graphWidth: r.graphWidth !== widthBefore ? r.graphWidth : typeof repoPrefs['graph.width'] === 'number' ? repoPrefs['graph.width'] : null,
       refsWidth: r.refsWidth !== refsBefore ? r.refsWidth : typeof repoPrefs['graph.refsWidth'] === 'number' ? repoPrefs['graph.refsWidth'] : null,
+      commitRules: r.commitRules !== rulesBefore ? r.commitRules : readRules(repoPrefs['commit.rules']),
       commits: page.commits,
       hasMore: page.hasMore,
       layout,
@@ -536,11 +600,20 @@ export async function loadMore(repoId: string): Promise<void> {
   if (!r || !r.hasMore || r.loading) return
   patchRepo(repoId, { loading: true })
   const skip = r.commits.filter((c) => c.kind === 'commit').length
-  const page = await attempt(() => call('graph.load', { repoId, skip, limit: PAGE }))
+  const filter = graphFilter(r)
+  const page = await attempt(() => call('graph.load', { repoId, skip, limit: PAGE, filter }))
   if (!page) return patchRepo(repoId, { loading: false })
   const commits = [...r.commits, ...page.commits]
-  const layout = await layoutInWorker(withWip(commits, (r.status?.changes.length ?? 0) > 0, r.refs?.head.sha ?? null), pinnedLine(commits, r.refs, r.refView.pinned))
+  const layout = await layoutFor(commits, (r.status?.changes.length ?? 0) > 0, r.refs, r.refView.pinned, !!filter)
   patchRepo(repoId, { commits, hasMore: page.hasMore, layout, loading: false })
+}
+
+/** The lanes for these rows, drawn along `drawn` parents when the graph is filtered. */
+function layoutFor(commits: CommitRow[], dirty: boolean, refs: Refs | null, pinned: string | null, filtered: boolean): Promise<Layout> {
+  const rows = commits.map((c) => ({ sha: c.sha, parents: c.drawn ?? c.parents }))
+  // Filtered, HEAD may not be shown: then the uncommitted changes have no line to join.
+  const head = refs?.head.sha ?? null
+  return layoutInWorker(withWip(rows, dirty, filtered && !commits.some((c) => c.sha === head) ? null : head), pinnedLine(rows, refs, pinned))
 }
 
 /** The pinned branch's first-parent line among the loaded rows (what lane 0 shows). */
@@ -554,8 +627,45 @@ function pinnedLine(rows: Array<{ sha: string; parents: string[] }>, refs: { ref
 }
 
 /** The graph rows as drawn: an extra "uncommitted changes" row on top when the tree is dirty. */
-export function withWip<T extends { sha: string; parents: string[] }>(rows: T[], dirty: boolean, head: string | null): Array<{ sha: string; parents: string[] }> {
+function withWip<T extends { sha: string; parents: string[] }>(rows: T[], dirty: boolean, head: string | null): Array<{ sha: string; parents: string[] }> {
   return dirty ? [{ sha: 'wip', parents: head ? [head] : [] }, ...rows] : rows
+}
+
+// ---------- filtering the graph ----------
+
+/** The filter the graph loads with: the bar's fields that have something in them, or undefined. */
+export function graphFilter(r: RepoState | undefined): GraphFilter | undefined {
+  const path = r?.filter?.path.trim()
+  const author = r?.filter?.author.trim()
+  return path || author ? { ...(path ? { path } : {}), ...(author ? { author } : {}) } : undefined
+}
+
+/** Opens the filter bar (the fields as they were) with the keyboard in its path field. */
+export function openFilter(repoId: string): void {
+  setFilter(repoId, {})
+  setTimeout(() => window.dispatchEvent(new Event('gc:focus-filter')), 0)
+}
+
+/** What each repository's graph was last loaded with, so a change in the bar that filters nothing new doesn't reload. */
+const loadedFilter = new Map<string, string>()
+const filterTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/**
+ * Opens the filter bar with these fields (the others stay as they were) or, with null, closes it and shows every
+ * commit again. `wait`: while typing, the graph reloads once you stop.
+ */
+export function setFilter(repoId: string, next: { path?: string; author?: string } | null, wait = 0): void {
+  const r = useApp.getState().repos[repoId]
+  if (!r) return
+  patchRepo(repoId, { filter: next ? { path: next.path ?? r.filter?.path ?? '', author: next.author ?? r.filter?.author ?? '' } : null })
+  if (r.center.kind !== 'graph') setCenter(repoId, { kind: 'graph' })
+  clearTimeout(filterTimers.get(repoId))
+  filterTimers.set(
+    repoId,
+    setTimeout(() => {
+      if (JSON.stringify(graphFilter(useApp.getState().repos[repoId]) ?? null) !== (loadedFilter.get(repoId) ?? 'null')) void loadRepo(repoId, { keepSelection: true })
+    }, wait)
+  )
 }
 
 // ---------- selection and views ----------
@@ -595,6 +705,8 @@ export function extendSelect(repoId: string, sha: string, order: string[]): void
 /** The current branch's first-parent line among the loaded commits, newest first. */
 export function headLine(repoId: string): string[] {
   const r = useApp.getState().repos[repoId]
+  // A filtered graph skips commits, so the line can't be followed: nothing on it is offered for rewriting.
+  if (graphFilter(r)) return []
   const bySha = new Map((r?.commits ?? []).map((c) => [c.sha, c]))
   const line: string[] = []
   for (let sha = r?.refs?.head.sha ?? null; sha && bySha.has(sha); sha = bySha.get(sha)!.parents[0] ?? null) line.push(sha)
@@ -692,6 +804,18 @@ export function reword(repoId: string, sha: string, message: string, done?: (ok:
   )
 }
 
+/** Who commits are by: you, someone else, or an added co-author. The newest commit alone can change with other work around. */
+export function setAuthorship(repoId: string, shas: string[], change: AuthorChange): void {
+  const line = headLine(repoId)
+  if (!(shas.length === 1 && shas[0] === line[0]) && blocked(repoId, 'Changing the author')) return
+  const what = shas.length === 1 ? shas[0].slice(0, 7) : plural(shas.length, 'commit')
+  const name = change.kind === 'reset' ? '' : change.author.replace(/\s*<[^>]*>\s*$/, '')
+  const done = change.kind === 'reset' ? `You’re now the author of ${what}` : change.kind === 'set' ? `${name} is now the author of ${what}` : `Added ${name} as a co-author of ${what}`
+  guardPushed(repoId, shas, 'Change the author', () =>
+    void rewriteOp(repoId, () => call('history.authorship', { repoId, shas, change }), 'Couldn’t change the author', done, Math.min(...shas.map((s) => line.indexOf(s))))
+  )
+}
+
 export function squash(repoId: string, shas: string[], message: string, done?: (ok: boolean) => void, noVerify = false): void {
   guardPushed(repoId, shas, `Squash ${shas.length} commits`, () =>
     void rewriteOp(repoId, () => call('history.squash', { repoId, shas, message, noVerify }), 'Couldn’t squash', `Squashed ${shas.length} commits into one`, Math.min(...shas.map((s) => headLine(repoId).indexOf(s)))).then((ok) => done?.(ok))
@@ -735,7 +859,7 @@ export function moveCommit(repoId: string, sha: string, direction: 'up' | 'down'
 
 // ---------- custom patches: taking changes out of a commit ----------
 
-export type PatchInput = { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean } | null }
+export type PatchInput = { sha: string; path: string; oldPath?: string; part: { hunk: number; header: string; lines: number[] | null; full: boolean; context?: number } | null }
 
 /** Why changes can't be taken out of this commit (not on the branch's own line, a merge, the first commit), or null. */
 export function patchProblem(repoId: string, sha: string): string | null {
@@ -833,7 +957,7 @@ export async function findFixupTarget(repoId: string): Promise<void> {
   const res = await attempt(() => call('history.fixupTarget', { repoId }), 'Couldn’t look for the commit')
   if (!res) return
   const commits = useApp.getState().repos[repoId]?.commits ?? []
-  const label = (s: string): string => `${s.slice(0, 7)} ${commits.find((c) => c.sha === s)?.summary ?? ''}`.trim()
+  const label = (s: string): string => `${s.slice(0, 7)} ${commits.find((c) => c.sha === s)?.summary ?? res.summaries[s] ?? ''}`.trim()
   if (!res.shas.length) {
     toast({
       tone: 'info',
@@ -884,11 +1008,18 @@ export function rebaseRange(repoId: string, shas: string[]): void {
 }
 
 export function setCenter(repoId: string, center: Center): void {
-  patchRepo(repoId, { center })
+  patchRepo(repoId, { center, rebaseFile: null })
 }
 
+/** A file's diff in the middle. While a rebase or a copy is being planned, it opens under that list instead. */
 export function openDiff(repoId: string, path: string, source: DiffSource, oldPath?: string): void {
-  setCenter(repoId, { kind: 'diff', path, source, oldPath })
+  const kind = useApp.getState().repos[repoId]?.center.kind
+  if (source.kind === 'commit' && (kind === 'rebase' || kind === 'cherry')) patchRepo(repoId, { rebaseFile: { path, oldPath, source } })
+  else setCenter(repoId, { kind: 'diff', path, source, oldPath })
+}
+
+export function closeRebaseFile(repoId: string): void {
+  patchRepo(repoId, { rebaseFile: null })
 }
 
 export function openLog(): void {
@@ -921,6 +1052,13 @@ export function discard(repoId: string, paths: string[] | 'all'): void {
       await loadRepo(repoId, { keepSelection: true })
     }
   })
+}
+
+/** Cleans up the working tree (see CleanDialog). */
+export async function clean(repoId: string, what: { tracked: boolean; untracked: boolean; ignored: boolean }): Promise<void> {
+  const res = await attempt(() => call('worktree.clean', { repoId, ...what }), 'Couldn’t clean up')
+  if (res) toast({ tone: 'success', title: res.removed ? `Removed ${plural(res.removed, 'item')}` : 'Nothing to remove', body: res.removed ? 'Undo brings it all back.' : undefined })
+  await loadRepo(repoId, { keepSelection: true })
 }
 
 type CommitInput = { summary: string; body: string; amend: boolean; noVerify: boolean; push: boolean; messageOnly?: boolean; detachedOk?: boolean }
@@ -1055,31 +1193,42 @@ function checkedOutElsewhere(repoId: string, branch: string, w: Pick<Worktree, '
   })
 }
 
+/** Back to the branch (or detached commit) checked out before this one, as `git checkout -` does. */
+export async function checkoutPrevious(repoId: string): Promise<void> {
+  // Asked again: a switch made a moment ago may not be on screen yet, and this would go back to the wrong branch.
+  const fresh = await call('refs.list', { repoId }).catch(() => null)
+  const prev = fresh ? fresh.previous : useApp.getState().repos[repoId]?.refs?.previous
+  if (prev) await checkout(repoId, prev)
+  else toast({ tone: 'info', title: 'No previous branch', body: 'Switch to another branch first. This goes back to the one you left.' })
+}
+
 async function runCheckout(repoId: string, ref: string): Promise<void> {
   // A far jump can take a while: say so, with git's progress, until it's done.
-  patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: `Switching to ${ref}…` }, progress: null }))
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: `Switching to ${refLabel(ref)}…` }, progress: null }))
   const done = (): void => patchRepo(repoId, (r) => ({ busy: { ...r.busy, checkout: undefined }, progress: null }))
   try {
     await call('branch.checkout', { repoId, ref, opId: newOpId() })
     done()
-    toast({ tone: 'success', title: `Switched to ${ref}` })
+    toast({ tone: 'success', title: `Switched to ${refLabel(ref)}` })
   } catch (err) {
     done()
     // A worktree made a moment ago (in a terminal, say) that the list here doesn't show yet.
     const m = err instanceof ApiError ? /'([^']+)' is already (?:used|checked out) by worktree at '([^']+)'/.exec(`${err.message}\n${err.detail ?? ''}`) : null
     await loadRepo(repoId, { keepSelection: true })
     if (m) return checkedOutElsewhere(repoId, m[1], { path: m[2], missing: !(await call('worktrees.list', { repoId }).catch(() => [])).some((w) => w.branch === m[1] && !w.missing) })
-    fail(err, `Couldn’t switch to ${ref}`)
+    fail(err, `Couldn’t switch to ${refLabel(ref)}`)
     return
   }
   await loadRepo(repoId, { keepSelection: true })
 }
 
 export async function createBranch(repoId: string, name: string, at: string, checkoutAfter: boolean): Promise<boolean> {
-  const ok = await attempt(() => call('branch.create', { repoId, name, at, checkout: checkoutAfter }), 'Couldn’t create the branch')
+  const r = await attempt(() => call('branch.create', { repoId, name, at, checkout: checkoutAfter }), 'Couldn’t create the branch')
   await loadRepo(repoId, { keepSelection: true })
-  if (ok === undefined) return false
-  toast({ tone: 'success', title: checkoutAfter ? `Created and switched to ${name}` : `Created ${name}` })
+  if (r === undefined) return false
+  // Made, but the switch was refused: the branch is there, so the dialog is done; this says what's in the way.
+  if (checkoutAfter && !r.switched) toast({ tone: 'info', title: `Created ${name}, but didn’t switch to it`, body: r.reason ?? undefined })
+  else toast({ tone: 'success', title: checkoutAfter ? `Created and switched to ${name}` : `Created ${name}` })
   return true
 }
 
@@ -1278,24 +1427,83 @@ function afterOp(repoId: string, res: { result: string; message?: string } | und
   if (res.result === 'conflicts') {
     toast({ tone: 'info', title: 'Conflicts to sort out', body: 'Both sides changed the same lines. Open each file, pick what to keep, then continue.' })
     select(repoId, 'wip')
+  } else if (res.result === 'paused') {
+    toast({ tone: 'info', title: 'Stopped to edit a commit', body: 'Change the files and stage them to add them to it, or make new commits. Then continue.' })
+    select(repoId, 'wip')
   } else if (res.result === 'nothing') toast({ tone: 'info', title: res.message ?? 'Nothing to do' })
   else if (res.result === 'ok') toast({ tone: 'success', title: okTitle })
 }
 
-/** Merge `source` into `target`. Checks out target first if needed. */
-export async function mergeInto(repoId: string, source: string, target: string): Promise<void> {
-  const head = useApp.getState().repos[repoId]?.refs?.head.branch
-  if (target !== head) {
-    const ok = await attempt(() => call('branch.checkout', { repoId, ref: target }), `Couldn’t switch to ${target}`)
-    if (ok === undefined) return void (await loadRepo(repoId))
+/** "a.txt", "a.txt and b.txt", or "a.txt, b.txt, c.txt and 4 more files". */
+export function fileList(files: string[], shown = 3): string {
+  if (files.length <= shown) return files.length > 1 ? `${files.slice(0, -1).join(', ')} and ${files[files.length - 1]}` : (files[0] ?? '')
+  return `${files.slice(0, shown).join(', ')} and ${plural(files.length - shown, 'more file')}`
+}
+
+/**
+ * Before a merge, rebase or pull: whether it would conflict, worked out by git without touching anything. If it
+ * would, asks first, and `go` runs only on "anyway". A forecast that can't be made (an old git) doesn't stand in the way.
+ */
+async function unlessConflicts(
+  repoId: string,
+  p: { kind: 'merge'; into: string; from: string } | { kind: 'rebase'; branch: string; onto: string } | { kind: 'pull'; rebase: boolean },
+  ask: { title: string; confirmLabel: string; note?: string },
+  go: () => void
+): Promise<void> {
+  const f = await call('conflict.forecast', { repoId, ...p }).catch(() => null)
+  if (!f?.files.length) return go()
+  const files = fileList(f.files)
+  const where = f.stopAt
+    ? `It would stop at “${f.stopAt.summary}” (commit ${f.stopAt.step} of ${f.stopAt.total}), with conflicts in ${files}.`
+    : `Both sides changed the same lines in ${files}.`
+  confirm({
+    title: ask.title,
+    body: `${where} You can go ahead and sort them out, or leave it for now.${ask.note ? ` ${ask.note}` : ''}`,
+    confirmLabel: ask.confirmLabel,
+    danger: false,
+    undoable: true,
+    onConfirm: go
+  })
+}
+
+/**
+ * Merge `source` into `target`. Checks out target first if needed. `noFf`: always a merge commit. `checked`: the
+ * conflict forecast was seen.
+ */
+export async function mergeInto(repoId: string, source: string, target: string, noFf = false, checked = false): Promise<void> {
+  if (!checked) {
+    const title = `Merging ${source} into ${target} will conflict`
+    return unlessConflicts(repoId, { kind: 'merge', into: target, from: source }, { title, confirmLabel: 'Merge anyway' }, () => void mergeInto(repoId, source, target, noFf, true))
   }
-  const res = await attempt(() => call('branch.merge', { repoId, source }), `Couldn’t merge ${source}`)
+  if (!(await switchFor(repoId, target))) return
+  const res = await attempt(() => call('branch.merge', { repoId, source, noFf }), `Couldn’t merge ${source}`)
   afterOp(repoId, res, `Merged ${source} into ${target}`)
   await loadRepo(repoId, { keepSelection: true })
 }
 
-/** Rebase `branch` onto `onto`. Checks out branch first if needed. */
-export async function rebaseOnto(repoId: string, branch: string, onto: string): Promise<void> {
+/** Checks out `target` unless it's checked out already. False if that failed. */
+async function switchFor(repoId: string, target: string): Promise<boolean> {
+  if (target === useApp.getState().repos[repoId]?.refs?.head.branch) return true
+  const ok = await attempt(() => call('branch.checkout', { repoId, ref: target }), `Couldn’t switch to ${target}`)
+  if (ok === undefined) await loadRepo(repoId)
+  return ok !== undefined
+}
+
+/** Everything `source` brings in, as one commit on `target` with `message`. Checks out target first if needed. */
+export async function squashMerge(repoId: string, source: string, target: string, message: string, noVerify: boolean): Promise<boolean> {
+  if (!(await switchFor(repoId, target))) return false
+  const res = await attempt(() => call('branch.squashMerge', { repoId, source, message, noVerify }), `Couldn’t squash ${source}`)
+  afterOp(repoId, res, `Squashed ${source} into one commit on ${target}`)
+  await loadRepo(repoId, { keepSelection: true })
+  return !!res
+}
+
+/** Rebase `branch` onto `onto`. Checks out branch first if needed. `checked`: the conflict forecast was seen. */
+export async function rebaseOnto(repoId: string, branch: string, onto: string, checked = false): Promise<void> {
+  if (!checked) {
+    const title = `Rebasing ${branch} onto ${onto} will conflict`
+    return unlessConflicts(repoId, { kind: 'rebase', branch, onto }, { title, confirmLabel: 'Rebase anyway' }, () => void rebaseOnto(repoId, branch, onto, true))
+  }
   const head = useApp.getState().repos[repoId]?.refs?.head.branch
   if (branch !== head) {
     const ok = await attempt(() => call('branch.checkout', { repoId, ref: branch }), `Couldn’t switch to ${branch}`)
@@ -1304,6 +1512,15 @@ export async function rebaseOnto(repoId: string, branch: string, onto: string): 
   const res = await attempt(() => call('branch.rebase', { repoId, onto, branch }), `Couldn’t rebase ${branch}`)
   afterOp(repoId, res, `Rebased ${branch} onto ${onto}`)
   await loadRepo(repoId, { keepSelection: true })
+}
+
+/** Moves the commits after `from` (on the current branch) onto `onto`: git rebase --onto. */
+export async function rebaseFrom(repoId: string, from: string, onto: string, updateRefs: boolean): Promise<boolean> {
+  const branch = useApp.getState().repos[repoId]?.refs?.head.branch ?? 'the branch'
+  const res = await attempt(() => call('rebase.onto', { repoId, from, onto, updateRefs }), `Couldn’t rebase ${branch}`)
+  afterOp(repoId, res, `Moved ${branch}’s commits onto ${onto}`)
+  await loadRepo(repoId, { keepSelection: true })
+  return !!res
 }
 
 // ---------- sync ----------
@@ -1329,14 +1546,25 @@ export async function fetchAll(repoId: string, quiet = false): Promise<void> {
     if (!quiet) toast({ tone: 'success', title: 'Fetched all remotes' })
   }
   await loadRepo(repoId, { keepSelection: true })
+  void loadPulls(repoId)
 }
 
 /**
  * Pulls the checked-out branch. When uncommitted changes are in the way, asks: stash them and pull (they're put back
  * after), discard them and pull, or cancel. `autostash` is that first answer.
  */
-export async function pull(repoId: string, mode?: PullMode, autostash = false): Promise<void> {
+export async function pull(repoId: string, mode?: PullMode, autostash = false, checked = false): Promise<void> {
   const m = mode ?? useApp.getState().prefs.pullMode
+  // Merged or replayed onto the remote branch (as of the last fetch): would that conflict?
+  if (!checked && m !== 'ff-only') {
+    const what = m === 'rebase' ? 'Pulling with rebase' : 'Pulling'
+    return unlessConflicts(
+      repoId,
+      { kind: 'pull', rebase: m === 'rebase' },
+      { title: `${what} will conflict`, confirmLabel: 'Pull anyway', note: 'This is from the last fetch: the pull gets anything newer first.' },
+      () => void pull(repoId, m, autostash, true)
+    )
+  }
   const res = await remoteOp(repoId, 'pull', 'Pulling', (opId) => call('remote.pull', { repoId, mode: m, opId, autostash }), 'Pull failed')
   if (res?.result === 'rejected') toast({ tone: 'error', title: 'Pull stopped', body: res.message })
   else if (res?.result === 'dirty') {
@@ -1346,7 +1574,7 @@ export async function pull(repoId: string, mode?: PullMode, autostash = false): 
       confirmLabel: 'Stash and pull',
       danger: false,
       undoable: null,
-      onConfirm: () => void pull(repoId, m, true),
+      onConfirm: () => void pull(repoId, m, true, true),
       alt: {
         label: 'Discard and pull…',
         onSelect: () =>
@@ -1357,7 +1585,7 @@ export async function pull(repoId: string, mode?: PullMode, autostash = false): 
             danger: true,
             undoable: true,
             onConfirm: async () => {
-              if ((await attempt(() => call('worktree.discard', { repoId, paths: 'all' }), 'Couldn’t discard')) !== undefined) await pull(repoId, m)
+              if ((await attempt(() => call('worktree.discard', { repoId, paths: 'all' }), 'Couldn’t discard')) !== undefined) await pull(repoId, m, false, true)
             }
           })
       }
@@ -1404,8 +1632,10 @@ export function localFor(repoId: string, remoteBranch: string): Ref | undefined 
  * For a remote branch such as origin/x: fast-forwards the local branch that tracks it (or the one with its name) to
  * it. With no such local branch, makes one that tracks it. With `checkout` (a double-click), it then checks that
  * branch out too, even when it couldn't be fast-forwarded (the toast says why); otherwise you stay where you are.
+ * `resetFirst` (a click on the remote branch's label): when it can't be fast-forwarded, resetting it to the remote
+ * branch is what the question offers first.
  */
-export async function fastForwardTo(repoId: string, remoteBranch: string, opts: { checkout?: boolean } = {}): Promise<void> {
+export async function fastForwardTo(repoId: string, remoteBranch: string, opts: { checkout?: boolean; resetFirst?: boolean } = {}): Promise<void> {
   const refs = useApp.getState().repos[repoId]?.refs?.refs ?? []
   const r = refs.find((x) => x.kind === 'remote' && x.short === remoteBranch)
   const name = r?.remote ? remoteBranch.slice(r.remote.length + 1) : remoteBranch.split('/').slice(1).join('/')
@@ -1415,7 +1645,7 @@ export async function fastForwardTo(repoId: string, remoteBranch: string, opts: 
   if (!local && opts.checkout) return checkout(repoId, remoteBranch)
   const res = await attempt(() => call('branch.fastForward', { repoId, name: local?.short ?? name, to: remoteBranch, fetch: false, create: !local, opId: newOpId() }), `Couldn’t fast-forward ${local?.short ?? name}`)
   // It has commits of its own: offer to check it out as it is, or to reset it to the remote branch.
-  if (opts.checkout && local && !local.worktree && res?.result === 'rejected') return offerReset(repoId, local, remoteBranch, res.ahead)
+  if (opts.checkout && local && !local.worktree && res?.result === 'rejected') return offerReset(repoId, local, remoteBranch, res.ahead, opts.resetFirst)
   // Up to date is the usual case for a double-click: no need to say so before switching.
   if (!(opts.checkout && res?.result === 'nothing')) fastForwardResult(res)
   if (opts.checkout && local && !local.isHead) return checkout(repoId, local.short)
@@ -1425,31 +1655,31 @@ export async function fastForwardTo(repoId: string, remoteBranch: string, opts: 
 /**
  * After a double-click on a remote branch whose local branch can't be fast-forwarded. Checking it out as it is comes
  * first; resetting moves a branch that isn't checked out (then checks it out), or hard-resets the checked-out one.
- * Both can be undone.
+ * Both can be undone. With `resetFirst`, resetting is the main button and keeping it as it is the other one.
  */
-function offerReset(repoId: string, local: Ref, remoteBranch: string, ahead?: number): void {
+function offerReset(repoId: string, local: Ref, remoteBranch: string, ahead?: number, resetFirst = false): void {
   const own = ahead ? plural(ahead, 'commit') : 'commits'
+  const keep = { label: local.isHead ? 'Keep it as it is' : 'Check out as it is', run: () => (local.isHead ? undefined : void checkout(repoId, local.short)) }
+  const toRemote = {
+    label: `Reset to ${remoteBranch}`,
+    run: async () => {
+      if (local.isHead) await reset(repoId, remoteBranch, 'hard', local.short)
+      else if (await moveBranch(repoId, local.short, remoteBranch)) await checkout(repoId, local.short)
+    }
+  }
+  const [main, other] = resetFirst ? [toRemote, keep] : [keep, toRemote]
   confirm({
-    title: `${local.short} can’t be fast-forwarded`,
+    title: resetFirst ? `Reset ${local.short} to ${remoteBranch}?` : `${local.short} can’t be fast-forwarded`,
     body:
       `${local.short} has ${own} that ${remoteBranch} doesn’t, so it can’t just move forward. ` +
       (local.isHead
         ? `Keep it as it is, or reset it to ${remoteBranch}: a hard reset, so your uncommitted changes are discarded too.`
         : `Check it out as it is, or reset it to ${remoteBranch} and check it out: its own commits are left out of it.`),
-    confirmLabel: local.isHead ? 'Keep it as it is' : 'Check out as it is',
-    danger: false,
+    confirmLabel: main.label,
+    danger: main === toRemote,
     undoable: true,
-    onConfirm: () => {
-      if (!local.isHead) void checkout(repoId, local.short)
-    },
-    alt: {
-      label: `Reset to ${remoteBranch}`,
-      danger: true,
-      onSelect: async () => {
-        if (local.isHead) await reset(repoId, remoteBranch, 'hard', local.short)
-        else if (await moveBranch(repoId, local.short, remoteBranch)) await checkout(repoId, local.short)
-      }
-    }
+    onConfirm: () => void main.run(),
+    alt: { label: other.label, danger: other === toRemote, onSelect: () => void other.run() }
   })
 }
 
@@ -1490,8 +1720,11 @@ export async function push(repoId: string, opts: PushOpts = {}, subChecked = fal
       return
     }
   }
+  const before = useApp.getState().repos[repoId]?.refs
+  const branch = opts.branch ?? before?.head.branch ?? ''
+  // Where it goes, from before the push: the load after it may give way to a newer one still running.
+  const upstream = before?.refs.find((x) => x.kind === 'local' && x.short === branch)?.upstream
   const res = await remoteOp(repoId, 'push', 'Pushing', (opId) => call('remote.push', { repoId, opId, ...opts }), 'Push failed')
-  const branch = opts.branch ?? useApp.getState().repos[repoId]?.refs?.head.branch ?? ''
   if (res?.result === 'needsUpstream') openDialog({ kind: 'publish', repoId, branch })
   else if (res?.result === 'stale') {
     toast({ tone: 'error', title: 'Force push stopped', body: res.message, action: { label: 'Fetch now', onClick: () => void fetchAll(repoId) } })
@@ -1506,7 +1739,16 @@ export async function push(repoId: string, opts: PushOpts = {}, subChecked = fal
     })
   } else if (res?.result === 'ok') {
     const where = opts.remote ? ` to ${opts.remote}` : ''
-    toast({ tone: 'success', title: opts.force ? `Force pushed ${branch}${where}` : `Pushed ${branch}${where}` })
+    await loadRepo(repoId, { keepSelection: true })
+    const github = useApp.getState().repos[repoId]?.pulls
+    const toGitHub = github?.state === 'ok' && (opts.remote ? opts.remote === github.remote : !!upstream?.startsWith(`refs/remotes/${github.remote}/`))
+    const offer = toGitHub && canOpenPull(repoId, branch)
+    toast({
+      tone: 'success',
+      title: opts.force ? `Force pushed ${branch}${where}` : `Pushed ${branch}${where}`,
+      action: offer ? { label: 'Create pull request', onClick: () => createPullRequest(repoId, branch) } : undefined
+    })
+    return
   }
   await loadRepo(repoId, { keepSelection: true })
 }
@@ -1518,6 +1760,7 @@ export async function continueOp(repoId: string): Promise<void> {
   const res = await attempt(() => call('op.continue', { repoId }), 'Couldn’t continue')
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined } }))
   if (res?.result === 'conflicts') toast({ tone: 'info', title: 'More conflicts', body: 'The next commit also conflicts. Resolve these files, then continue again.' })
+  else if (res?.result === 'paused') afterOp(repoId, res, '')
   else if (res?.result === 'ok') toast({ tone: 'success', title: 'Finished. Everything’s back in one piece.' })
   setCenter(repoId, { kind: 'graph' })
   await loadRepo(repoId, { keepSelection: true })
@@ -1580,38 +1823,90 @@ const patchTitles = { stage: 'Couldn’t stage those lines', unstage: 'Couldn’
 
 export async function applyPatch(
   repoId: string,
-  input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean }
+  input: { path: string; source: 'worktree' | 'index'; hunk: number; header: string; lines: number[] | null; action: 'stage' | 'unstage' | 'discard'; full: boolean; context?: number }
 ): Promise<boolean> {
   const ok = await attempt(() => call('index.applyPatch', { repoId, ...input }), patchTitles[input.action])
   await loadStatus(repoId)
   return ok !== undefined
 }
 
-/** Adds lines to the root .gitignore; tracked files they cover stop being tracked and stay on disk. Undoable. */
-export async function ignore(repoId: string, choice: IgnoreChoice): Promise<boolean> {
-  const res = await attempt(() => call('ignore.add', { repoId, patterns: choice.patterns, label: choice.what }), 'Couldn’t update .gitignore')
+/**
+ * Adds lines to the root .gitignore; tracked files they cover stop being tracked and stay on disk. `local`: to
+ * .git/info/exclude instead, which isn't committed, so only this computer ignores them. Undoable.
+ */
+export async function ignore(repoId: string, choice: IgnoreChoice, local = false): Promise<boolean> {
+  const res = await attempt(
+    () => call('ignore.add', { repoId, patterns: choice.patterns, label: choice.what, local }),
+    local ? 'Couldn’t update .git/info/exclude' : 'Couldn’t update .gitignore'
+  )
   if (res) {
     toast({
       tone: 'success',
-      title: `Ignoring ${choice.what}`,
-      body: res.untracked
-        ? `Git stopped tracking ${plural(res.untracked, 'file')}; ${res.untracked === 1 ? 'it stays' : 'they stay'} on disk. Commit to record it.`
-        : 'Commit .gitignore to share it.'
+      title: local ? `Ignoring ${choice.what} on this computer` : `Ignoring ${choice.what}`,
+      body: local
+        ? 'Added to .git/info/exclude, which isn’t committed: nobody else is affected.'
+        : res.untracked
+          ? `Git stopped tracking ${plural(res.untracked, 'file')}; ${res.untracked === 1 ? 'it stays' : 'they stay'} on disk. Commit to record it.`
+          : 'Commit .gitignore to share it.'
     })
   }
   await loadStatus(repoId)
   return res !== undefined
 }
 
+// ---------- patches ----------
+
+/** Copies these commits as a patch (git format-patch): each with its author and message, ready for git am. */
+export async function copyCommitsPatch(repoId: string, shas: string[]): Promise<void> {
+  if ((await attempt(() => call('patch.copyCommits', { repoId, shas }), 'Couldn’t make the patch')) === undefined) return
+  toast({ tone: 'success', title: shas.length === 1 ? 'Copied the commit as a patch' : `Copied ${shas.length} commits as a patch` })
+}
+
+/** Saves these commits' patch to a file, named after the commit as git format-patch would. */
+export async function saveCommitsPatch(repoId: string, shas: string[]): Promise<void> {
+  const summary = useApp.getState().repos[repoId]?.commits.find((c) => c.sha === shas[0])?.summary ?? 'commit'
+  const slug = summary.replace(/[^\w.-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 52) || 'commit'
+  const name = shas.length === 1 ? `0001-${slug}.patch` : `${shas.length}-commits.patch`
+  const path = await attempt(() => call('patch.save', { repoId, shas, name }), 'Couldn’t save the patch')
+  if (path) toast({ tone: 'success', title: 'Saved the patch', body: path })
+}
+
+/** Copies uncommitted changes as a plain diff: the staged ones, the unstaged ones (new files too), or all. */
+export async function copyChangesPatch(repoId: string, scope: 'staged' | 'unstaged' | 'all', paths?: string[]): Promise<void> {
+  if ((await attempt(() => call('patch.copyChanges', { repoId, scope, paths }), 'Couldn’t make the patch')) === undefined) return
+  toast({ tone: 'success', title: paths?.length === 1 ? 'Copied the changes to the file as a patch' : 'Copied the changes as a patch' })
+}
+
+/** Applies a patch the dialog checked. Undoable. Returns whether it applied. */
+export async function applyPatchSource(repoId: string, source: PatchSource, target: PatchTarget): Promise<boolean> {
+  const res = await attempt(() => call('patch.apply', { repoId, source, target }), 'Couldn’t apply the patch')
+  if (res) {
+    toast({
+      tone: 'success',
+      title: target === 'commits' ? `Applied ${plural(res.commits, 'commit')}` : 'Applied the patch',
+      body: target === 'commits' ? undefined : target === 'index' ? 'The changes are staged.' : 'The changes are in your working files, unstaged.'
+    })
+  }
+  await loadRepo(repoId, { keepSelection: true })
+  return res !== undefined
+}
+
 // ---------- stash ----------
 
-/** `paths`: only those files, whatever the staged-only and new-files choices. */
-export async function stashSave(repoId: string, message: string, stagedOnly: boolean, paths?: string[]): Promise<boolean> {
-  const includeUntracked = useApp.getState().prefs.stashUntracked
-  const res = await attempt(() => call('stash.save', { repoId, message, stagedOnly, includeUntracked, paths }), 'Couldn’t stash')
+/**
+ * Stashes the changes: all of them, the staged ones, or some files (new files picked go too, whatever the setting).
+ * `keepIndex`: the staged changes also stay in the folder.
+ */
+export async function stashSave(repoId: string, message: string, opts: { stagedOnly: boolean; paths?: string[]; keepIndex?: boolean }): Promise<boolean> {
+  const { stagedOnly, paths, keepIndex } = opts
+  const s = useApp.getState()
+  const isNew = new Set((s.repos[repoId]?.status?.changes ?? []).filter((c) => c.worktree === '?').map((c) => c.path))
+  const includeUntracked = s.prefs.stashUntracked || !!paths?.some((p) => isNew.has(p))
+  const res = await attempt(() => call('stash.save', { repoId, message, stagedOnly, includeUntracked, paths, keepIndex }), 'Couldn’t stash')
+  const title = stagedOnly ? 'Staged changes stashed' : paths ? `Stashed ${plural(paths.length, 'file')}` : 'Changes stashed'
+  const body = [message, keepIndex ? 'The staged changes are still in the folder too.' : ''].filter(Boolean).join(' · ')
   if (res?.result === 'nothing') toast({ tone: 'info', title: res.message ?? 'Nothing to stash' })
-  else if (res?.result === 'ok')
-    toast({ tone: 'success', title: paths ? `${plural(paths.length, 'file')} stashed` : stagedOnly ? 'Staged changes stashed' : 'Changes stashed', body: message || undefined })
+  else if (res?.result === 'ok') toast({ tone: 'success', title, body: body || undefined })
   await loadRepo(repoId, { keepSelection: true })
   if (res?.result === 'ok' && useApp.getState().repos[repoId]?.selected === 'wip') patchRepo(repoId, { selected: null })
   return res?.result === 'ok'
@@ -1716,6 +2011,66 @@ export async function bisectRun(repoId: string, command: string): Promise<boolea
 export function cancelBisectRun(repoId: string): void {
   const run = useApp.getState().repos[repoId]?.bisectRun
   if (run) void call('op.cancel', { opId: run.opId })
+}
+
+// ---------- your commands ----------
+
+/**
+ * Runs one of your commands on `ctx`. One that asks something, wants to be checked first or shows what it prints
+ * opens its window; any other runs straight away and says how it went.
+ */
+export function runCustomCommand(repoId: string, commandId: string, ctx: CommandContext): void {
+  const s = useApp.getState()
+  const cmd = s.prefs.customCommands.find((c) => c.id === commandId)
+  if (!cmd) return
+  const parsed = parseCommand(cmd.command)
+  const answers = Object.fromEntries(parsed.prompts.map((p) => [p.label, p.value]))
+  const filled = fillCommand(parsed, { ...ctx, head: s.repos[repoId]?.refs?.head.branch ?? undefined }, answers)
+  if ('problem' in filled) return void toast({ tone: 'error', title: `Can’t run ${cmd.name}`, body: filled.problem })
+  if (parsed.prompts.length || cmd.confirm || cmd.output) return openDialog({ kind: 'runCommand', repoId, commandId, ctx })
+  void runCustomQuietly(repoId, cmd.name, filled.args)
+}
+
+/** Runs a command's arguments; a notification says how it went. The repository is read again: it may have changed. */
+export async function runCustomQuietly(repoId: string, name: string, args: string[]): Promise<void> {
+  try {
+    const r = await call('custom.run', { repoId, args, opId: newOpId() })
+    const last = (t: string): string | undefined => t.trim().split('\n').pop() || undefined
+    if (r.code === 0) toast({ tone: 'success', title: `${name}: done`, body: last(r.stdout) ?? last(r.stderr) })
+    else toast({ tone: 'error', title: `${name} failed (exit code ${r.code})`, body: last(r.stderr) ?? last(r.stdout), action: { label: 'Show details', onClick: () => openLog() } })
+  } catch (err) {
+    fail(err, `${name} didn’t run`)
+  } finally {
+    void loadRepo(repoId, { keepSelection: true })
+  }
+}
+
+/** Adds a command, or replaces the one with its id. */
+export function saveCustomCommand(cmd: CustomCommand): void {
+  const list = useApp.getState().prefs.customCommands
+  setPrefs({ customCommands: list.some((c) => c.id === cmd.id) ? list.map((c) => (c.id === cmd.id ? cmd : c)) : [...list, cmd] })
+}
+
+/** Deletes a command and its shortcut. The notification puts both back. */
+export function deleteCustomCommand(id: string): void {
+  const { customCommands, keymap } = useApp.getState().prefs
+  const cmd = customCommands.find((c) => c.id === id)
+  if (!cmd) return
+  const key = customKeyId(id)
+  const { [key]: shortcut, ...rest } = keymap
+  setPrefs({ customCommands: customCommands.filter((c) => c.id !== id), ...(shortcut !== undefined ? { keymap: rest } : {}) })
+  toast({
+    tone: 'info',
+    title: `Deleted ${cmd.name}`,
+    action: {
+      label: 'Put it back',
+      onClick: () => {
+        const p = useApp.getState().prefs
+        const at = Math.min(customCommands.indexOf(cmd), p.customCommands.length)
+        setPrefs({ customCommands: [...p.customCommands.slice(0, at), cmd, ...p.customCommands.slice(at)], ...(shortcut !== undefined ? { keymap: { ...p.keymap, [key]: shortcut } } : {}) })
+      }
+    }
+  })
 }
 
 /**
@@ -1910,9 +2265,9 @@ export async function cherryPick(repoId: string, shas: string[]): Promise<boolea
   return !!res && res.result !== 'conflicts'
 }
 
-export async function rebaseInteractive(repoId: string, onto: string, plan: RebaseStep[], noVerify = false): Promise<boolean> {
+export async function rebaseInteractive(repoId: string, onto: string, plan: RebaseStep[], noVerify = false, updateRefs = false): Promise<boolean> {
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: 'Rebasing' } }))
-  const res = await attempt(() => call('rebase.interactive', { repoId, onto, plan, noVerify }), 'Interactive rebase failed')
+  const res = await attempt(() => call('rebase.interactive', { repoId, onto, plan, noVerify, updateRefs }), 'Interactive rebase failed')
   patchRepo(repoId, (r) => ({ busy: { ...r.busy, op: undefined } }))
   afterOp(repoId, res, 'Rebase finished')
   if (res) setCenter(repoId, { kind: 'graph' })
@@ -1944,6 +2299,21 @@ export async function addRemote(repoId: string, name: string, url: string, fetch
   if (fetchAfter) await fetchAll(repoId, true)
   else await loadRepo(repoId, { keepSelection: true })
   return true
+}
+
+/** Renames a remote and sets its URLs (an empty push URL pushes to the fetch URL). */
+export async function editRemote(repoId: string, name: string, next: Remote): Promise<boolean> {
+  const ok = await attempt(() => call('remote.edit', { repoId, name, next }), 'Couldn’t change the remote')
+  if (ok === undefined) return false
+  toast({ tone: 'success', title: next.name !== name ? `Renamed ${name} to ${next.name}` : `Updated ${name}` })
+  await loadRepo(repoId, { keepSelection: true })
+  return true
+}
+
+export async function fetchRemote(repoId: string, name: string): Promise<void> {
+  const ok = await remoteOp(repoId, 'fetch', `Fetching ${name}`, (opId) => call('remote.fetchOne', { repoId, name, opId }), `Couldn’t fetch ${name}`)
+  if (ok !== undefined) toast({ tone: 'success', title: `Fetched ${name}` })
+  await loadRepo(repoId, { keepSelection: true })
 }
 
 export function removeRemote(repoId: string, name: string): void {
@@ -2013,7 +2383,9 @@ export function startAutoFetch(): void {
   document.addEventListener('visibilitychange', () => {
     autoFetchState.hiddenSince = document.hidden ? Date.now() : null
   })
+  window.addEventListener('focus', () => refreshPulls(60_000))
   autoFetchState.timer = setInterval(() => {
+    if (!document.hidden && document.hasFocus()) refreshPulls(PULLS_EVERY)
     const s = useApp.getState()
     const every = s.prefs.autoFetchMinutes * 60_000
     if (!every) return
@@ -2045,6 +2417,13 @@ async function backgroundFetch(repoId: string): Promise<void> {
 
 // ---------- stash names, graph layout, focus ----------
 
+export async function stashBranch(repoId: string, sha: string, name: string): Promise<boolean> {
+  const ok = await attempt(() => call('stash.branch', { repoId, sha, name }), 'Couldn’t make the branch')
+  if (ok !== undefined) toast({ tone: 'success', title: `Switched to ${name}, made from the stash`, body: 'Its changes are in the folder, and the stash is deleted.' })
+  await loadRepo(repoId, { keepSelection: true })
+  return ok !== undefined
+}
+
 export async function renameStash(repoId: string, sha: string, message: string): Promise<boolean> {
   const ok = await attempt(() => call('stash.rename', { repoId, sha, message }), 'Couldn’t rename the stash')
   await loadRepo(repoId, { keepSelection: true })
@@ -2066,6 +2445,197 @@ export function setGraphWidth(repoId: string, width: number | null): void {
 export function setRefsWidth(repoId: string, width: number | null): void {
   patchRepo(repoId, { refsWidth: width })
   void call('repoPrefs.set', { repoId, key: 'graph.refsWidth', value: width }).catch(() => {})
+}
+
+/** This repository's commit message rules; null takes them all away. */
+export async function setCommitRules(repoId: string, rules: CommitRules | null): Promise<void> {
+  const kept = hasRules(rules) ? rules : null
+  patchRepo(repoId, { commitRules: kept })
+  await attempt(() => call('repoPrefs.set', { repoId, key: 'commit.rules', value: kept }), 'Couldn’t save the commit rules')
+}
+
+// ---------- Git Flow ----------
+
+/** Which Git Flow branch this is, from its prefix: a feature, release or hotfix, and its name after the prefix. */
+export function flowBranch(repoId: string, branch: string | null | undefined): { kind: FlowKind; name: string } | null {
+  const flow = useApp.getState().repos[repoId]?.flow
+  if (!flow || !branch) return null
+  for (const kind of ['feature', 'release', 'hotfix'] as const) {
+    const p = flow.prefix[kind]
+    if (branch.startsWith(p) && branch.length > p.length) return { kind, name: branch.slice(p.length) }
+  }
+  return null
+}
+
+// The Git Flow dialogs show what went wrong themselves, so these return it (null when it worked) rather than a toast.
+const reason = (err: unknown): string => (err instanceof Error ? err.message : String(err))
+
+export async function flowInit(repoId: string, config: FlowConfig): Promise<string | null> {
+  try {
+    await call('flow.init', { repoId, config })
+  } catch (err) {
+    return reason(err)
+  } finally {
+    await loadRepo(repoId, { keepSelection: true })
+  }
+  toast({ tone: 'success', title: 'Git Flow is set up', body: `Features start from ${config.develop}, releases go to ${config.production}.` })
+  return null
+}
+
+export async function flowStart(repoId: string, kind: FlowKind, name: string): Promise<string | null> {
+  let branch: string
+  try {
+    branch = await call('flow.start', { repoId, kind, name })
+  } catch (err) {
+    return reason(err)
+  } finally {
+    await loadRepo(repoId, { keepSelection: true })
+  }
+  toast({ tone: 'success', title: `Started ${branch}`, body: 'It’s checked out. Finish it from the Git Flow buttons when it’s done.' })
+  return null
+}
+
+export async function flowFinish(repoId: string, kind: FlowKind, name: string, keep: boolean, tagMessage: string): Promise<string | null> {
+  const branch = `${useApp.getState().repos[repoId]?.flow?.prefix[kind] ?? ''}${name}`
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: `Finishing ${branch}…` } }))
+  let done: FlowFinished
+  try {
+    done = await call('flow.finish', { repoId, kind, name, keep, tagMessage })
+  } catch (err) {
+    return reason(err)
+  } finally {
+    patchRepo(repoId, (r) => ({ busy: { ...r.busy, flow: undefined } }))
+    await loadRepo(repoId, { keepSelection: true })
+  }
+  const what = [
+    done.merged.length ? `Merged into ${done.merged.join(' and ')}` : 'It was already merged',
+    done.tag ? `tagged ${done.tag}` : '',
+    done.deleted ? `${branch} deleted` : keep ? '' : `${branch} kept: it isn’t merged into the remote branch it tracks`
+  ].filter(Boolean)
+  toast({ tone: 'success', title: `Finished ${branch}`, body: `${what.join(', ')}.` })
+  return null
+}
+
+// ---------- GitHub ----------
+
+export async function loadGitHub(): Promise<void> {
+  const s = await call('github.status', {}).catch(() => null)
+  if (s) useApp.setState({ github: s })
+}
+
+/** The repository's pull requests: when it opens, after a fetch, after signing in or out, and on Refresh. */
+export async function loadPulls(repoId: string): Promise<void> {
+  if (!useApp.getState().repos[repoId]) return
+  patchRepo(repoId, { pullsLoading: true })
+  const pulls = await call('github.pulls', { repoId }).catch((e: Error) => ({ state: 'error' as const, repo: '', message: e.message }))
+  if (useApp.getState().repos[repoId]) patchRepo(repoId, { pulls, pullsLoading: false, pullsAt: Date.now() })
+}
+
+const PULLS_EVERY = 3 * 60_000
+
+/** The open tab's pull requests, read again when they're older than `stale` ms: while Caboose is in front, and as it comes back there. */
+function refreshPulls(stale: number): void {
+  const s = useApp.getState()
+  const r = s.active === 'home' ? undefined : s.repos[s.active]
+  if (r?.pulls?.state !== 'ok' || r.pullsLoading || Date.now() - r.pullsAt < stale) return
+  void loadPulls(s.active)
+}
+
+function reloadAllPulls(): void {
+  for (const t of useApp.getState().tabs) void loadPulls(t.id)
+}
+
+export function signedInToGitHub(user: GitHubUser): void {
+  useApp.setState((s) => ({ github: { canKeep: s.github?.canKeep ?? true, user } }))
+  toast({ tone: 'success', title: `Signed in to GitHub as ${user.login}` })
+  reloadAllPulls()
+}
+
+export async function useGhCliSignIn(): Promise<void> {
+  const user = await attempt(() => call('github.useGhCli', {}), 'Couldn’t use the gh CLI’s sign-in')
+  if (user) signedInToGitHub(user)
+}
+
+export async function signOutOfGitHub(): Promise<void> {
+  await attempt(() => call('github.signOut', {}))
+  useApp.setState((s) => ({ github: { canKeep: s.github?.canKeep ?? true, user: null } }))
+  toast({ tone: 'info', title: 'Signed out of GitHub', body: 'To take back Caboose’s access too, revoke it in GitHub’s Settings › Applications.' })
+  reloadAllPulls()
+}
+
+/** The pull request a branch in the graph or the panel is for: by its branch here, or pr/<number> for a fork's. */
+export function pullFor(repoId: string, branch: string): PullRequest | undefined {
+  const p = useApp.getState().repos[repoId]?.pulls
+  if (p?.state !== 'ok') return undefined
+  return p.pulls.find((pr) => (pr.fromFork ? branch === `pr/${pr.number}` : branch === pr.head || branch === `${p.remote}/${pr.head}`))
+}
+
+/** Whether to offer a new pull request for a local branch here: on GitHub and signed in, not its default branch, and none open yet. `pushed`: only once it's on the remote. */
+export function canOpenPull(repoId: string, branch: string, pushed = false): boolean {
+  const r = useApp.getState().repos[repoId]
+  const p = r?.pulls
+  if (p?.state !== 'ok' || branch === p.defaultBranch || pullFor(repoId, branch)) return false
+  const local = r?.refs?.refs.find((x) => x.kind === 'local' && x.short === branch)
+  if (!local) return false
+  return !pushed || (!!local.upstream?.startsWith(`refs/remotes/${p.remote}/`) && !local.upstreamGone)
+}
+
+/** A new pull request for a branch: in Caboose when signed in to GitHub, otherwise on the git host's site. One that has one already says so. */
+export function createPullRequest(repoId: string, branch: string): void {
+  const open = pullFor(repoId, branch)
+  if (open) {
+    toast({ tone: 'info', title: `${branch} already has pull request #${open.number}`, body: open.title, action: { label: 'Open on GitHub', onClick: () => void window.open(open.url, '_blank') } })
+    return
+  }
+  if (canOpenPull(repoId, branch)) openDialog({ kind: 'createPull', repoId, branch })
+  else void openOnWeb(repoId, { kind: 'pr', branch })
+}
+
+/** Pushes the branch first when it needs it, then creates the pull request. The error, for the dialog to show; null once it's made. */
+export async function createPull(repoId: string, branch: string, d: PullDraft, f: { base: string; title: string; body: string; draft: boolean }): Promise<string | null> {
+  const p = useApp.getState().repos[repoId]?.pulls
+  if (p?.state !== 'ok') return 'Sign in to GitHub first.'
+  if (d.push !== 'pushed') {
+    patchRepo(repoId, (r) => ({ busy: { ...r.busy, push: `Pushing ${branch}` }, progress: null }))
+    try {
+      const res = await call('remote.push', { repoId, opId: newOpId(), remote: p.remote, branch, setUpstream: d.track })
+      if (res.result !== 'ok') return 'message' in res && res.message ? `Couldn’t push ${branch}: ${res.message}` : `Couldn’t push ${branch}.`
+    } catch (e) {
+      return `Couldn’t push ${branch}: ${(e as Error).message}`
+    } finally {
+      patchRepo(repoId, (r) => ({ busy: { ...r.busy, push: undefined }, progress: null }))
+      void loadRepo(repoId, { keepSelection: true })
+    }
+  }
+  let pr: PullRequest
+  try {
+    pr = await call('github.createPull', { repoId, head: d.head, base: f.base, title: f.title, body: f.body, draft: f.draft })
+  } catch (e) {
+    return (e as Error).message
+  }
+  closeDialog()
+  toast({ tone: 'success', title: `Created pull request #${pr.number}`, body: pr.title, action: { label: 'Open on GitHub', onClick: () => void window.open(pr.url, '_blank') } })
+  void loadPulls(repoId)
+  return null
+}
+
+/** Its newest commit in the graph, if it's loaded there. */
+export function selectPull(repoId: string, pr: PullRequest): void {
+  const r = useApp.getState().repos[repoId]
+  if (r?.commits.some((c) => c.sha === pr.headSha)) select(repoId, pr.headSha)
+}
+
+/**
+ * Checks a pull request out: one from this repository through its branch (made, or brought up to the remote one,
+ * as a remote branch's double-click does); one from a fork as pr/<number>.
+ */
+export async function checkoutPull(repoId: string, pr: PullRequest): Promise<void> {
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, fetch: `Fetching #${pr.number}…` } }))
+  const res = await attempt(() => call('github.fetchPull', { repoId, number: pr.number, head: pr.head, fromFork: pr.fromFork }), `Couldn’t fetch #${pr.number}`)
+  patchRepo(repoId, (r) => ({ busy: { ...r.busy, fetch: undefined } }))
+  if (!res) return
+  if (res.fork) await checkout(repoId, res.ref)
+  else await fastForwardTo(repoId, res.ref, { checkout: true })
 }
 
 export async function setFocusHead(repoId: string, on: boolean): Promise<void> {

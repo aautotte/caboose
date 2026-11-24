@@ -7,9 +7,11 @@ import { call } from '@/lib/api'
 import { relativeTime } from '@/lib/format'
 import { useApp } from '@/store'
 import * as act from '@/actions'
+import { useKey } from '@/lib/keys'
 
 /** S01: open, clone or start a repository; recent and favourite repositories. */
 export function HomeView(): React.JSX.Element {
+  const openKey = useKey('open')
   const [list, setList] = useState<RepoList | null>(null)
   const tabs = useApp((s) => s.tabs)
 
@@ -39,7 +41,7 @@ export function HomeView(): React.JSX.Element {
         </header>
 
         <div className="grid grid-cols-3 gap-3">
-          <ActionCard icon={<FolderOpen size={20} />} title="Open" body="A folder on this computer" shortcut="Alt+O" onClick={() => void act.pickAndOpen()} />
+          <ActionCard icon={<FolderOpen size={20} />} title="Open" body="A folder on this computer" shortcut={openKey} onClick={() => void act.pickAndOpen()} />
           <ActionCard icon={<DownloadCloud size={20} />} title="Clone" body="Copy from a URL" onClick={() => act.openDialog({ kind: 'clone' })} />
           <ActionCard icon={<FolderPlus size={20} />} title="New" body="Start an empty repository" onClick={() => act.openDialog({ kind: 'init' })} />
         </div>

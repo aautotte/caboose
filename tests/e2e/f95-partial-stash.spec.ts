@@ -1,4 +1,4 @@
-// F68: stash only part of the work. Some files, from their menu in Not staged or Staged (new files and both halves
+// F95: stash only part of the work. Some files, from their menu in Not staged or Staged (new files and both halves
 // of a staged file included), or one block or some lines of a file, from its diff. The rest stays, and the stash
 // holds only what was picked, so popping it brings exactly that back.
 import { test, expect } from '@playwright/test'
@@ -59,7 +59,7 @@ const status = (): { staged: string; unstaged: string; untracked: string } => ({
 const stashFiles = (): string[] => h.git(repo, 'stash', 'show', '--include-untracked', '--name-only', 'stash@{0}').split('\n').filter(Boolean).sort()
 const read = (p: string): string => readFileSync(join(repo, p), 'utf8')
 
-test('F68-H1: two picked files are stashed, a new one included; the others stay, and pop brings them back', async () => {
+test('F95-H1: two picked files are stashed, a new one included; the others stay, and pop brings them back', async () => {
   await row('Not staged', 'b.txt').click()
   await row('Not staged', 'new.txt').click({ modifiers: ['Control'] })
   await row('Not staged', 'new.txt').click({ button: 'right' })
@@ -67,10 +67,10 @@ test('F68-H1: two picked files are stashed, a new one included; the others stay,
   const d = dialog(h.page)
   await expect(d).toContainText('b.txt')
   await expect(d).toContainText('new.txt')
-  await expect(d.getByRole('checkbox', { name: /Only staged/ })).toHaveCount(0)
+  await expect(d.getByRole('radio', { name: 'Some files' })).toHaveAttribute('aria-checked', 'true')
   await d.getByRole('textbox', { name: /Name/ }).fill('b and new')
-  await d.getByRole('button', { name: 'Stash', exact: true }).click()
-  await expect(toasts().getByText('2 files stashed')).toBeVisible()
+  await d.getByRole('button', { name: 'Stash 2 files' }).click()
+  await expect(toasts().getByText('Stashed 2 files')).toBeVisible()
   expect(status()).toEqual({ staged: 'c.txt', unstaged: 'a.txt c.txt', untracked: '' })
   expect(stashFiles()).toEqual(['b.txt', 'new.txt'])
   expect(h.git(repo, 'stash', 'list', '--format=%gs')).toBe('On main: b and new')
@@ -78,11 +78,11 @@ test('F68-H1: two picked files are stashed, a new one included; the others stay,
   expect(status()).toEqual({ staged: 'c.txt', unstaged: 'a.txt b.txt c.txt', untracked: 'new.txt' })
 })
 
-test('F68-H2: a file from the staged list goes with both its staged and unstaged parts', async () => {
+test('F95-H2: a file from the staged list goes with both its staged and unstaged parts', async () => {
   await row('Staged', 'c.txt').click({ button: 'right' })
   await h.page.getByRole('menuitem', { name: 'Stash this file…' }).click()
-  await dialog(h.page).getByRole('button', { name: 'Stash', exact: true }).click()
-  await expect(toasts().getByText('1 file stashed')).toBeVisible()
+  await dialog(h.page).getByRole('button', { name: 'Stash 1 file' }).click()
+  await expect(toasts().getByText('Stashed 1 file')).toBeVisible()
   expect(status()).toEqual({ staged: '', unstaged: 'a.txt b.txt', untracked: 'new.txt' })
   expect(read('c.txt')).toBe('c\n')
   h.git(repo, 'stash', 'pop', '-q', '--index')
@@ -90,16 +90,16 @@ test('F68-H2: a file from the staged list goes with both its staged and unstaged
   expect(read('c.txt')).toBe('c staged\nand more\n')
 })
 
-test('F68-H3: one block is stashed and leaves the file; the stash holds only that block', async () => {
+test('F95-H3: one block is stashed and leaves the file; the stash holds only that block', async () => {
   await row('Not staged', 'a.txt').click()
-  await expect(view('a.txt').getByRole('button', { name: 'Stage block' })).toHaveCount(2)
-  await view('a.txt').getByRole('button', { name: 'Stash block…' }).first().click()
+  await expect(view('a.txt').getByRole('button', { name: 'Stage hunk' })).toHaveCount(2)
+  await view('a.txt').getByRole('button', { name: 'Stash hunk…' }).first().click()
   const d = dialog(h.page)
   await expect(d).toContainText('a.txt')
   await d.getByRole('button', { name: 'Stash', exact: true }).click()
-  await expect(toasts().getByText('Stashed a block of a.txt')).toBeVisible()
+  await expect(toasts().getByText('Stashed a hunk of a.txt')).toBeVisible()
   expect(read('a.txt')).toBe(lines(40, (i) => (i === 35 ? 'THIRTY-FIVE' : null)))
-  await expect(view('a.txt').getByRole('button', { name: 'Stage block' })).toHaveCount(1)
+  await expect(view('a.txt').getByRole('button', { name: 'Stage hunk' })).toHaveCount(1)
   // Only a.txt, only line 2, and the rest of the work is untouched.
   expect(h.git(repo, 'stash', 'show', '-p', 'stash@{0}')).toMatch(/^-line 2\n\+TWO$/m)
   expect(h.git(repo, 'stash', 'show', '--name-only', 'stash@{0}')).toBe('a.txt')
@@ -113,14 +113,14 @@ test('F68-H3: one block is stashed and leaves the file; the stash holds only tha
   expect(h.git(repo, 'stash', 'list')).toBe('')
 })
 
-test('F68-H4: picked lines of a block are stashed; the other lines of the block stay, and Pop merges them back', async () => {
+test('F95-H4: picked lines of a block are stashed; the other lines of the block stay, and Pop merges them back', async () => {
   // One block, two changes with one unchanged line between them.
   const both = lines(40, (i) => (i === 2 ? 'TWO' : i === 4 ? 'FOUR' : null))
   writeFileSync(join(repo, 'a.txt'), both)
   await refocus()
   await row('Not staged', 'a.txt').click()
   await expect(view('a.txt')).toContainText('FOUR')
-  await expect(view('a.txt').getByRole('button', { name: 'Stage block' })).toHaveCount(1)
+  await expect(view('a.txt').getByRole('button', { name: 'Stage hunk' })).toHaveCount(1)
   await pickLine('a.txt', 'line 4')
   await pickLine('a.txt', 'FOUR')
   await view('a.txt').getByRole('button', { name: 'Stash 2 lines…' }).click()
@@ -141,7 +141,7 @@ test('F68-H4: picked lines of a block are stashed; the other lines of the block 
   expect(h.git(repo, 'stash', 'list')).toBe('')
 })
 
-test('F68-E2: a stash whose lines clash with the file as it is now is kept, and the file is left alone', async () => {
+test('F95-E2: a stash whose lines clash with the file as it is now is kept, and the file is left alone', async () => {
   // Nothing staged, so the stash has no staged part: only the clash can stop it.
   h.git(repo, 'reset', '-q')
   h.git(repo, 'stash', 'push', '-q', '--', 'a.txt')
@@ -155,13 +155,13 @@ test('F68-E2: a stash whose lines clash with the file as it is now is kept, and 
   expect(h.git(repo, 'stash', 'list', '--format=%gs')).toMatch(/^WIP on main/)
 })
 
-test('F68-E1: a file with staged changes, or a new file, can only be stashed whole', async () => {
+test('F95-E1: a file with staged changes, or a new file, can only be stashed whole', async () => {
   await row('Not staged', 'c.txt').click()
   await expect(view('c.txt')).toContainText('and more')
-  await expect(view('c.txt').getByRole('button', { name: 'Stash block' })).toBeDisabled()
+  await expect(view('c.txt').getByRole('button', { name: 'Stash hunk' })).toBeDisabled()
   await row('Not staged', 'new.txt').click()
   await expect(view('new.txt')).toContainText('New file')
-  await expect(view('new.txt').getByRole('button', { name: 'Stash block' })).toBeDisabled()
+  await expect(view('new.txt').getByRole('button', { name: 'Stash hunk' })).toBeDisabled()
   // The staged side has no Stash button for lines.
   await row('Staged', 'c.txt').click()
   await expect(view('c.txt')).toContainText('Staged')

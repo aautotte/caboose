@@ -6,7 +6,14 @@ import { call } from '@/lib/api'
 import { CloneDialog, FolderField, InitDialog } from '@/home/RepoDialogs'
 import { ShortcutSheet } from '@/screens/Stubs'
 import { ProfilesDialog } from './ProfilesDialog'
-import { AddRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
+import { AuthorDialog, RebaseFromDialog, SquashMergeDialog } from './HistoryDialogs'
+import { CleanDialog } from './CleanDialog'
+import { ApplyPatchDialog } from './PatchDialog'
+import { GitHubSignInDialog } from './GitHubDialog'
+import { CreatePullDialog } from './CreatePullDialog'
+import { EditCommandDialog, RunCommandDialog } from './CommandDialogs'
+import { FlowFinishDialog, FlowInitDialog, FlowStartDialog } from './FlowDialogs'
+import { AddRemoteDialog, EditRemoteDialog, AddSubmoduleDialog, SubmoduleUrlDialog, CompareDialog, BisectDialog, BisectRunDialog, CreateTagDialog, GroupNameDialog, RenameStashDialog, ResetDialog, SquashDialog, StashDialog, UpstreamDialog, PatchCommitDialog } from './MoreDialogs'
 
 /** Renders whichever dialog is open (S02, S03, S14, S15). */
 export function DialogHost(): React.JSX.Element | null {
@@ -27,10 +34,14 @@ export function DialogHost(): React.JSX.Element | null {
       return <ShortcutSheet />
     case 'stash':
       return <StashDialog d={d} />
+    case 'stashBranch':
+      return <StashBranchDialog d={d} />
     case 'createTag':
       return <CreateTagDialog d={d} />
     case 'addRemote':
       return <AddRemoteDialog d={d} />
+    case 'editRemote':
+      return <EditRemoteDialog d={d} />
     case 'reset':
       return <ResetDialog d={d} />
     case 'upstream':
@@ -57,6 +68,30 @@ export function DialogHost(): React.JSX.Element | null {
       return <CompareDialog d={d} />
     case 'patchCommit':
       return <PatchCommitDialog d={d} />
+    case 'rebaseFrom':
+      return <RebaseFromDialog d={d} />
+    case 'squashMerge':
+      return <SquashMergeDialog d={d} />
+    case 'author':
+      return <AuthorDialog d={d} />
+    case 'clean':
+      return <CleanDialog d={d} />
+    case 'applyPatch':
+      return <ApplyPatchDialog d={d} />
+    case 'runCommand':
+      return <RunCommandDialog d={d} />
+    case 'editCommand':
+      return <EditCommandDialog d={d} />
+    case 'flowInit':
+      return <FlowInitDialog d={d} />
+    case 'flowStart':
+      return <FlowStartDialog d={d} />
+    case 'flowFinish':
+      return <FlowFinishDialog d={d} />
+    case 'githubSignIn':
+      return <GitHubSignInDialog />
+    case 'createPull':
+      return <CreatePullDialog d={d} />
     case 'confirm':
       return (
         <ConfirmDialog
@@ -124,6 +159,53 @@ function CreateBranchDialog({ d }: { d: Extract<D, { kind: 'createBranch' }> }):
           {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="feature/short-description" />}
         </Field>
         <Switch label="Switch to it now" checked={checkout} onCheckedChange={setCheckout} />
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
+  )
+}
+
+/** git stash branch: a branch from the commit the stash was made on, where its changes apply cleanly. */
+function StashBranchDialog({ d }: { d: Extract<D, { kind: 'stashBranch' }> }): React.JSX.Element {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const refs = useApp((s) => s.repos[d.repoId]?.refs)
+  const existing = useMemo(() => refs?.refs.filter((r) => r.kind === 'local').map((r) => r.short) ?? [], [refs])
+  const problem = branchNameProblem(name.trim(), existing)
+  const submit = async (): Promise<void> => {
+    if (!name.trim() || problem) return
+    setBusy(true)
+    const ok = await act.stashBranch(d.repoId, d.sha, name.trim())
+    setBusy(false)
+    if (ok) act.closeDialog()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && act.closeDialog()}
+      title="Branch from a stash"
+      footer={
+        <>
+          <Button onClick={() => act.closeDialog()}>Cancel</Button>
+          <Button variant="primary" disabled={!name.trim() || !!problem} loading={busy} onClick={() => void submit()}>
+            Create branch
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <p className="text-base text-muted">
+          The branch starts from the commit “{d.label}” was made on, so its changes apply without conflicts. You switch to it, the changes come back as they were (staged ones staged), and the stash is deleted.
+        </p>
+        <Field label="Branch name" error={problem}>
+          {(p) => <TextInput {...p} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="feature/short-description" />}
+        </Field>
         <button type="submit" hidden />
       </form>
     </Dialog>

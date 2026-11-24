@@ -48,7 +48,7 @@ test('F55-H1: staging the open file keeps showing it, from the staged side; unst
 
 test('F55-H2: staging one block of two stays on the unstaged side; staging the last one follows the file', async () => {
   await row('Not staged', 'a.txt').click()
-  const stageBlock = view('a.txt').getByRole('button', { name: 'Stage block' })
+  const stageBlock = view('a.txt').getByRole('button', { name: 'Stage hunk' })
   await expect(stageBlock).toHaveCount(2)
   await stageBlock.first().click()
   await expect(row('Staged', 'a.txt')).toBeVisible()

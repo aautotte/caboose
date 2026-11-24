@@ -196,7 +196,7 @@ test('create an SSH key from Settings', async () => {
   await expect(ssh.getByText('No SSH keys yet.')).toBeVisible()
   await ssh.getByLabel('Label').fill('e2e laptop')
   await ssh.getByRole('button', { name: 'Create an SSH key' }).click()
-  await expect(ssh.getByText('id_ed25519', { exact: true })).toBeVisible()
+  await expect(ssh.getByRole('listitem').filter({ hasText: 'id_ed25519' })).toBeVisible()
   expect(existsSync(join(home, '.ssh', 'id_ed25519.pub'))).toBe(true)
   await toGraph()
 })

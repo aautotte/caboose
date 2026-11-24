@@ -55,8 +55,11 @@ export function eolOf(text: string): string {
   return text.includes('\r\n') ? '\r\n' : '\n'
 }
 
-/** The result text: picked sides in pick order; unpicked conflicts keep their markers so they can't be saved by accident. */
-export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; theirs: string }, eol: string): string {
+/**
+ * The result text: picked sides in pick order, or a conflict's own lines (`custom`: both sides' changes combined);
+ * unpicked conflicts keep their markers so they can't be saved by accident.
+ */
+export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; theirs: string }, eol: string, custom: Array<string[] | null> = []): string {
   const out: string[] = []
   let c = 0
   for (const s of segs) {
@@ -64,14 +67,35 @@ export function compose(segs: Segment[], picks: Pick[], labels: { ours: string; 
       out.push(...s.lines)
       continue
     }
+    const own = custom[c]
     const pick = picks[c++] ?? []
-    if (pick.length === 0) {
+    if (own) out.push(...own)
+    else if (pick.length === 0) {
       out.push(`<<<<<<< ${labels.ours}`, ...s.ours, '=======', ...s.theirs, `>>>>>>> ${labels.theirs}`)
     } else {
       for (const side of pick) out.push(...(side === 'ours' ? s.ours : s.theirs))
     }
   }
   return out.join(eol)
+}
+
+/**
+ * Where each block of lines sits in a file (1-based, inclusive), looking in order so that each one is found after
+ * the one before. Null for an empty block, or one that isn't there as it is.
+ */
+export function rangesIn(text: string, blocks: string[][]): Array<[number, number] | null> {
+  const lines = text.split(eolOf(text))
+  let from = 0
+  return blocks.map((b) => {
+    if (!b.length) return null
+    for (let i = from; i + b.length <= lines.length; i++) {
+      if (b.every((l, k) => lines[i + k] === l)) {
+        from = i + b.length
+        return [i + 1, i + b.length]
+      }
+    }
+    return null
+  })
 }
 
 export const hasMarkers = (text: string): boolean => /^(<<<<<<<|=======|>>>>>>>)( |$)/m.test(text)

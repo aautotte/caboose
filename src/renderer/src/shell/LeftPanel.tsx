@@ -1,14 +1,15 @@
 import { createContext, Fragment, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp } from 'lucide-react'
-import type { Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
+import { Archive, Boxes, ChevronDown, Download, FolderGit2, FolderPlus, Lock, LockOpen, Pencil, Settings, ChevronRight, Cloud, Eye, EyeOff, Focus, Folder, FolderOpen, Pin, PinOff, GitBranch, History, Link, Plus, RefreshCw, SquareTerminal, Tag, Trash2, GitMerge, GitPullRequestArrow, Upload, X, ChevronsDownUp, Workflow, Flag, GitPullRequest, GitPullRequestCreate, CircleCheck, CircleX, CircleDot, ExternalLink } from 'lucide-react'
+import type { PullRequest, Ref, RefViewState, Submodule, SubmoduleMode, Worktree } from '../../../shared/types'
 import { Badge, Button, ContextMenu, DropdownMenu, IconButton, SharedContextMenu, Spinner, TextInput, Tooltip, useMenuOffer, type MenuEntry } from '@/ui'
 import { call } from '@/lib/api'
 import { stashMenu } from '@/graph/GraphView'
-import { compareEntry, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
+import { compareEntry, createPullEntry, mergeEntries, pullEntry, pushEntry, rebaseOntoEntry, resetToRemoteEntry, tagMenu } from './refMenus'
 import { cn } from '@/ui/cn'
 import { useRepo } from '@/store'
 import * as act from '@/actions'
 import { webEntry } from './webMenu'
+import { customMenu } from './customMenu'
 import { progressAmount } from '@/lib/format'
 import { CollapseLeftButton, leftSectionId } from './PanelRails'
 
@@ -83,6 +84,127 @@ function Section({
             {children}
           </div>
         )
+      ) : null}
+    </section>
+  )
+}
+
+/**
+ * Git Flow, once it's set up: start a feature, release or hotfix, and finish the one checked out. Starting from the
+ * branches the flow names, and finishing, merges it where it belongs (see the finish dialog).
+ */
+/** The repository's open pull requests on GitHub: double-click (or Enter) checks one out. */
+function PullsSection({ repoId }: { repoId: string }): React.JSX.Element | null {
+  const pulls = useRepo(repoId, (r) => r.pulls)
+  const loading = useRepo(repoId, (r) => r.pullsLoading)
+  const selected = useRepo(repoId, (r) => r.selected)
+  const head = useRepo(repoId, (r) => r.refs?.head.branch)
+  // Read for the offer below: it changes when the branch is pushed.
+  useRepo(repoId, (r) => r.refs)
+  if (!pulls || pulls.state === 'none') return null
+  const offer = pulls.state === 'ok' && head && act.canOpenPull(repoId, head, true) ? head : null
+  const list = pulls.state === 'ok' ? pulls.pulls : []
+  const note =
+    pulls.state === 'signedOut' ? (
+      <div className="px-7 pb-2">
+        <Button size="sm" onClick={() => act.openDialog({ kind: 'githubSignIn' })}>
+          Sign in to GitHub
+        </Button>
+      </div>
+    ) : pulls.state === 'error' ? (
+      <p className="px-7 pb-2 text-sm text-danger">{pulls.message}</p>
+    ) : offer ? (
+      <div className="px-7 pb-2">
+        <Button size="sm" icon={<GitPullRequestCreate size={14} />} onClick={() => act.createPullRequest(repoId, offer)}>
+          Create a pull request for {offer}…
+        </Button>
+      </div>
+    ) : null
+  const checks = { success: 'checks passed', failure: 'checks failed', pending: 'checks running' } as const
+  const review = { approved: 'approved', changes: 'changes requested', required: 'review required' } as const
+  return (
+    <Section
+      title="Pull requests"
+      count={list.length}
+      empty={pulls.state === 'ok' ? 'No open pull requests' : pulls.state === 'signedOut' ? `Sign in to see ${pulls.repo}’s.` : 'Couldn’t list them.'}
+      note={note}
+      action={{ label: 'Refresh pull requests', icon: loading ? <Spinner size={14} /> : <RefreshCw size={14} />, disabled: loading, onClick: () => void act.loadPulls(repoId) }}
+    >
+      {list.map((pr) => (
+        <LeafRow
+          key={pr.number}
+          icon={<GitPullRequest size={14} />}
+          label={`#${pr.number} ${pr.title}`}
+          // What it shows, as it reads (the title, then the draft and review badges), then the rest.
+          name={[[`#${pr.number} ${pr.title}`, pr.draft ? 'draft' : '', pr.review && pr.review !== 'required' ? review[pr.review] : ''].filter(Boolean).join(' '), `by ${pr.author}`, pr.checks ? checks[pr.checks] : ''].filter(Boolean).join(', ')}
+          level={1}
+          selected={selected === pr.headSha}
+          title={`${pr.title}\n${pr.fromFork ? `${pr.author}:${pr.head}` : pr.head} → ${pr.base}, by ${pr.author}`}
+          onSelect={() => act.selectPull(repoId, pr)}
+          onActivate={() => void act.checkoutPull(repoId, pr)}
+          menu={() => pullMenu(repoId, pr)}
+          badges={
+            <>
+              {/* Read with the title: "#12 Add login approved", not "loginapproved". */}{' '}
+              {pr.draft ? <Badge label="draft">draft</Badge> : null}
+              {pr.review === 'approved' ? (
+                <Badge tone="success" label="approved">
+                  approved
+                </Badge>
+              ) : pr.review === 'changes' ? (
+                <Badge tone="warning" label="changes requested">
+                  changes
+                </Badge>
+              ) : null}
+              {pr.checks === 'success' ? (
+                <CircleCheck size={12} aria-hidden className="shrink-0 text-success" />
+              ) : pr.checks === 'failure' ? (
+                <CircleX size={12} aria-hidden className="shrink-0 text-danger" />
+              ) : pr.checks === 'pending' ? (
+                <CircleDot size={12} aria-hidden className="shrink-0 text-warning" />
+              ) : null}
+            </>
+          }
+        />
+      ))}
+    </Section>
+  )
+}
+
+function pullMenu(repoId: string, pr: PullRequest): MenuEntry[] {
+  return [
+    { type: 'item', label: pr.fromFork ? `Check out as pr/${pr.number}` : `Check out ${pr.head}`, icon: <GitBranch size={14} />, onSelect: () => void act.checkoutPull(repoId, pr) },
+    { type: 'item', label: 'Open on GitHub', icon: <ExternalLink size={14} />, onSelect: () => void window.open(pr.url, '_blank') },
+    { type: 'item', label: 'Copy link', onSelect: () => void navigator.clipboard.writeText(pr.url) }
+  ]
+}
+
+function FlowBar({ repoId }: { repoId: string }): React.JSX.Element | null {
+  const flow = useRepo(repoId, (r) => r.flow)
+  const head = useRepo(repoId, (r) => r.refs?.head.branch ?? null)
+  const busy = useRepo(repoId, (r) => r.busy.flow)
+  if (!flow) return null
+  const here = act.flowBranch(repoId, head)
+  const start = (kind: 'feature' | 'release' | 'hotfix') => () => act.openDialog({ kind: 'flowStart', repoId, flowKind: kind })
+  return (
+    <section aria-label="Git Flow" id={leftSectionId('Git Flow')} className="flex flex-col gap-1 px-2 pb-3">
+      <ContextMenu items={[{ type: 'item', label: 'Git Flow settings…', icon: <Settings size={14} />, onSelect: () => act.openDialog({ kind: 'flowInit', repoId }) }]}>
+        <p className="flex h-(--gc-list-row-h) items-center gap-1 text-xs font-medium text-muted">
+          <Workflow size={12} aria-hidden />
+          Git Flow
+        </p>
+      </ContextMenu>
+      <div className="flex flex-wrap gap-1">
+        {(['feature', 'release', 'hotfix'] as const).map((k) => (
+          <Button key={k} size="sm" icon={<Plus size={12} />} aria-label={`Start a ${k}`} onClick={start(k)}>
+            {k[0].toUpperCase() + k.slice(1)}
+          </Button>
+        ))}
+      </div>
+      {here ? (
+        <Button size="sm" variant="primary" icon={<Flag size={12} />} loading={!!busy} className="self-start" onClick={() => act.openDialog({ kind: 'flowFinish', repoId, flowKind: here.kind, name: here.name })}>
+          Finish {here.kind} {here.name}
+        </Button>
       ) : null}
     </section>
   )
@@ -216,11 +338,13 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
     })
   }
   if (head && r.short !== head) {
-    m.push({ type: 'item', label: `Merge into ${head}`, icon: <GitMerge size={14} />, onSelect: () => void act.mergeInto(repoId, r.short, head) })
+    m.push(...mergeEntries(repoId, r.short, head, false))
     m.push({ type: 'item', label: `Rebase ${head} onto ${r.short}`, icon: <GitPullRequestArrow size={14} />, onSelect: () => void act.rebaseOnto(repoId, head, r.short) })
     m.push(rebaseOntoEntry(repoId, head, r.short))
     m.push(compareEntry(repoId, head, r.short))
   }
+  const flow = r.kind === 'local' ? act.flowBranch(repoId, r.short) : null
+  if (flow) m.push({ type: 'item', label: `Finish ${flow.kind} ${flow.name}…`, icon: <Flag size={14} />, onSelect: () => act.openDialog({ kind: 'flowFinish', repoId, flowKind: flow.kind, name: flow.name }) })
   if (r.kind === 'local' && r.upstream && !r.upstreamGone) m.push(compareEntry(repoId, r.upstream.replace(/^refs\/remotes\//, ''), r.short))
   if (r.kind === 'remote') {
     m.push({ type: 'item', label: 'Fast-forward my local branch', icon: <Download size={14} />, onSelect: () => void act.fastForwardTo(repoId, r.short) })
@@ -230,6 +354,8 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
   if (r.kind === 'local') {
     m.push(pullEntry(repoId, { name: r.short, isHead: r.isHead, upstream: r.upstream, upstreamGone: r.upstreamGone, worktree: r.worktree }))
     m.push(pushEntry(repoId, { name: r.short, isHead: r.isHead, upstream: r.upstream }, remotes))
+    const pr = createPullEntry(repoId, r.short)
+    if (pr) m.push(pr)
     m.push({ type: 'item', label: 'New branch from here…', onSelect: () => act.openDialog({ kind: 'createBranch', repoId, at: r.short, atLabel: r.short }) })
     m.push({ type: 'item', label: 'Rename…', onSelect: () => act.openDialog({ kind: 'renameBranch', repoId, name: r.short }) })
     m.push({ type: 'item', label: r.upstream ? 'Change upstream…' : 'Set upstream…', icon: <Link size={14} />, onSelect: () => act.openDialog({ kind: 'upstream', repoId, branch: r.short }) })
@@ -246,6 +372,7 @@ function branchMenu(repoId: string, r: Ref, head: string | null, v: RefViewState
   const views = viewMenu(repoId, r, v)
   if (views.length) m.push({ type: 'separator' }, ...views)
   m.push({ type: 'item', label: 'Copy name', onSelect: () => void navigator.clipboard.writeText(r.short) })
+  m.push(...customMenu(repoId, 'branch', { branch: r.short }))
   return m
 }
 
@@ -463,6 +590,7 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   const view = useRepo(repoId, (r) => r.refView)
   const focused = view.hidden.length + view.soloed.length
   const focusHead = useRepo(repoId, (r) => r.focusHead)
+  const flowOn = useRepo(repoId, (r) => !!r.flow)
   const [filter, setFilter] = useState('')
   const f = filter.trim().toLowerCase()
   const match = (s: string): boolean => !f || s.toLowerCase().includes(f)
@@ -535,8 +663,10 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
   // Just one remote (the usual case): no row for it, only its branches.
   const single = byRemote.size === 1 ? [...byRemote.keys()][0] : null
   const remoteMenu = (remote: string): MenuEntry[] => [
-    { type: 'item', label: 'Fetch all remotes', icon: <RefreshCw size={14} />, onSelect: () => void act.fetchAll(repoId) },
+    { type: 'item', label: `Fetch ${remote}`, icon: <RefreshCw size={14} />, onSelect: () => void act.fetchRemote(repoId, remote) },
+    { type: 'item', label: 'Fetch all remotes', onSelect: () => void act.fetchAll(repoId) },
     { type: 'separator' },
+    { type: 'item', label: `Edit ${remote}…`, icon: <Pencil size={14} />, onSelect: () => act.openDialog({ kind: 'editRemote', repoId, name: remote }) },
     { type: 'item', label: `Remove ${remote}…`, icon: <Trash2 size={14} />, danger: true, onSelect: () => act.removeRemote(repoId, remote) }
   ]
   const shownLocals = locals.filter((r) => match(r.short))
@@ -698,7 +828,10 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
               count={shownLocals.length}
               empty={f ? 'No matches' : 'No branches yet'}
               eye={eyeFor(locals) ?? undefined}
-              menu={[{ type: 'item', label: 'Reflog: where HEAD has been', icon: <History size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'reflog' }) }]}
+              menu={[
+                { type: 'item', label: 'Reflog: where HEAD has been', icon: <History size={14} />, onSelect: () => act.setCenter(repoId, { kind: 'reflog' }) },
+                { type: 'item', label: flowOn ? 'Git Flow settings…' : 'Set up Git Flow…', icon: <Workflow size={14} />, onSelect: () => act.openDialog({ kind: 'flowInit', repoId }) }
+              ]}
               multiselectable
               note={branchPick.pick.length > 1 ? <PickBar count={branchPick.pick.length} actions={branchActions()} onClear={branchPick.clear} /> : null}
             >
@@ -732,6 +865,8 @@ export function LeftPanel({ repoId, width }: { repoId: string; width: number }):
                 />
               ))}
             </Section>
+            <FlowBar repoId={repoId} />
+            <PullsSection repoId={repoId} />
             <Section
               title="Remotes"
               // With one remote, its row is left out: the section stands for it, and counts its branches.

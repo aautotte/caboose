@@ -26,6 +26,8 @@ export interface RunOptions {
 
 export interface RunResult {
   stdout: string
+  /** stdout as it came, for what isn't text (an image). */
+  bytes: Buffer
   stderr: string
   code: number
 }
@@ -43,6 +45,7 @@ const LOCKED = /index\.lock|cannot lock ref|could not write index|unable to writ
 export class GitRunner extends EventEmitter {
   private queues = new Map<string, Promise<unknown>>()
   private busyCount = new Map<string, number>()
+  private writeCount = new Map<string, number>()
   private children = new Map<string, Set<ChildProcess>>()
   private configArgs: ((opts: RunOptions) => Promise<string[]>) | null = null
 
@@ -69,6 +72,11 @@ export class GitRunner extends EventEmitter {
 
   isBusy(repoId: string): boolean {
     return (this.busyCount.get(repoId) ?? 0) > 0
+  }
+
+  /** Goes up as each command that changes this repository starts and ends: a read from before is out of date. */
+  writes(repoId: string): number {
+    return this.writeCount.get(repoId) ?? 0
   }
 
   cancel(opId: string): void {
@@ -173,7 +181,8 @@ export class GitRunner extends EventEmitter {
         set.delete(child)
         if (set.size === 0) this.children.delete(opId)
         if (tracksBusy) this.setBusy(opts.repoId!, -1)
-        const stdout = Buffer.concat(out).toString('utf8')
+        const bytes = Buffer.concat(out)
+        const stdout = bytes.toString('utf8')
         const killed = !spawnError && (code === null || stopped.has(child))
         const ok = !spawnError && code !== null && (code === 0 || (opts.okCodes ?? []).includes(code))
         const status = killed ? 'cancelled' : ok ? 'ok' : 'error'
@@ -187,7 +196,7 @@ export class GitRunner extends EventEmitter {
         } else if (!ok) {
           reject(gitError(opts.args, err, code ?? -1))
         } else {
-          resolve({ stdout, stderr: err, code: code ?? 0 })
+          resolve({ stdout, bytes, stderr: err, code: code ?? 0 })
         }
       }
       child.on('error', (e) => finish(null, e))
@@ -205,6 +214,7 @@ export class GitRunner extends EventEmitter {
   private setBusy(repoId: string, delta: number): void {
     const n = Math.max(0, (this.busyCount.get(repoId) ?? 0) + delta)
     this.busyCount.set(repoId, n)
+    this.writeCount.set(repoId, this.writes(repoId) + 1)
     if (n === 0 || (n === 1 && delta > 0)) this.emit('busy', repoId, n > 0)
   }
 }
