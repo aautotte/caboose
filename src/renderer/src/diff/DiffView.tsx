@@ -74,6 +74,7 @@ export function DiffView({
   // disk) quietly reloads the same view.
   const viewKey = `${path}|${oldPath}|${srcKey}|${force}|${mode}|${ignoreWs}`
   const lastView = useRef('')
+  const shownHunks = useRef<string[]>([])
   useEffect(() => {
     let live = true
     if (lastView.current !== viewKey) {
@@ -85,8 +86,11 @@ export function DiffView({
     call('diff.get', { repoId, path, oldPath, source, force, full: mode === 'inline', ignoreWs })
       .then((d) => {
         if (!live) return
+        // A pick survives a reload only while its block is the same one (stashing lines elsewhere moves it).
+        const was = shownHunks.current
+        shownHunks.current = d.hunks.map((h) => h.header)
         setDiff(d)
-        setSel((s) => (s && d.hunks[s.hunk] ? s : null))
+        setSel((s) => (s && d.hunks[s.hunk] && was[s.hunk] === d.hunks[s.hunk].header ? s : null))
       })
       .catch((e: Error) => live && setError(e.message))
     return () => {
@@ -147,6 +151,23 @@ export function DiffView({
       undoable: true,
       onConfirm: () => void go()
     })
+  }
+
+  // Why this file's blocks can't be stashed part by part, or null when they can.
+  const fileChange = status?.changes.find((c) => c.path === path)
+  const stashWhy =
+    source.kind !== 'worktree'
+      ? 'Only unstaged changes'
+      : diff?.isNew
+        ? 'A new file can only be stashed whole, from its menu'
+        : fileChange && fileChange.index !== '.' && fileChange.index !== '?'
+          ? 'Part of this file is staged: stash the whole file from its menu, or unstage it first'
+          : status?.op && status.op.kind !== 'none'
+            ? 'Finish or abort first'
+            : null
+  const stash = (hunk: number, lines: number[] | null): void => {
+    if (!diff || stashWhy) return
+    act.openDialog({ kind: 'stash', repoId, part: { path, hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline', what: lines ? plural(lines.length, 'line') : 'a block' } })
   }
 
   const runPatch = (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage'): void => {
@@ -336,6 +357,8 @@ export function DiffView({
                   sel={sel?.hunk === i ? sel : null}
                   busy={busy}
                   onRun={run}
+                  stashWhy={stashWhy}
+                  onStash={stash}
                   onClear={() => setSel(null)}
                 />
                 {mode === 'split' ? (
@@ -369,6 +392,8 @@ function HunkBar({
   sel,
   busy,
   onRun,
+  stashWhy,
+  onStash,
   onClear
 }: {
   h: Hunk
@@ -383,6 +408,9 @@ function HunkBar({
   sel: Selection | null
   busy: boolean
   onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard') => void
+  /** Why the block can't be stashed, or null when it can. */
+  stashWhy: string | null
+  onStash: (hunk: number, lines: number[] | null) => void
   onClear: () => void
 }): React.JSX.Element | null {
   if (!showHeader && source.kind === 'commit' && !patchOk) return null
@@ -425,6 +453,19 @@ function HunkBar({
               <Button size="sm" variant="ghost" className="text-danger" disabled={busy || newFile} onClick={() => onRun(index, lines, 'discard')}>
                 Discard {what}
               </Button>
+              {stashWhy ? (
+                <Tooltip content={stashWhy}>
+                  <span tabIndex={0}>
+                    <Button size="sm" variant="ghost" disabled>
+                      Stash {what}
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : (
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => onStash(index, lines)}>
+                  Stash {what}…
+                </Button>
+              )}
               <Button size="sm" variant="secondary" disabled={busy} onClick={() => onRun(index, lines, 'stage')}>
                 Stage {what}
               </Button>

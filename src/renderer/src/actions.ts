@@ -6,7 +6,7 @@ import { plural } from './lib/format'
 import type { IgnoreChoice } from './lib/ignore'
 import { layoutInWorker } from './graph/layoutClient'
 import { toast } from './ui/toastBus'
-import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog } from './store'
+import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, useApp, type Center, type Dialog, type StashPart } from './store'
 
 const PAGE = 2000
 
@@ -1605,13 +1605,24 @@ export async function ignore(repoId: string, choice: IgnoreChoice): Promise<bool
 
 // ---------- stash ----------
 
-export async function stashSave(repoId: string, message: string, stagedOnly: boolean): Promise<boolean> {
+/** `paths`: only those files, whatever the staged-only and new-files choices. */
+export async function stashSave(repoId: string, message: string, stagedOnly: boolean, paths?: string[]): Promise<boolean> {
   const includeUntracked = useApp.getState().prefs.stashUntracked
-  const res = await attempt(() => call('stash.save', { repoId, message, stagedOnly, includeUntracked }), 'Couldn’t stash')
+  const res = await attempt(() => call('stash.save', { repoId, message, stagedOnly, includeUntracked, paths }), 'Couldn’t stash')
   if (res?.result === 'nothing') toast({ tone: 'info', title: res.message ?? 'Nothing to stash' })
-  else if (res?.result === 'ok') toast({ tone: 'success', title: stagedOnly ? 'Staged changes stashed' : 'Changes stashed', body: message || undefined })
+  else if (res?.result === 'ok')
+    toast({ tone: 'success', title: paths ? `${plural(paths.length, 'file')} stashed` : stagedOnly ? 'Staged changes stashed' : 'Changes stashed', body: message || undefined })
   await loadRepo(repoId, { keepSelection: true })
   if (res?.result === 'ok' && useApp.getState().repos[repoId]?.selected === 'wip') patchRepo(repoId, { selected: null })
+  return res?.result === 'ok'
+}
+
+/** Stashes one block, or some of its lines, and takes them out of the file. */
+export async function stashLines(repoId: string, part: StashPart, message: string): Promise<boolean> {
+  const { what: _what, ...input } = part
+  const res = await attempt(() => call('stash.lines', { repoId, ...input, message }), 'Couldn’t stash those lines')
+  if (res?.result === 'ok') toast({ tone: 'success', title: `Stashed ${part.what} of ${part.path.split('/').pop()}`, body: message || undefined })
+  await loadRepo(repoId, { keepSelection: true })
   return res?.result === 'ok'
 }
 

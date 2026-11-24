@@ -144,6 +144,15 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
       : ignoreChoices(files.map((f) => f.path)).map((c) => ({ type: 'item' as const, label: c.label, onSelect: () => void act.ignore(repoId, c) }))
   })
 
+  // Stash only these files. A rename takes its old path along, so the deletion doesn't stay behind.
+  const stashMenu = (files: FileItem[]): MenuEntry => {
+    const label = files.length > 1 ? `Stash ${plural(files.length, 'file')}…` : 'Stash this file…'
+    const why = files.some((f) => f.status === 'conflicted') ? 'Resolve the conflict first' : paused ? 'Finish or abort first' : !refs?.head.sha ? 'Commit once before stashing' : null
+    if (why) return { type: 'item', label: why, icon: <Archive size={14} />, disabled: true }
+    const paths = [...new Set(files.flatMap((f) => (f.origPath ? [f.path, f.origPath] : [f.path])))]
+    return { type: 'item', label, icon: <Archive size={14} />, onSelect: () => act.openDialog({ kind: 'stash', repoId, paths }) }
+  }
+
   // Several files picked: only what makes sense for all of them at once.
   const manyMenu = (files: FileItem[], side: 'staged' | 'unstaged'): MenuEntry[] => {
     const paths = files.map((f) => f.path)
@@ -154,6 +163,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
         : { type: 'item', label: `Unstage ${n}`, onSelect: () => void act.unstage(repoId, paths) },
       { type: 'item', label: 'Copy paths', onSelect: () => void navigator.clipboard.writeText(paths.join('\n')) },
       { type: 'separator' },
+      stashMenu(files),
       ignoreMenu(files),
       { type: 'separator' },
       { type: 'item', label: `Discard changes to ${n}…`, danger: true, icon: <Trash2 size={14} />, onSelect: () => act.discard(repoId, paths) }
@@ -182,6 +192,7 @@ export function WipPanel({ repoId }: { repoId: string }): React.JSX.Element {
     { type: 'separator' as const },
     { type: 'item' as const, label: 'File history', icon: <History size={14} />, disabled: f.status === 'untracked' || f.status === 'added', onSelect: () => act.setCenter(repoId, { kind: 'history', path: f.path }) },
     { type: 'item' as const, label: 'Blame', icon: <UserSearch size={14} />, disabled: f.status === 'untracked' || f.status === 'added' || f.status === 'deleted', onSelect: () => act.setCenter(repoId, { kind: 'blame', path: f.path, rev: null }) },
+    stashMenu([f]),
     ignoreMenu([f]),
     lfsMenu(f),
     { type: 'separator' as const },

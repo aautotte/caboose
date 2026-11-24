@@ -26,7 +26,7 @@ function DialogForm({ onSubmit, children }: { onSubmit: () => void; children: Re
   )
 }
 
-/** F13: stash the uncommitted work, optionally named, optionally only what's staged. */
+/** F13: stash the uncommitted work, optionally named, optionally only what's staged, only some files, or only some lines. */
 export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.JSX.Element {
   const [message, setMessage] = useState('')
   const [stagedOnly, setStagedOnly] = useState(false)
@@ -34,17 +34,19 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
   const status = useApp((s) => s.repos[d.repoId]?.status)
   const untracked = useApp((s) => s.prefs.stashUntracked)
   const stagedCount = status?.changes.filter((c) => c.index !== '.' && c.index !== '?' && !c.conflicted).length ?? 0
+  const { paths, part } = d
   const submit = async (): Promise<void> => {
     setBusy(true)
-    const ok = await act.stashSave(d.repoId, message, stagedOnly)
+    const ok = part ? await act.stashLines(d.repoId, part, message) : await act.stashSave(d.repoId, message, stagedOnly, paths)
     setBusy(false)
     if (ok) close()
   }
+  const shown = paths?.slice(0, 8) ?? []
   return (
     <Dialog
       open
       onOpenChange={(o) => !o && close()}
-      title="Stash changes"
+      title={part ? `Stash ${part.what}` : paths ? `Stash ${plural(paths.length, 'file')}` : 'Stash changes'}
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
@@ -55,12 +57,35 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
       }
     >
       <DialogForm onSubmit={() => void submit()}>
-        <p className="text-base text-text">Puts your uncommitted changes aside and leaves the working folder clean. Pop the stash to bring them back.</p>
+        {part ? (
+          <p className="text-base text-text">
+            Puts the {part.lines ? 'selected lines' : 'block'} of <span className="font-mono text-sm">{part.path}</span> aside and takes them out of the file. The rest of your changes stay. Pop
+            the stash to bring them back.
+          </p>
+        ) : paths ? (
+          <>
+            <p className="text-base text-text">Puts the changes in these files aside, staged and unstaged, new files too. Your other changes stay. Pop the stash to bring them back.</p>
+            <ul className="max-h-40 overflow-auto rounded border border-border bg-surface px-2 py-1 font-mono text-sm text-text">
+              {shown.map((p) => (
+                <li key={p} className="truncate">
+                  {p}
+                </li>
+              ))}
+              {paths.length > shown.length ? <li className="font-sans text-muted">and {plural(paths.length - shown.length, 'more file')}</li> : null}
+            </ul>
+          </>
+        ) : (
+          <p className="text-base text-text">Puts your uncommitted changes aside and leaves the working folder clean. Pop the stash to bring them back.</p>
+        )}
         <Field label="Name (optional)" help="Helps you find it later in the Stashes list.">
           {(p) => <TextInput {...p} autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="half-done settings page" />}
         </Field>
-        <Checkbox label={`Only staged changes (${stagedCount})`} checked={stagedOnly} disabled={stagedCount === 0} onCheckedChange={setStagedOnly} />
-        {!stagedOnly ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
+        {!part && !paths ? (
+          <>
+            <Checkbox label={`Only staged changes (${stagedCount})`} checked={stagedOnly} disabled={stagedCount === 0} onCheckedChange={setStagedOnly} />
+            {!stagedOnly ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
+          </>
+        ) : null}
       </DialogForm>
     </Dialog>
   )

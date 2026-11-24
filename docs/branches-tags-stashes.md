@@ -94,6 +94,24 @@ changes**. Whether new (untracked) files go too is a [setting](settings.md#commi
 If a stash conflicts with your files, Caboose says so: resolve the conflicted files, then stage them. A pop that
 conflicts keeps the stash, as git does, so delete it yourself once you're done.
 
+### Stashing part of your work
+
+To put only some files aside, pick them in **Not staged** or **Staged** (Ctrl+click or Shift+click for several),
+right-click, and choose **Stash this file…** or **Stash 3 files…**. Their staged and unstaged changes go, and new
+files too, since you picked them. Everything else stays as it is, and the stash holds only those files.
+
+To put aside one block of a file, or a few lines, open the file from **Not staged** and use the block's **Stash
+block…** button. To stash some lines, click their line numbers first; the button then reads **Stash 2 lines…**
+(for example). The lines leave the file, and the rest of your changes stay.
+
+Stashing part of a file works for a file that has nothing staged and was already in the last commit. For a new file,
+or one with staged changes, stash the whole file from its menu, or unstage it first.
+
+Git won't apply a stash to files that have other uncommitted changes, which is always the case after stashing some
+lines of a file. **Pop** and **Apply** then merge the stash into those files, as long as it only changed lines in
+files that were already there, and none of its lines clash with yours. When they clash, nothing changes and the stash
+stays: commit or stash the clashing changes first.
+
 ## Remotes
 
 The **+** on the Remotes header adds a remote: a name (like `origin` or `upstream`) and a URL (HTTPS, SSH or a

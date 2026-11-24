@@ -156,7 +156,10 @@ export interface Api {
   }
   'ignore.add': { in: R & { patterns: string[]; label: string }; out: { untracked: number } }
 
-  'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean }; out: OpResult }
+  /** `paths`: only those files, staged and unstaged parts, new ones included. */
+  'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[] }; out: OpResult }
+  /** One block, or some of its lines, of a file's unstaged changes: stashed, and taken out of the file. */
+  'stash.lines': { in: R & { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; message: string }; out: OpResult }
   'stash.apply': { in: R & { sha: string }; out: OpResult }
   'stash.pop': { in: R & { sha: string }; out: OpResult }
   'stash.drop': { in: R & { sha: string }; out: null }

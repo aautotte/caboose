@@ -23,6 +23,7 @@ Right-click a file (or several):
 | --- | --- |
 | Stage / Unstage | |
 | Discard changes… | asks first, and can be [undone](undo.md) |
+| Stash this file… / Stash 3 files… | only those files, see [Stashing part of your work](branches-tags-stashes.md#stashing-part-of-your-work) |
 | Ignore | the file only, all files with its extension, or its folder; also undoable |
 | Track with Git LFS / Stop tracking | see [Git LFS](lfs.md) |
 | Open in editor, Open in diff tool, Show in folder | your own tools, see [Settings](settings.md#external-tools) |
@@ -55,8 +56,9 @@ Some files get a different view:
 
 ## Staging blocks and lines
 
-In a diff of a file that isn't staged, each block of changes has **Stage block** and **Discard block** buttons. In
-a staged file, it has **Unstage block**.
+In a diff of a file that isn't staged, each block of changes has **Stage block**, **Stash block…** and **Discard
+block** buttons. In a staged file, it has **Unstage block**. Stashing a block or some lines is explained under
+[Stashing part of your work](branches-tags-stashes.md#stashing-part-of-your-work).
 
 To stage only some lines, click their line numbers to pick them (Shift+click picks a range), then use the block's
 button, which now reads **Stage 2 lines** (for example): it acts on the picked lines only. **Clear** drops the pick.

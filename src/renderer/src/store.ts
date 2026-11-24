@@ -3,6 +3,17 @@ import type { AuthPromptEvent, CommitRow, DiffSource, GraphColumn, Profile, Pull
 import { call } from './lib/api'
 import type { Layout } from './graph/lanes'
 
+
+/** Part of one file's unstaged diff, picked for a stash. `what` names it for people ("3 lines", "a block"). */
+export interface StashPart {
+  path: string
+  hunk: number
+  header: string
+  lines: number[] | null
+  full: boolean
+  what: string
+}
+
 export type Center =
   | { kind: 'graph' }
   | { kind: 'diff'; path: string; oldPath?: string; source: DiffSource }
@@ -84,7 +95,8 @@ export type Dialog =
   | { kind: 'renameBranch'; repoId: string; name: string }
   | { kind: 'publish'; repoId: string; branch: string }
   | { kind: 'shortcuts' }
-  | { kind: 'stash'; repoId: string }
+  /** `paths`: only those files. `part`: one block, or some of its lines, of a file's unstaged changes. */
+  | { kind: 'stash'; repoId: string; paths?: string[]; part?: StashPart }
   | { kind: 'createTag'; repoId: string; at: string; atLabel: string }
   | { kind: 'addRemote'; repoId: string }
   /** `branch`: a local branch other than the checked-out one, which just moves (no files involved). */

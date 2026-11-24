@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type {
@@ -1408,15 +1408,109 @@ export class RepoOps {
     return i
   }
 
-  async stashSave(message: string, stagedOnly: boolean, includeUntracked: boolean): Promise<OpResult> {
+  /**
+   * Stashes the uncommitted changes. With `paths`, only those files (staged and unstaged parts, new files too,
+   * since they were picked); `stagedOnly` and `includeUntracked` then don't apply.
+   */
+  async stashSave(message: string, stagedOnly: boolean, includeUntracked: boolean, paths?: string[]): Promise<OpResult> {
     const before = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
     const args = ['stash', 'push', '-q']
     if (message.trim()) args.push('-m', message.trim())
-    if (stagedOnly) args.push('--staged')
+    if (paths) args.push('--include-untracked', '--', ...this.safePaths(paths))
+    else if (stagedOnly) args.push('--staged')
     else if (includeUntracked) args.push('--include-untracked')
-    await this.mut(args)
+    // Picked paths are file names, not patterns: a "*" or ":" in one means only itself.
+    await this.mut(args, paths ? { extraEnv: { GIT_LITERAL_PATHSPECS: '1' } } : {})
     const after = await this.tryGit(['rev-parse', '-q', '--verify', 'refs/stash'])
-    if (!after || after === before) return { result: 'nothing', message: stagedOnly ? 'Nothing staged to stash.' : 'No changes to stash.' }
+    if (!after || after === before) return { result: 'nothing', message: paths ? 'Those files have no changes to stash.' : stagedOnly ? 'Nothing staged to stash.' : 'No changes to stash.' }
+    if (paths) await this.narrowStash(after.trim(), this.safePaths(paths))
+    return { result: 'ok' }
+  }
+
+  /**
+   * git stash push with paths takes only those files out of the working copy, but records the whole index in the
+   * stash, so the other staged files would show up in it (and come back with it). The newest stash is rewritten
+   * to hold only `paths`: its index and files are HEAD with only those paths changed. New files are already only those.
+   */
+  private async narrowStash(stash: string, paths: string[]): Promise<void> {
+    const [, head, index, untracked] = (await this.git(['rev-list', '--parents', '-n1', stash])).trim().split(' ')
+    const literal = { GIT_LITERAL_PATHSPECS: '1' }
+    const dir = mkdtempSync(join(tmpdir(), 'caboose-stash-'))
+    const treeOf = async (from: string): Promise<string> => {
+      const env = { extraEnv: { ...literal, GIT_INDEX_FILE: join(dir, 'index') } }
+      await this.git(['read-tree', head], env)
+      // mode, object and path for each path the stash has; mode 0 takes a path out (it isn't in that side).
+      const has = new Map<string, string>()
+      for (const entry of (await this.git(['ls-tree', '-z', '-r', from, '--', ...paths], env)).split('\0').filter(Boolean)) {
+        const tab = entry.indexOf('\t')
+        const [mode, , sha] = entry.slice(0, tab).split(' ')
+        has.set(entry.slice(tab + 1), `${mode} ${sha}`)
+      }
+      const zero = '0'.repeat(40)
+      const info = [...new Set([...paths, ...has.keys()])].map((p) => `${has.get(p) ?? `0 ${zero}`}\t${p}`)
+      await this.git(['update-index', '-z', '--index-info'], { ...env, stdin: info.join('\0') + '\0' })
+      return (await this.git(['write-tree'], env)).trim()
+    }
+    try {
+      const message = (await this.git(['log', '-1', '--format=%gs', '-g', 'refs/stash'])).trim()
+      const subject = (sha: string): Promise<string> => this.git(['log', '-1', '--format=%B', sha])
+      const newIndex = (await this.git(['commit-tree', '--no-gpg-sign', await treeOf(index), '-p', head], { stdin: await subject(index) })).trim()
+      const parents = ['-p', head, '-p', newIndex, ...(untracked ? ['-p', untracked] : [])]
+      const narrowed = (await this.git(['commit-tree', '--no-gpg-sign', await treeOf(stash), ...parents], { stdin: await subject(stash) })).trim()
+      await this.stashStore(narrowed, message)
+      await this.mut(['stash', 'drop', '-q', 'stash@{1}'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  /**
+   * Stashes one block, or some of its lines, of a file's unstaged changes, and takes them out of the file.
+   * The stash is built by hand so it holds only those lines: its index part is HEAD, and its files are HEAD with
+   * the lines applied, in a temporary index. That needs the file's index to match HEAD, so a file with staged
+   * changes, or a new one, is stashed whole instead.
+   */
+  async stashLines(input: { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; message: string }): Promise<OpResult> {
+    const path = this.safePath(input.path)
+    const head = (await this.headSha()) ?? null
+    if (!head) throw invalid('There’s no commit yet to stash against. Make the first commit, then stash.')
+    if ((await this.git(['ls-files', '-z', '--', path])).length === 0) throw invalid('This file is new, so only all of it can be stashed. Stash the whole file from its menu.')
+    if ((await this.tryGit(['diff', '--cached', '--quiet', '--no-ext-diff', 'HEAD', '--', path])) === null)
+      throw invalid('Part of this file is staged, so only all of it can be stashed. Unstage it first, or stash the whole file from its menu.')
+    const base = ['--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', ...(input.full ? ['--unified=1000000'] : [])]
+    const raw = await this.git(['diff', ...base, '--', path])
+    if (/^(new file mode|rename from|Binary files|GIT binary patch)/m.test(raw)) throw invalid('New, renamed and binary files can only be stashed as a whole.')
+    const forward = buildPartialPatch(raw, input.hunk, input.lines, false)
+    const reverse = buildPartialPatch(raw, input.hunk, input.lines, true)
+    if (!forward || !reverse || forward.header !== input.header) throw new GcFail('changed_outside', 'This file changed since it was shown. Look at it again, then retry.')
+
+    // The stash's files: HEAD plus the lines, in an index of its own so the real one isn't touched.
+    const dir = mkdtempSync(join(tmpdir(), 'caboose-stash-'))
+    let tree: string
+    try {
+      const env = { extraEnv: { GIT_INDEX_FILE: join(dir, 'index') } }
+      await this.git(['read-tree', head], env)
+      await this.git(['apply', '--cached', '--recount', '--whitespace=nowarn', '-'], { ...env, stdin: forward.patch })
+      tree = (await this.git(['write-tree'], env)).trim()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+    // The messages git stash itself writes.
+    const branch = (await this.tryGit(['symbolic-ref', '-q', '--short', 'HEAD']))?.trim() || '(no branch)'
+    const subject = (await this.git(['log', '-1', '--format=%h %s', head])).trim()
+    const name = input.message.trim() ? `On ${branch}: ${input.message.trim()}` : `WIP on ${branch}: ${subject}`
+    const headTree = (await this.git(['rev-parse', `${head}^{tree}`])).trim()
+    const index = (await this.git(['commit-tree', '--no-gpg-sign', headTree, '-p', head], { stdin: `index on ${branch}: ${subject}\n` })).trim()
+    const stash = (await this.git(['commit-tree', '--no-gpg-sign', tree, '-p', head, '-p', index], { stdin: name + '\n' })).trim()
+    await this.stashStore(stash, name)
+    // Out of the file, as Discard does. If that fails, the stash goes again: nothing has changed.
+    try {
+      await this.mut(['apply', '--reverse', '--recount', '--whitespace=nowarn', '-'], { stdin: reverse.patch })
+    } catch (e) {
+      const i = await this.stashIndex(stash).catch(() => -1)
+      if (i >= 0) await this.tryGit(['stash', 'drop', '-q', `stash@{${i}}`], { mutating: true })
+      throw e
+    }
     return { result: 'ok' }
   }
 
@@ -1425,6 +1519,14 @@ export class RepoOps {
     try {
       await this.mut(['stash', 'apply', '-q', '--index', sha])
     } catch (e) {
+      // git won't apply a stash over files with local changes, even far from its lines: the usual case after
+      // stashing some lines of a file. A stash of unstaged changes only can be merged into the files one by one instead.
+      if (e instanceof GcFail && /would be overwritten/.test(e.detail ?? '')) {
+        if (!(await this.applyStashOnto(sha)))
+          throw invalid('The stash changes files you’ve changed since, in the same places or with staged changes. Commit or stash those changes first, then try again.')
+        if (pop) await this.mut(['stash', 'drop', '-q', `stash@{${index}}`])
+        return { result: 'ok' }
+      }
       const st = await this.status()
       if (st.changes.some((c) => c.conflicted)) {
         return { result: 'conflicts', message: pop ? 'The stash was kept, because applying it hit conflicts.' : undefined }
@@ -1435,6 +1537,55 @@ export class RepoOps {
     }
     if (pop) await this.mut(['stash', 'drop', '-q', `stash@{${index}}`])
     return { result: 'ok' }
+  }
+
+  /**
+   * Merges a stash's changes into the files, one three-way merge per file (base HEAD, ours the file on disk,
+   * theirs the stash), as git stash apply would if it didn't refuse files with local changes. Only for a stash
+   * with no staged part and no new files, and only when every file merges cleanly; otherwise nothing is written.
+   * True when it did.
+   */
+  private async applyStashOnto(sha: string): Promise<boolean> {
+    const [, head, index, untracked] = (await this.git(['rev-list', '--parents', '-n1', sha])).trim().split(' ')
+    if (untracked) return false
+    const [headTree, indexTree] = (await this.git(['rev-parse', `${head}^{tree}`, `${index}^{tree}`])).trim().split('\n')
+    if (headTree !== indexTree) return false
+    const changed = (await this.git(['diff-tree', '-r', '-z', '--no-renames', '--name-status', head, sha])).split('\0').filter(Boolean)
+    const paths: string[] = []
+    for (let i = 0; i < changed.length; i += 2) {
+      // Only changed files: one the stash adds or deletes would need more than a merge of lines.
+      if (changed[i] !== 'M') return false
+      paths.push(this.safePath(changed[i + 1]))
+    }
+    if (!paths.length) return true
+    const dir = mkdtempSync(join(tmpdir(), 'caboose-stash-'))
+    try {
+      // Each side checked out by git into a folder of its own, so the bytes (and line endings) are git's.
+      const side = async (name: string, rev: string): Promise<string> => {
+        const out = join(dir, name)
+        mkdirSync(out)
+        const env = { extraEnv: { GIT_INDEX_FILE: join(dir, `${name}.index`), GIT_LITERAL_PATHSPECS: '1' } }
+        await this.git(['read-tree', rev], env)
+        await this.git([`--work-tree=${out}`, 'checkout-index', '-f', '--', ...paths], env)
+        return out
+      }
+      const base = await side('base', head)
+      const theirs = await side('theirs', sha)
+      const merged = join(dir, 'ours')
+      for (const p of paths) {
+        const mine = join(this.repo.path, p)
+        if (!existsSync(mine)) return false
+        const out = join(merged, p)
+        mkdirSync(join(out, '..'), { recursive: true })
+        copyFileSync(mine, out)
+        // Non-zero on conflicts (or a binary file): then leave everything as it is.
+        if ((await this.tryGit(['merge-file', '-q', out, join(base, p), join(theirs, p)])) === null) return false
+      }
+      for (const p of paths) copyFileSync(join(merged, p), join(this.repo.path, p))
+      return true
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   }
 
   async stashDrop(sha: string): Promise<string> {

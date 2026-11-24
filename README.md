@@ -91,6 +91,8 @@ works offline, and it doesn't phone home.
 ### Stashes
 
 - Stash your changes (new files too, if you want), apply, pop, rename, delete one or several.
+- Stash only the files you pick, or one block or a few lines of a file. The stash holds only what you picked, and
+  pop puts it back even when the file has other changes since.
 
 ### Bisect
 
