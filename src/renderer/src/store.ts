@@ -5,6 +5,19 @@ import type { Layout } from './graph/lanes'
 import type { CommandContext, CustomCommand } from './lib/custom'
 import type { CommitRules } from './lib/commitRules'
 
+
+/** Part of one file's unstaged diff, picked for a stash. `what` names it for people ("3 lines", "a block"). */
+export interface StashPart {
+  path: string
+  hunk: number
+  header: string
+  lines: number[] | null
+  full: boolean
+  /** The lines of context the diff was shown with. */
+  context?: number
+  what: string
+}
+
 export type Center =
   | { kind: 'graph' }
   | { kind: 'diff'; path: string; oldPath?: string; source: DiffSource }
@@ -99,8 +112,8 @@ export type Dialog =
   | { kind: 'renameBranch'; repoId: string; name: string }
   | { kind: 'publish'; repoId: string; branch: string }
   | { kind: 'shortcuts' }
-  /** `paths`: start with only these files picked. */
-  | { kind: 'stash'; repoId: string; paths?: string[] }
+  /** `paths`: start with only these files picked. `part`: one block, or some of its lines, of a file's unstaged changes. */
+  | { kind: 'stash'; repoId: string; paths?: string[]; part?: StashPart }
   | { kind: 'stashBranch'; repoId: string; sha: string; label: string }
   | { kind: 'createTag'; repoId: string; at: string; atLabel: string }
   | { kind: 'addRemote'; repoId: string }

@@ -637,6 +637,20 @@ export function registerIpc({ db, runner, repos, undo, prefs, refView, repoPrefs
     z.object({ ...R, message: z.string().max(2000), stagedOnly: z.boolean(), includeUntracked: z.boolean(), paths: z.array(filePath).min(1).max(100_000).optional(), keepIndex: z.boolean().optional() }),
     ({ repoId, message, stagedOnly, includeUntracked, paths, keepIndex }) => exclusive(repoId, () => ops(repoId).stashSave(message, stagedOnly, includeUntracked, paths, keepIndex))
   )
+  handle(
+    'stash.lines',
+    z.object({
+      ...R,
+      path: filePath,
+      hunk: z.number().int().min(0),
+      header: z.string().max(10_000),
+      lines: z.array(z.number().int().min(0)).max(1_000_000).nullable(),
+      full: z.boolean(),
+      context,
+      message: z.string().max(2000)
+    }),
+    ({ repoId, ...input }) => exclusive(repoId, () => ops(repoId).stashLines(input))
+  )
   handle('stash.branch', z.object({ ...R, sha, name: z.string().min(1).max(255) }), ({ repoId, sha, name }) => exclusive(repoId, async () => (await ops(repoId).stashBranch(sha, name), null)))
   handle('stash.apply', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, false)))
   handle('stash.pop', z.object({ ...R, sha }), ({ repoId, sha }) => exclusive(repoId, () => ops(repoId).stashApply(sha, true)))

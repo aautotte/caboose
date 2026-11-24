@@ -8,7 +8,7 @@ import { hasRules, readRules, type CommitRules } from './lib/commitRules'
 import { layoutInWorker } from './graph/layoutClient'
 import type { Layout } from './graph/lanes'
 import { toast } from './ui/toastBus'
-import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, setPrefs, useApp, type Center, type Dialog, type RepoState } from './store'
+import { DEFAULT_COLUMNS, emptyRepo, loadSavedPrefs, patchRepo, setPrefs, useApp, type Center, type Dialog, type RepoState, type StashPart } from './store'
 import { fillCommand, parseCommand, type CommandContext, type CustomCommand } from './lib/custom'
 import { customKeyId } from './lib/keys'
 
@@ -1909,6 +1909,15 @@ export async function stashSave(repoId: string, message: string, opts: { stagedO
   else if (res?.result === 'ok') toast({ tone: 'success', title, body: body || undefined })
   await loadRepo(repoId, { keepSelection: true })
   if (res?.result === 'ok' && useApp.getState().repos[repoId]?.selected === 'wip') patchRepo(repoId, { selected: null })
+  return res?.result === 'ok'
+}
+
+/** Stashes one block, or some of its lines, and takes them out of the file. */
+export async function stashLines(repoId: string, part: StashPart, message: string): Promise<boolean> {
+  const { what: _what, ...input } = part
+  const res = await attempt(() => call('stash.lines', { repoId, ...input, message }), 'Couldn’t stash those lines')
+  if (res?.result === 'ok') toast({ tone: 'success', title: `Stashed ${part.what} of ${part.path.split('/').pop()}`, body: message || undefined })
+  await loadRepo(repoId, { keepSelection: true })
   return res?.result === 'ok'
 }
 

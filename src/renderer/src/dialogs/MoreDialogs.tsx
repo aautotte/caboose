@@ -5,7 +5,7 @@ import { Button, Checkbox, Dialog, Field, SegmentedControl, Select, TextArea, Te
 import { cn } from '@/ui/cn'
 import { call } from '@/lib/api'
 import { plural } from '@/lib/format'
-import { useApp, type Dialog as D } from '@/store'
+import { useApp, type Dialog as D, type StashPart } from '@/store'
 import * as act from '@/actions'
 
 const close = (): void => act.closeDialog()
@@ -28,8 +28,49 @@ function DialogForm({ onSubmit, children }: { onSubmit: () => void; children: Re
 
 type StashWhat = 'all' | 'staged' | 'files'
 
-/** F13: stash the uncommitted work, optionally named: all of it, only what's staged, or some files. */
+/** F13: stash the uncommitted work, optionally named: all of it, only what's staged, some files, or one block or some lines of a file. */
 export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.JSX.Element {
+  return d.part ? <StashPartDialog repoId={d.repoId} part={d.part} /> : <StashChangesDialog d={d} />
+}
+
+/** One block, or some lines, of a file's unstaged changes, from its diff. */
+function StashPartDialog({ repoId, part }: { repoId: string; part: StashPart }): React.JSX.Element {
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const submit = async (): Promise<void> => {
+    setBusy(true)
+    const ok = await act.stashLines(repoId, part, message)
+    setBusy(false)
+    if (ok) close()
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => !o && close()}
+      title={`Stash ${part.what}`}
+      footer={
+        <>
+          <Button onClick={close}>Cancel</Button>
+          <Button variant="primary" loading={busy} onClick={() => void submit()}>
+            Stash
+          </Button>
+        </>
+      }
+    >
+      <DialogForm onSubmit={() => void submit()}>
+        <p className="text-base text-text">
+          Puts the {part.lines ? 'selected lines' : 'block'} of <span className="font-mono text-sm">{part.path}</span> aside and takes them out of the file. The rest of your changes stay. Pop
+          the stash to bring them back.
+        </p>
+        <Field label="Name (optional)" help="Helps you find it later in the Stashes list.">
+          {(p) => <TextInput {...p} autoFocus value={message} onChange={(e) => setMessage(e.target.value)} placeholder="half-done settings page" />}
+        </Field>
+      </DialogForm>
+    </Dialog>
+  )
+}
+
+function StashChangesDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.JSX.Element {
   const [message, setMessage] = useState('')
   const [what, setWhat] = useState<StashWhat>(d.paths ? 'files' : 'all')
   const [picked, setPicked] = useState<string[]>(d.paths ?? [])
@@ -40,8 +81,6 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
   const changes = useMemo(() => (status?.changes ?? []).filter((c) => !c.conflicted), [status])
   const stagedCount = changes.filter((c) => c.index !== '.' && c.index !== '?').length
   const ready = what !== 'files' || picked.length > 0
-  // git records the whole staging area in a stash, so staged changes to files left out are copied into it too.
-  const stagedOther = changes.filter((c) => c.index !== '.' && c.index !== '?' && !picked.includes(c.path)).length
   const submit = async (): Promise<void> => {
     if (!ready) return
     setBusy(true)
@@ -88,11 +127,7 @@ export function StashDialog({ d }: { d: Extract<D, { kind: 'stash' }> }): React.
             ))}
           </ul>
         ) : null}
-        {what === 'files' && stagedOther ? (
-          <p className="text-sm text-muted">
-            {`Staged changes to ${plural(stagedOther, 'other file')} are copied into the stash too, as git does. They stay staged here, and come back with the stash when you apply it.`}
-          </p>
-        ) : null}
+        {what === 'files' ? <p className="text-sm text-muted">Their staged and unstaged changes go into the stash, and only theirs. Your other changes stay.</p> : null}
         {what === 'all' ? <p className="text-sm text-muted">{untracked ? 'New files are included.' : 'New files stay where they are (change this in Settings).'}</p> : null}
         {what !== 'staged' ? <Checkbox label="Keep the staged changes in the folder too" checked={keepIndex} onCheckedChange={setKeepIndex} /> : null}
       </DialogForm>

@@ -146,8 +146,8 @@ and **Copy name**.
 - **All changes**. Whether new (untracked) files go too is a [setting](settings.md#commits-and-stashes).
 - **Staged only**: what you staged goes, the rest stays.
 - **Some files**: tick them in the list. New files you tick go too, whatever the setting. **Stash this file…** in a
-  file's menu (or **Stash *N* files…** with several picked) opens it with those files ticked. As git does, staged
-  changes to the other files are copied into the stash too: they stay staged, and come back with the stash.
+  file's menu (or **Stash *N* files…** with several picked) opens it with those files ticked. The stash holds only
+  those files: staged changes to the others stay out of it.
 
 **Keep the staged changes in the folder too** (`--keep-index`) stashes them but leaves them staged, so you can test
 or commit just those, with the rest put aside.
@@ -164,6 +164,20 @@ or commit just those, with the rest put aside.
 
 If a stash conflicts with your files, Caboose says so: resolve the conflicted files, then stage them. A pop that
 conflicts keeps the stash, as git does, so delete it yourself once you're done.
+
+### Stashing part of a file
+
+To put aside one hunk of a file, or a few lines, open the file from **Not staged** and use the hunk's **Stash
+hunk…** button, in the **Changes** or the **File** layout. To stash some lines, click their line numbers first; the
+button then reads **Stash 2 lines…** (for example). The lines leave the file, and the rest of your changes stay.
+
+Stashing part of a file works for a file that has nothing staged and was already in the last commit. For a new file,
+or one with staged changes, stash the whole file from its menu, or unstage it first.
+
+Git won't apply a stash to files that have other uncommitted changes, which is always the case after stashing some
+lines of a file. **Pop** and **Apply** then merge the stash into those files, as long as it only changed lines in
+files that were already there, and none of its lines clash with yours. When they clash, nothing changes and the stash
+stays: commit or stash the clashing changes first.
 
 ## Remotes
 

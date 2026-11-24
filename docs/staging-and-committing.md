@@ -78,10 +78,11 @@ Some files get a different view:
 
 ## Staging hunks and lines
 
-In a diff of a file that isn't staged, each hunk (a block of changes) has **Stage hunk** and **Discard hunk**
-buttons. In a staged file, it has **Unstage hunk**. The **File** layout shows the whole file, with the same
-buttons above each of its hunks: changes with no more than twice the [lines around changes](#diffs) between them
-make one hunk, as in the **Changes** layout.
+In a diff of a file that isn't staged, each hunk (a block of changes) has **Stage hunk**, **Stash hunk…** and
+**Discard hunk** buttons. In a staged file, it has **Unstage hunk**. The **File** layout shows the whole file, with
+the same buttons above each of its hunks: changes with no more than twice the [lines around changes](#diffs) between
+them make one hunk, as in the **Changes** layout. Stashing a hunk or some lines is explained under
+[Stashing part of a file](branches-tags-stashes.md#stashing-part-of-a-file).
 
 To stage only some lines, click their line numbers to pick them (Shift+click picks a range), then use the hunk's
 button, which now reads **Stage 2 lines** (for example): it acts on the picked lines only. **Clear** drops the pick.

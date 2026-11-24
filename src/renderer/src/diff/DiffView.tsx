@@ -83,6 +83,7 @@ export function DiffView({
   // disk) quietly reloads the same view.
   const viewKey = `${path}|${oldPath}|${srcKey}|${force}|${mode}|${ignoreWs}|${context}`
   const lastView = useRef('')
+  const shownHunks = useRef<string[]>([])
   useEffect(() => {
     let live = true
     if (lastView.current !== viewKey) {
@@ -94,8 +95,11 @@ export function DiffView({
     call('diff.get', { repoId, path, oldPath, source, force, full: mode === 'inline', ignoreWs, context })
       .then((d) => {
         if (!live) return
+        // A pick survives a reload only while its block is the same one (stashing lines elsewhere moves it).
+        const was = shownHunks.current
+        shownHunks.current = d.hunks.map((h) => h.header)
         setDiff(d)
-        setSel((s) => (s && d.hunks[s.hunk] ? s : null))
+        setSel((s) => (s && d.hunks[s.hunk] && was[s.hunk] === d.hunks[s.hunk].header ? s : null))
       })
       .catch((e: Error) => live && setError(e.message))
     return () => {
@@ -158,6 +162,25 @@ export function DiffView({
       undoable: true,
       onConfirm: () => void go()
     })
+  }
+
+  // Why this file's blocks can't be stashed part by part, or null when they can.
+  const fileChange = status?.changes.find((c) => c.path === path)
+  const stashWhy =
+    source.kind !== 'worktree'
+      ? 'Only unstaged changes'
+      : diff?.isNew
+        ? 'A new file can only be stashed whole, from its menu'
+        : fileChange && fileChange.index !== '.' && fileChange.index !== '?'
+          ? 'Part of this file is staged: stash the whole file from its menu, or unstage it first'
+          : status?.op && status.op.kind !== 'none'
+            ? 'Finish or abort first'
+            : null
+  // `whole`: the lines are a whole hunk of the File layout's one block.
+  const stash = (hunk: number, lines: number[] | null, whole = false): void => {
+    if (!diff || stashWhy) return
+    const what = lines && !whole ? plural(lines.length, 'line') : 'a hunk'
+    act.openDialog({ kind: 'stash', repoId, part: { path, hunk, header: diff.hunks[hunk].header, lines, full: mode === 'inline', context, what } })
   }
 
   const runPatch = (hunk: number, lines: number[] | null, action: 'remove' | 'split' | 'stage'): void => {
@@ -371,6 +394,8 @@ export function DiffView({
                   sel={sel?.hunk === i ? sel : null}
                   busy={busy}
                   onRun={run}
+                  stashWhy={stashWhy}
+                  onStash={stash}
                   onClear={() => setSel(null)}
                 />
                 {mode === 'split' ? (
@@ -386,7 +411,7 @@ export function DiffView({
                     onSelect={setSel}
                     onRun={run}
                     source={source}
-                    changes={mode === 'inline' && !diff.oldPath && canStage ? { context: hunkContext, newFile: diff.isNew && source.kind === 'worktree', busy } : undefined}
+                    changes={mode === 'inline' && !diff.oldPath && canStage ? { context: hunkContext, newFile: diff.isNew && source.kind === 'worktree', busy, stashWhy, onStash: (lines) => stash(i, lines, true) } : undefined}
                   />
                 )}
               </section>
@@ -416,6 +441,8 @@ function HunkBar({
   sel,
   busy,
   onRun,
+  stashWhy,
+  onStash,
   onClear
 }: {
   h: Hunk
@@ -432,6 +459,9 @@ function HunkBar({
   sel: Selection | null
   busy: boolean
   onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard') => void
+  /** Why the block can't be stashed, or null when it can. */
+  stashWhy: string | null
+  onStash: (hunk: number, lines: number[] | null, whole?: boolean) => void
   onClear: () => void
 }): React.JSX.Element | null {
   if (!showHeader && source.kind === 'commit' && !patchOk) return null
@@ -470,7 +500,7 @@ function HunkBar({
               Clear
             </Button>
           ) : null}
-          <HunkButtons what={what} source={source} newFile={newFile} busy={busy} onRun={(action) => onRun(index, lines, action)} />
+          <HunkButtons what={what} source={source} newFile={newFile} busy={busy} onRun={(action) => onRun(index, lines, action)} stashWhy={stashWhy} onStash={() => onStash(index, lines)} />
         </div>
       )}
     </div>
@@ -483,19 +513,37 @@ function HunkButtons({
   source,
   newFile,
   busy,
-  onRun
+  onRun,
+  stashWhy,
+  onStash
 }: {
   what: string
   source: DiffSource
   newFile: boolean
   busy: boolean
   onRun: (action: 'stage' | 'unstage' | 'discard') => void
+  /** Why the hunk can't be stashed, or null when it can. */
+  stashWhy: string | null
+  onStash: () => void
 }): React.JSX.Element {
   return source.kind === 'worktree' ? (
     <>
       <Button size="sm" variant="secondary" className="enabled:border-danger/60 enabled:text-danger" disabled={busy || newFile} onClick={() => onRun('discard')}>
         Discard {what}
       </Button>
+      {stashWhy ? (
+        <Tooltip content={stashWhy}>
+          <span tabIndex={0}>
+            <Button size="sm" variant="secondary" disabled>
+              Stash {what}
+            </Button>
+          </span>
+        </Tooltip>
+      ) : (
+        <Button size="sm" variant="secondary" disabled={busy} onClick={onStash}>
+          Stash {what}…
+        </Button>
+      )}
       <Button size="sm" variant="secondary" className="enabled:border-success/60 enabled:text-success" disabled={busy} onClick={() => onRun('stage')}>
         Stage {what}
       </Button>
@@ -563,7 +611,7 @@ function UnifiedHunk({
   onRun: (hunk: number, lines: number[] | null, action: 'stage' | 'unstage' | 'discard', whole?: boolean) => void
   source: DiffSource
   /** The whole file: a bar with the hunk's buttons above each of its hunks. */
-  changes?: { context: number; newFile: boolean; busy: boolean }
+  changes?: { context: number; newFile: boolean; busy: boolean; stashWhy: string | null; onStash: (lines: number[]) => void }
 }): React.JSX.Element {
   const [cursor, setCursor] = useState<number | null>(null)
   const changed = useMemo(() => h.lines.map((l, i) => (l.type === 'ctx' ? -1 : i)).filter((i) => i >= 0), [h])
@@ -622,7 +670,7 @@ function UnifiedHunk({
             {changes && k !== undefined ? (
               <div role="row" data-change={k} aria-label={`Hunk ${k + 1} of ${hunks.length}`} className="flex border-y border-border bg-surface-raised font-sans">
                 <span role="cell" className="flex flex-1 items-center justify-end gap-1 px-3 py-0.5">
-                  <HunkButtons what="hunk" source={source} newFile={changes.newFile} busy={changes.busy} onRun={(action) => onRun(index, hunks[k], action, true)} />
+                  <HunkButtons what="hunk" source={source} newFile={changes.newFile} busy={changes.busy} onRun={(action) => onRun(index, hunks[k], action, true)} stashWhy={changes.stashWhy} onStash={() => changes.onStash(hunks[k])} />
                 </span>
               </div>
             ) : null}

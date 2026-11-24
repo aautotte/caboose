@@ -41,14 +41,14 @@ test('F73-H1: Stash this file starts with that file picked; a new file picked go
   await expect(files().getByRole('checkbox', { name: 'a.txt', exact: true })).toBeChecked()
   await expect(files().getByRole('checkbox', { name: 'c.txt', exact: true })).not.toBeChecked()
   await files().getByRole('checkbox', { name: 'n.txt (new)' }).click()
-  // b.txt is staged: git copies it into the stash, and it stays staged here.
-  await expect(dialog(h.page).getByText(/^Staged changes to 1 other file are copied into the stash too/)).toBeVisible()
+  // b.txt is staged but not picked: it stays out of the stash, and stays staged here.
+  await expect(dialog(h.page).getByText(/^Their staged and unstaged changes go into the stash, and only theirs/)).toBeVisible()
   await dialog(h.page).getByLabel('Name (optional)').fill('just a')
   await dialog(h.page).getByRole('button', { name: 'Stash 2 files' }).click()
   await expect(toasts().getByText('Stashed 2 files')).toBeVisible()
   expect(status()).toBe('M  b.txt\n M c.txt')
   expect(existsSync(file('n.txt'))).toBe(false)
-  expect(h.git(repo, 'stash', 'show', '--include-untracked', '--name-only', 'stash@{0}')).toBe('a.txt\nb.txt\nn.txt')
+  expect(h.git(repo, 'stash', 'show', '--include-untracked', '--name-only', 'stash@{0}')).toBe('a.txt\nn.txt')
 })
 
 test('F73-H2: Keep the staged changes in the folder too stashes them and leaves them staged', async () => {
@@ -71,7 +71,7 @@ test('F73-H3: Create a branch from this stash starts at the commit it was made o
   await expect(toasts().getByText('Switched to from-stash, made from the stash')).toBeVisible()
   expect(h.git(repo, 'branch', '--show-current')).toBe('from-stash')
   expect(h.git(repo, 'rev-parse', 'HEAD')).toBe(base)
-  // With the copy of b.txt's staged change that git put in the stash.
-  expect(status()).toBe('M a.txt\nM  b.txt\n?? n.txt')
+  // Only the files that were stashed: b.txt's staged change stayed out of the stash.
+  expect(status()).toBe('M a.txt\n?? n.txt')
   expect(h.git(repo, 'stash', 'list', '--format=%gs')).not.toContain('just a')
 })

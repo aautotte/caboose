@@ -215,6 +215,8 @@ export interface Api {
 
   /** `paths`: only these files. `keepIndex`: what's staged is stashed and also stays in the folder, staged. */
   'stash.save': { in: R & { message: string; stagedOnly: boolean; includeUntracked: boolean; paths?: string[]; keepIndex?: boolean }; out: OpResult }
+  /** One block, or some of its lines, of a file's unstaged changes: stashed, and taken out of the file. */
+  'stash.lines': { in: R & { path: string; hunk: number; header: string; lines: number[] | null; full: boolean; context?: number; message: string }; out: OpResult }
   /** A new branch from the commit the stash was made on, checked out, with the stash applied there and deleted. */
   'stash.branch': { in: R & { sha: string; name: string }; out: null }
   'stash.apply': { in: R & { sha: string }; out: OpResult }

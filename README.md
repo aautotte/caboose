@@ -115,6 +115,8 @@ works offline, and it doesn't phone home.
 
 - Stash your changes (new files too, if you want), only the staged ones, or some files; keep the staged changes in
   the folder if you like. Apply, pop, rename, delete one or several, or make a branch from a stash.
+- Stash one hunk or a few lines of a file. The stash holds only what you picked, some files included, and pop puts
+  it back even when the file has other changes since.
 
 ### Bisect
 
